@@ -7,7 +7,7 @@ plugins {
 
 group = 'com.motcs'
 version = '0.0.1'
-description = 'motcs-commons'
+description = 'motcs-graphrag'
 
 java {
     toolchain {

@@ -12,12 +12,12 @@ import java.util.TimeZone;
         org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration.class,
         org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration.class
 })
-public class MotcsCommonsApplication {
+public class MotcsGraphragApplication {
 
     static void main(String[] args) {
         // 固定时区为北京时间，避免容器 UTC 时区导致时间少 8 小时
         TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
-        SpringApplication.run(MotcsCommonsApplication.class, args);
+        SpringApplication.run(MotcsGraphragApplication.class, args);
     }
 
 }

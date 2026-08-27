@@ -1,4 +1,4 @@
-# Motcs Commons — GraphRAG 多跳智能搜索系统
+# Motcs Graphrag — GraphRAG 多跳智能搜索系统
 
 基于 **Spring Boot 4.1.1 + Neo4j + Spring AI 2.0** 的企业级文档知识库与多跳智能问答系统。采用纯 WebFlux
 响应式架构，支持文档异步入库、企业级双层切分、向量检索 + 知识图谱多跳推理、流式对话、引用溯源等核心能力。
@@ -113,8 +113,8 @@ export DOCKER_URL=your-registry.com
 ```yaml
 version: '3.8'
 services:
-  motcs-commons:
-    image: your-registry.com/motcs/motcs-commons:latest
+  motcs-graphrag:
+    image: your-registry.com/motcs/motcs-graphrag:latest
     environment:
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_AUTH_USERNAME=neo4j
@@ -248,7 +248,7 @@ Spring Boot 4.1.1 使用 Jackson 3.x（包名 `tools.jackson`），通过 `JsonM
 
 ### 时区配置
 
-启动类 `MotcsCommonsApplication.main()` 最前面设置 `TimeZone.setDefault(Asia/Shanghai)`，确保容器内时间正确。
+启动类 `MotcsGraphragApplication.main()` 最前面设置 `TimeZone.setDefault(Asia/Shanghai)`，确保容器内时间正确。
 
 ### 向量库配置
 
@@ -280,9 +280,9 @@ A: 已在启动类固定 JVM 时区为 Asia/Shanghai，确保使用最新镜像�
 ## 项目结构
 
 ```
-motcs-commons/
+motcs-graphrag/
 ├── src/main/java/com/motcs/
-│   ├── MotcsCommonsApplication.java        # 启动类（时区配置）
+│   ├── MotcsGraphragApplication.java        # 启动类（时区配置）
 │   ├── controller/
 │   │   └── DocumentController.java         # 全量 WebFlux 控制器（13个接口）
 │   ├── service/
@@ -358,8 +358,8 @@ motcs-commons/
 |------------------------------------------------------------------------------------|--------|-------------------------|------------|
 | [Apache PDFBox](https://pdfbox.apache.org/)                                        | 2.0.29 | PDF 文本提取            | Apache 2.0 |
 | [Apache POI](https://poi.apache.org/)                                              | 5.4.0  | Word/Excel/PPT 文档解析 | Apache 2.0 |
-| [Apache Commons IO](https://commons.apache.org/proper/commons-io/)                 | 2.18.0 | 文件 I/O 工具           | Apache 2.0 |
-| [Apache Commons FileUpload](https://commons.apache.org/proper/commons-fileupload/) | 1.6.0  | 文件上传处理            | Apache 2.0 |
+| [Apache Graphrag IO](https://commons.apache.org/proper/commons-io/)                 | 2.18.0 | 文件 I/O 工具           | Apache 2.0 |
+| [Apache Graphrag FileUpload](https://commons.apache.org/proper/commons-fileupload/) | 1.6.0  | 文件上传处理            | Apache 2.0 |
 
 ### AI 服务
 
@@ -391,4 +391,4 @@ motcs-commons/
 - **个人非商业研究/学习使用**：免费、自由，可使用、复制、修改、分发
 - **商业使用**：需联系作者获得书面授权，包括但不限于集成到商业产品、付费服务、任何以商业盈利为目的的使用
 
-完整协议见 [LICENSE](./LICENSE)。
+完整协议见 [LICENSE](LICENSE)。
