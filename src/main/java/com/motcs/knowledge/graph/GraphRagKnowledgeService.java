@@ -15,6 +15,7 @@ import com.motcs.service.DocumentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -32,6 +33,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -58,6 +60,12 @@ public class GraphRagKnowledgeService {
      * 摘要时保留最近N轮原始对话
      */
     private static final int HISTORY_KEEP_RECENT = 10;
+
+    /**
+     * SSE 思考事件前缀：AI 思考内容（reasoning_content）以该前缀行输出，前端据此展示"思考过程"；
+     * 回答内容以原文输出。无思考时只输出回答。
+     */
+    private static final String REASONING_EVENT_PREFIX = "__REASONING__:";
 
     /**
      * AI 实体+关系抽取 Prompt（用 __TEXT__ 占位，避免 StringTemplate 与 JSON 大括号冲突）
@@ -93,23 +101,29 @@ public class GraphRagKnowledgeService {
     private static final String SYSTEM_PROMPT = """
             你是企业知识库问答助手，请严格依据下面提供的知识库上下文回答用户问题。
             如果上下文没有答案，直接回复知识库无相关内容，不要编造信息。
-            
-            【重要】回答必须使用 Markdown 格式：
+
+            【回答要求】
+            - 直接、自然地回答问题，只输出答案本身，不要复述或引用原文片段。
+            - 回答中不要出现"原文""系统""知识库上下文""根据资料""根据上下文"等元描述字样。
+            - 不要输出或罗列文档元数据（如系统、角色、完成时间、平台等字段），不要用"系统：""角色："这类前缀搬运信息。
+            - 引用来源已由界面单独展示，回答正文中无需再标注、引用或说明出处。
+            - 依据上下文用自己的话组织答案，保证信息准确完整，直接给出用户需要的结论。
+
+            【格式要求】回答使用 Markdown 格式：
             - 用 ### 标题分段
             - 用 **加粗** 突出关键点
             - 用 - 或 1. 列表列举
-            - 用 > 引用原文
             - 代码用 ``` 包裹
-            
+
             【历史对话】
             {history}
-            
+
             【知识库上下文】
             {context}
             """;
 
     /**
-     * 查询结果封装：知识库来源 + AI 回答流
+     * 查询结果封装：知识库来源 + SSE 事件流（思考片段带 __REASONING__: 前缀，回答片段为原文）
      */
     public record QueryResult(List<Map<String, Object>> sources, Flux<String> answer) {
     }
@@ -142,11 +156,11 @@ public class GraphRagKnowledgeService {
             if (ctx == null) return null;
             return new ContextResult(ctx.fullContext(), ctx.sources(), historyContext);
         }).subscribeOn(Schedulers.boundedElastic()).map(ctx -> {
-            Flux<String> answer = this.chatClient.prompt()
+            Flux<String> answer = streamChatEvents(this.chatClient.prompt()
                     .system(s -> s.text(SYSTEM_PROMPT)
                             .param("context", ctx.fullContext())
                             .param("history", ctx.historyContext()))
-                    .user(ragQuery.getQuestion()).stream().content();
+                    .user(ragQuery.getQuestion()));
             return new QueryResult(ctx.sources(), answer);
         }).switchIfEmpty(Mono.fromCallable(() -> {
             // 向量检索无结果：仍调用 AI，让其判断是打招呼/闲聊还是知识问题
@@ -158,13 +172,44 @@ public class GraphRagKnowledgeService {
                     1. 如果是打招呼、问候、闲聊（如"你好"、"谢谢"、"你是谁"等），请礼貌、自然地回复，不要提及知识库。
                     2. 如果是询问具体知识、文档内容、业务问题，请礼貌告知当前知识库中暂无相关内容，建议用户上传相关文档或换个问题。
                     3. 你主要能力：分析文档，通过私有知识库回答问题。
+                    4. 回答的内容中不要带有文档原文这样的字眼，只需要根据文档内容回答即可，界面已经显示了引用的文档内容。
                     
                     回复使用 Markdown 格式，简洁友好，不超过100字。""";
-            Flux<String> answer = this.chatClient.prompt()
+            Flux<String> answer = streamChatEvents(this.chatClient.prompt()
                     .system(noResultPrompt)
-                    .user(ragQuery.getQuestion()).stream().content();
+                    .user(ragQuery.getQuestion()));
             return new QueryResult(List.of(), answer);
         })).doOnError(e -> log.error("GraphRAG查询出错: {}", e.getMessage(), e));
+    }
+
+    /**
+     * 将 Spring AI 流式响应转换为 SSE 事件流。
+     * 每个 chunk 可能携带思考片段（metadata["reasoningContent"]）或回答片段（getText()），
+     * 思考片段输出为 "__REASONING__:" 前缀行，回答片段输出原文；两者都不会为空字符串。
+     */
+    private Flux<String> streamChatEvents(ChatClient.ChatClientRequestSpec promptSpec) {
+        // Spring AI 2.0.1 每个流式 chunk 的 metadata["reasoningContent"] 是累计值，
+        // 这里只取新增片段下发，避免前端重复拼接。
+        AtomicReference<String> lastReasoning = new AtomicReference<>("");
+        return promptSpec.stream().chatResponse().concatMap(response -> {
+            if (response.getResult() == null) {
+                return Flux.empty();
+            }
+            AssistantMessage output = response.getResult().getOutput();
+            List<String> events = new ArrayList<>(2);
+            Object reasoning = output.getMetadata().get("reasoningContent");
+            if (reasoning instanceof String r && StringUtils.hasText(r)) {
+                String prev = lastReasoning.getAndSet(r);
+                if (r.length() > prev.length()) {
+                    events.add(REASONING_EVENT_PREFIX + r.substring(prev.length()));
+                }
+            }
+            String text = output.getText();
+            if (StringUtils.hasText(text)) {
+                events.add(text);
+            }
+            return Flux.fromIterable(events);
+        });
     }
 
     /**
@@ -174,7 +219,9 @@ public class GraphRagKnowledgeService {
         QueryResult result = graphRagQueryStream(ragQuery).block();
         if (result == null) return Mono.empty();
         Flux<String> answer = result.answer();
-        return answer.collectList().map(list -> String.join("", list));
+        // 思考内容仅供前端实时展示，阻塞式拼接时过滤掉
+        return answer.filter(s -> !s.startsWith(REASONING_EVENT_PREFIX))
+                .collectList().map(list -> String.join("", list));
     }
 
     /**

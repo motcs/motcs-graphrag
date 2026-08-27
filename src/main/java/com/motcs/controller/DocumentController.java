@@ -3,9 +3,9 @@ package com.motcs.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.motcs.commons.Utils;
 import com.motcs.dto.*;
+import com.motcs.knowledge.graph.GraphRagKnowledgeService;
 import com.motcs.knowledge.graph.GraphRagQuery;
 import com.motcs.knowledge.record.ChatMessage;
-import com.motcs.knowledge.graph.GraphRagKnowledgeService;
 import com.motcs.service.DocumentService;
 import com.motcs.util.ByteArrayMultipartFile;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +18,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.HashMap;
 import java.util.List;
@@ -145,21 +146,21 @@ public class DocumentController {
             } catch (Exception e) {
                 sourcesJson[0] = "[]";
             }
-            // 发送顺序：1.sessionId 2.sources 3.回答token
+            // 发送顺序：1.sessionId 2.sources 3.回答token（其中思考token带__REASONING__:前缀，仅前端展示不入库）
             return Flux.concat(
                     Mono.just("__SESSION__:" + sessionId),
                     Mono.just("__SOURCES__:" + sourcesJson[0]),
-                    result.answer().doOnNext(answerBuilder::append)
+                    result.answer().doOnNext(seg -> {
+                        if (!seg.startsWith("__REASONING__:")) answerBuilder.append(seg);
+                    })
             );
-        }).doFinally(signal -> {
+        }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
             // 取消时由前端手动保存（避免重复），正常完成/出错时保存（answer 可为空，确保提问不丢失）
             if (signal == reactor.core.publisher.SignalType.CANCEL) return;
             if (ragQuery.getQuestion() != null && !ragQuery.getQuestion().isBlank()) {
-                graphRagKnowledgeService.saveConversation(
-                        ragQuery.getQuestion(), answerBuilder.toString(),
-                        ragQuery.getUserId(), sessionId, sourcesJson[0],
-                        ragQuery.getTenantCode(), ragQuery.getSystemType()
-                ).subscribe();
+                graphRagKnowledgeService.saveConversation(ragQuery.getQuestion(), answerBuilder.toString(),
+                                ragQuery.getUserId(), sessionId, sourcesJson[0], ragQuery.getTenantCode(), ragQuery.getSystemType())
+                        .subscribe();
             }
         }).doOnError(e -> log.error("问答SSE流出错: {}", e.getMessage(), e));
     }
@@ -177,7 +178,8 @@ public class DocumentController {
         String sources = body.get("sources");
         String tenantCode = body.get("tenantCode");
         String systemType = body.get("systemType");
-        return graphRagKnowledgeService.saveConversation(question, answer, userId, sessionId, sources, tenantCode, systemType)
+        return graphRagKnowledgeService.saveConversation(question, answer,
+                        userId, sessionId, sources, tenantCode, systemType)
                 .then(Mono.fromCallable(() -> {
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);

@@ -312,6 +312,66 @@ body {
     margin-bottom: 8px;
     font-weight: 500;
 }
+
+/* AI 思考过程（有思考内容时才展示，可折叠） */
+.msg-thinking {
+    margin-bottom: 10px;
+    border: 1px solid rgba(129,140,248,0.18);
+    background: rgba(129,140,248,0.06);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.thinking-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #a5b4fc;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.thinking-head:hover { background: rgba(129,140,248,0.08); }
+.thinking-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #a78bfa;
+    animation: pulse-dot 1.5s infinite;
+    flex-shrink: 0;
+}
+.thinking-label {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+}
+.thinking-badge {
+    font-style: normal;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: linear-gradient(135deg, #7c3aed, #a78bfa);
+    color: #fff;
+}
+.thinking-toggle { color: #6b7280; }
+.thinking-body {
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding: 6px 10px 8px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+.thinking-text {
+    font-size: 12px;
+    line-height: 1.7;
+    color: #9ca3af;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
 .sources-scroll {
     display: flex;
     gap: 8px;

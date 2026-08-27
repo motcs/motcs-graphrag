@@ -194,7 +194,7 @@ function appendAIMessage() {
     row.innerHTML = `
         <div class="msg-avatar">AI</div>
         <div class="msg-bubble">
-            <div class="ai-content typing-cursor"><span class="text-gray-500">思考中...</span></div>
+            <div class="ai-content typing-cursor"><span class="text-gray-500">生成中...</span></div>
             <div class="msg-sources hidden"></div>
             <div class="msg-actions hidden">
                 <button class="msg-copy-btn" title="复制回答">复制</button>
@@ -210,6 +210,41 @@ function appendAIMessage() {
         navigator.clipboard.writeText(text).then(() => showToast('已复制到剪贴板', 'success'));
     });
     return row.querySelector('.ai-content');
+}
+
+/**
+ * 创建"思考过程"可折叠区块（仅在有思考内容时调用）。
+ * 插入到回答内容之前；点击头部展开/收起。
+ */
+function createThinkingBlock(bubble) {
+    const el = document.createElement('div');
+    el.className = 'msg-thinking';
+    el.innerHTML = `
+        <div class="thinking-head" title="点击展开/收起思考过程">
+            <span class="thinking-dot"></span>
+            <span class="thinking-label"><i class="thinking-badge">AI</i>思考过程</span>
+            <span class="thinking-toggle">▾</span>
+        </div>
+        <div class="thinking-body"><div class="thinking-text"></div></div>`;
+    const head = el.querySelector('.thinking-head');
+    const body = el.querySelector('.thinking-body');
+    const toggle = el.querySelector('.thinking-toggle');
+    head.addEventListener('click', () => {
+        const collapsed = body.classList.toggle('hidden');
+        toggle.textContent = collapsed ? '▸' : '▾';
+    });
+    const aiEl = bubble.querySelector('.ai-content');
+    bubble.insertBefore(el, aiEl);
+    return el;
+}
+
+/** 设置思考区块折叠状态：collapsed=true 折叠，false 展开 */
+function setThinkingCollapsed(el, collapsed) {
+    if (!el) return;
+    const body = el.querySelector('.thinking-body');
+    const toggle = el.querySelector('.thinking-toggle');
+    body.classList.toggle('hidden', collapsed);
+    toggle.textContent = collapsed ? '▸' : '▾';
 }
 
 function renderSourcesInMessage(sourcesEl, sources) {
@@ -339,6 +374,8 @@ async function askQuestion() {
     let firstToken = true;
     let stopped = false;
     state.currentSources = [];
+    let thinkingEl = null;      // 思考过程区块（有思考内容时才创建）
+    let reasoningText = '';     // 已收到的思考内容
 
     try {
         const formData = new URLSearchParams();
@@ -387,11 +424,28 @@ async function askQuestion() {
                         state.currentSources = JSON.parse(data.slice(12));
                         renderSourcesInMessage(sourcesEl, state.currentSources);
                     } catch (e) { console.warn('解析来源失败', e); }
+                } else if (data.startsWith('__REASONING__:')) {
+                    // 思考过程：仅当模型实际输出思考内容时才创建区块展示
+                    reasoningText += data.slice(14);
+                    if (!thinkingEl) {
+                        thinkingEl = createThinkingBlock(bubble);
+                        aiContentEl.innerHTML = '';
+                        aiContentEl.classList.remove('typing-cursor');
+                        statusEl.classList.remove('hidden');
+                        statusEl.innerHTML = '<span class="status-dot"></span>思考中';
+                    }
+                    thinkingEl.querySelector('.thinking-text').textContent = reasoningText;
+                    // 思考内容超出容器后始终滚动到底部，保证最新部分可见
+                    const tb = thinkingEl.querySelector('.thinking-body');
+                    if (tb) tb.scrollTop = tb.scrollHeight;
+                    scrollToBottom();
                 } else {
                     if (firstToken) {
                         aiContentEl.innerHTML = '';
                         aiContentEl.classList.add('typing-cursor');
                         firstToken = false;
+                        // 回答正文开始输出，思考过程自动折叠收起（可手动点开查看）
+                        if (thinkingEl) setThinkingCollapsed(thinkingEl, true);
                         // 显示回答中状态
                         statusEl.classList.remove('hidden');
                         statusEl.innerHTML = '<span class="status-dot"></span>回答中';
