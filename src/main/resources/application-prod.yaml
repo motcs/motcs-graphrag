@@ -26,7 +26,7 @@ spring:
       api-key: ${app.zhipu.api-key}
       base-url: ${app.zhipu.url}
       chat:
-        model: ${AI_CHAT_MODEL:glm-4-flash}
+        model: ${AI_CHAT_MODEL:glm-4.6v-flash}
         temperature: ${AI_CHAT_TEMPERATURE:0.1}
     vectorstore:
       neo4j:
