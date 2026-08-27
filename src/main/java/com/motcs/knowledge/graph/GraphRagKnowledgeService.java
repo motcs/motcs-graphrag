@@ -101,23 +101,23 @@ public class GraphRagKnowledgeService {
     private static final String SYSTEM_PROMPT = """
             你是企业知识库问答助手，请严格依据下面提供的知识库上下文回答用户问题。
             如果上下文没有答案，直接回复知识库无相关内容，不要编造信息。
-
+            
             【回答要求】
             - 直接、自然地回答问题，只输出答案本身，不要复述或引用原文片段。
             - 回答中不要出现"原文""系统""知识库上下文""根据资料""根据上下文"等元描述字样。
             - 不要输出或罗列文档元数据（如系统、角色、完成时间、平台等字段），不要用"系统：""角色："这类前缀搬运信息。
             - 引用来源已由界面单独展示，回答正文中无需再标注、引用或说明出处。
             - 依据上下文用自己的话组织答案，保证信息准确完整，直接给出用户需要的结论。
-
+            
             【格式要求】回答使用 Markdown 格式：
             - 用 ### 标题分段
             - 用 **加粗** 突出关键点
             - 用 - 或 1. 列表列举
             - 代码用 ``` 包裹
-
+            
             【历史对话】
             {history}
-
+            
             【知识库上下文】
             {context}
             """;
@@ -213,15 +213,14 @@ public class GraphRagKnowledgeService {
     }
 
     /**
-     * 阻塞式便捷方法（仅供测试调用）
+     * 便捷方法：拼接收到的回答文本（过滤思考内容），供测试等同步场景调用。
      */
     public Mono<String> graphRagQuery(GraphRagQuery ragQuery) {
-        QueryResult result = graphRagQueryStream(ragQuery).block();
-        if (result == null) return Mono.empty();
-        Flux<String> answer = result.answer();
-        // 思考内容仅供前端实时展示，阻塞式拼接时过滤掉
-        return answer.filter(s -> !s.startsWith(REASONING_EVENT_PREFIX))
-                .collectList().map(list -> String.join("", list));
+        return this.graphRagQueryStream(ragQuery).flatMap(result -> {
+            // 思考内容仅供前端实时展示，阻塞式拼接时过滤掉
+            return result.answer().filter(s -> !s.startsWith(REASONING_EVENT_PREFIX))
+                    .collectList().map(list -> String.join("", list));
+        });
     }
 
     /**
