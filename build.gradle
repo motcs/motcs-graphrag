@@ -1,0 +1,130 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.1'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'com.google.cloud.tools.jib' version '3.5.4'
+}
+
+group = 'com.motcs'
+version = '0.0.1'
+description = 'motcs-commons'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(26)
+    }
+}
+
+repositories {
+    mavenLocal()
+    maven { url "https://maven.aliyun.com/repository/public" }
+    maven { url "https://maven.aliyun.com/repository/spring" }
+    maven { url "https://maven.aliyun.com/repository/google" }
+    mavenCentral()
+}
+
+configurations.configureEach {
+    resolutionStrategy.cacheChangingModulesFor 0, "minutes"
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+jib {
+    from {
+        // 仅当设置了 DOCKER_SDK_IMAGE 时才指定基础镜像；未设置时不覆盖 Jib 默认行为，避免 null 报错
+        def sdkImage = System.getenv("DOCKER_SDK_IMAGE")
+        if (sdkImage) {
+            image = sdkImage
+        }
+        def dockerUser = System.getenv("DOCKER_USERNAME")
+        def dockerPass = System.getenv("DOCKER_PASSWORD")
+        if (dockerUser && dockerPass) {
+            auth {
+                username = dockerUser
+                password = dockerPass
+            }
+        }
+    }
+    to {
+        image = (System.getenv("DOCKER_URL") ?: "") + "/motcs/${project.name}"
+        tags = ["latest", "${project.version}"]
+        def dockerUser = System.getenv("DOCKER_USERNAME")
+        def dockerPass = System.getenv("DOCKER_PASSWORD")
+        if (dockerUser && dockerPass) {
+            auth {
+                username = dockerUser
+                password = dockerPass
+            }
+        }
+    }
+    container {
+        jvmFlags = [
+                "--enable-native-access=ALL-UNNAMED",
+                "-Dfile.encoding=UTF-8",
+                "-Dspring.profiles.active=prod",
+                "-XX:+UseG1GC",
+                "-XX:MaxGCPauseMillis=200",
+                "-XX:+HeapDumpOnOutOfMemoryError"
+        ]
+        ports = ["8080"]
+        user = "0:0"
+        creationTime = "USE_CURRENT_TIMESTAMP"
+    }
+}
+
+dependencies {
+
+    implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:${webfluxUiVersion}")
+
+    implementation 'org.springframework.boot:spring-boot-starter-neo4j'
+    implementation 'org.springframework.boot:spring-boot-starter-webclient'
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
+
+    implementation("cn.hutool:hutool-core:${hutoolVersion}")
+    implementation("com.google.guava:guava:33.+")
+
+    // MySQL R2DBC 驱动
+    implementation 'io.asyncer:r2dbc-mysql:1.3.0'
+
+    implementation 'org.springframework.ai:spring-ai-starter-vector-store-neo4j'
+    implementation 'org.springframework.ai:spring-ai-starter-model-chat-memory-repository-neo4j'
+
+    implementation 'org.springframework.ai:spring-ai-starter-model-openai'
+
+    // 文件上传处理
+    implementation 'commons-fileupload:commons-fileupload:1.6.0'
+    implementation 'commons-io:commons-io:2.18.0'
+
+    // 文档处理（可扩展）
+    implementation 'org.apache.pdfbox:pdfbox:2.0.29'
+    implementation 'org.apache.poi:poi:5.4.0'
+    implementation 'org.apache.poi:poi-ooxml:5.4.0'
+    implementation 'org.apache.poi:poi-scratchpad:5.4.0'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.ai:spring-ai-bom:${springAiVersion}"
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+// 消除 JDK 24+ 的 netty native-access 警告（JDK 26 下 System::loadLibrary 受限提示）
+tasks.named('bootRun') {
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+}

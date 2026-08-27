@@ -1,0 +1,23 @@
+server:
+  shutdown: graceful
+  http2.enabled: true
+  compression.enabled: true
+
+spring:
+  profiles.active: ${SPRING_PROFILES_ACTIVE:prod}
+  threads.virtual.enabled: true
+  application.name: motcs-commons
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+  sql.init:
+    mode: always
+    continue-on-error: true
+    schema-locations: classpath:/db/schema.sql
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui
+    operationsSorter: method

@@ -1,0 +1,53 @@
+logging:
+  register-shutdown-hook: true
+  level:
+    web: debug
+    com.motcs.*: debug
+
+server.port: ${SERVER_PORT:8080}
+
+spring:
+  neo4j:
+    uri: ${NEO4J_URI:bolt://127.0.0.1:7687}
+    authentication:
+      username: ${NEO4J_AUTH_USERNAME:neo4j}
+      password: ${NEO4J_AUTH_PASSWORD:sx2011++}
+
+  r2dbc:
+    url: r2dbc:mysql://${app.r2dbc.url}?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: ${app.r2dbc.username}
+    password: ${app.r2dbc.password}
+    pool:
+      max-size: 20
+      initial-size: 5
+
+  ai:
+    openai:
+      api-key: ${app.zhipu.api-key}
+      base-url: ${app.zhipu.url}
+      chat:
+        model: ${AI_CHAT_MODEL:glm-4-flash}
+        temperature: ${AI_CHAT_TEMPERATURE:0.1}
+    vectorstore:
+      neo4j:
+        index-name: knowledge_vector_index
+        embedding-dimension: ${app.zhipu.embedding.dimension}
+        label: DocumentChunk
+        distance-type: cosine
+        initialize-schema: true
+
+# 应用配置
+app:
+  file:
+    upload-dir: ${FILE_UPLOAD_DIR:./uploads}
+    max-size: ${FILE_MAX_SIZE:52428800}  # 50MB
+  zhipu:
+    url: ${AI_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
+    api-key: ${AI_API_KEY:default}
+    embedding:
+      model: ${AI_EMBEDDING_MODEL:embedding-3}
+      dimension: ${AI_EMBEDDING_DIMENSION:2048}
+  r2dbc:
+    url: ${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:motcs}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:sx2011++}
