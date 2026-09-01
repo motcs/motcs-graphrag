@@ -97,19 +97,78 @@ function initMarkdown() {
 function renderMarkdown(text) {
     if (!text) return '';
     // 去除首尾空白
-    let t = text.replace(/^\s+/, '').replace(/\s+$/, '');
+    text = text.replace(/__NL__/g, '\n'); let t = text.replace(/^\s+/, '').replace(/\s+$/, '');
     // 修复 AI 常见不规范写法：###标题 → ### 标题
-    t = t.replace(/^(#{1,6})([^ #\t\n])/gm, '$1 $2');
-    // 修复：**加粗** 中间无空格问题（一般不需要，这里兜底）
+    t = t.replace(/^[ \t]*(#{1,6})(?!#)([^ #\t\n])/gm, (m, hash, rest) => hash + ' ' + rest);
+    // 2) 中文顿号/句点数字列表：1、xxx / 1．xxx -> 1. xxx
+    t = t.replace(/^[ \t]*(\d+)[、．]/gm, '$1. ');
+    // 3) 行首无空格无序列表：-xxx / *xxx -> - xxx
+    t = t.replace(/^[ \t]*([-*])(?![-*\s])([^ \t\n])/gm, '$1 $2');
+    // 4) 行首数字点后紧跟内容无空格：1.xxx -> 1. xxx（排除小数 1.5 场景）
+    t = t.replace(/^[ \t]*(\d+\.)([^ \t\n\d])/gm, '$1 $2');
+    // 5) 换行恢复兜底：AI流式输出换行可能丢失，在 ### 标题、- 列表项、数字点列表项前补回换行
+    t = t.replace(/([^\n])(#{1,6} )/g, '$1\n$2');
+    t = t.replace(/([^\n])([ \t]*- )/g, '$1\n$2');
+    t = t.replace(/([^\n])([ \t]*\d+\. )/g, '$1\n$2');
+    // 优先使用 marked 完整渲染
     if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
         try {
-            return marked.parse(t);
+            return marked.parse(t, { breaks: true });
         } catch (e) {
             console.warn('marked 渲染失败:', e);
         }
     }
-    // 降级：转义 + 换行
-    return escapeHtml(t).replace(/\n/g, '<br>');
+    // 降级：内置轻量 markdown 渲染（不依赖 marked 也能渲染标题/加粗/斜体/列表/换行）
+    return renderLightMarkdown(t);
+}
+
+/**
+ * 轻量级 Markdown 渲染兜底：不依赖 marked 库也能渲染常见语法。
+ * 先转义 HTML 再替换，避免 XSS。
+ */
+function renderLightMarkdown(md) {
+    if (!md) return '';
+    // 1) 转义 HTML
+    let h = escapeHtml(md);
+    // 2) 行内代码 `code`
+    h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // 3) 加粗 **text**
+    h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // 4) 斜体 *text*（避免误伤加粗）
+    h = h.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    // 5) 行首标题 ###### ~ #
+    h = h.replace(/^######\s+(.*)$/gm, '<h6>$1</h6>');
+    h = h.replace(/^#####\s+(.*)$/gm, '<h5>$1</h5>');
+    h = h.replace(/^####\s+(.*)$/gm, '<h4>$1</h4>');
+    h = h.replace(/^###\s+(.*)$/gm, '<h3>$1</h3>');
+    h = h.replace(/^##\s+(.*)$/gm, '<h2>$1</h2>');
+    h = h.replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
+    // 6) 引用 > text（转义后 > 变为 &gt;）
+    h = h.replace(/^[ \t]*&gt;\s?(.*)$/gm, '<blockquote>$1</blockquote>');
+    // 7) 无序列表 - item / * item
+    h = h.replace(/^[ \t]*[-*]\s+(.*)$/gm, '<li>$1</li>');
+    // 8) 有序列表 1. item
+    h = h.replace(/^[ \t]*\d+\.\s+(.*)$/gm, '<li>$1</li>');
+    // 9) 段落与换行：空行分段落，列表合并为 <ul>
+    const lines = h.split('\n');
+    const out = [];
+    let listOpen = false;
+    const closeList = () => { if (listOpen) { out.push('</ul>'); listOpen = false; } };
+    for (const line of lines) {
+        if (/^<li>/.test(line)) {
+            if (!listOpen) { out.push('<ul>'); listOpen = true; }
+            out.push(line);
+        } else {
+            closeList();
+            if (!line.trim() || /^<h[1-6]|^<blockquote>|^<pre>/.test(line)) {
+                out.push(line);
+            } else {
+                out.push('<p>' + line + '</p>');
+            }
+        }
+    }
+    closeList();
+    return out.join('\n');
 }
 
 function syncLabels() {
@@ -247,6 +306,25 @@ function setThinkingCollapsed(el, collapsed) {
     toggle.textContent = collapsed ? '▸' : '▾';
 }
 
+/**
+ * 清理思考区文本中的 Markdown 标记，只保留纯文本内容。
+ * 思考区用纯文本展示，不渲染 Markdown；但 AI 思考内容可能混入 **、#、` 等标记，
+ * 这里统一剥离，避免界面出现孤立的星号/井号等符号。
+ */
+function stripMarkdown(text) {
+    if (!text) return text;
+    return text
+        .replace(/\*\*\*/g, '')                    // 先移除 ***
+        .replace(/\*\*/g, '')                      // 再移除 **
+        .replace(/(^|\s)\*([^*\n]+)\*/g, '$1$2')   // 行内 *斜体*
+        .replace(/\*/g, '')                        // 兜底移除孤立 *
+        .replace(/`([^`\n]*)`/g, '$1')             // 反引号代码
+        .replace(/`/g, '')                         // 兜底移除孤立反引号
+        .replace(/~~([^~\n]*)~~/g, '$1')           // 删除线
+        .replace(/^#{1,6}\s*/gm, '')               // 行首 ### 标题
+        .replace(/^>\s?/gm, '');                   // 行首 > 引用
+}
+
 function renderSourcesInMessage(sourcesEl, sources) {
     if (!sources || sources.length === 0) { sourcesEl.classList.add('hidden'); return; }
     sourcesEl.classList.remove('hidden');
@@ -373,9 +451,11 @@ async function askQuestion() {
     let fullAnswer = '';
     let firstToken = true;
     let stopped = false;
+    let reasoningActive = false;   // 标记当前是否正在输出思考内容（思考/正文可能交错到达）
     state.currentSources = [];
     let thinkingEl = null;      // 思考过程区块（有思考内容时才创建）
     let reasoningText = '';     // 已收到的思考内容
+    state.currentReasoning = ''; // 当前思考内容（供新对话/中断保存用）
 
     try {
         const formData = new URLSearchParams();
@@ -415,42 +495,51 @@ async function askQuestion() {
                 }
                 if (dataLines.length === 0) continue;
                 const data = dataLines.join('\n');
+                if (!data) continue;
+                let ev;
+                try { ev = JSON.parse(data); } catch (e) { console.warn('非JSON SSE事件', data); continue; }
 
-                if (data.startsWith('__SESSION__:')) {
-                    state.sessionId = data.slice(12);
+                if (ev.type === 'session') {
+                    state.sessionId = ev.sessionId;
                     syncLabels();
-                } else if (data.startsWith('__SOURCES__:')) {
-                    try {
-                        state.currentSources = JSON.parse(data.slice(12));
-                        renderSourcesInMessage(sourcesEl, state.currentSources);
-                    } catch (e) { console.warn('解析来源失败', e); }
-                } else if (data.startsWith('__REASONING__:')) {
-                    // 思考过程：仅当模型实际输出思考内容时才创建区块展示
-                    reasoningText += data.slice(14);
+                } else if (ev.type === 'sources') {
+                    state.currentSources = ev.sources || [];
+                    renderSourcesInMessage(sourcesEl, state.currentSources);
+                } else if (ev.type === 'reasoning') {
+                    // 思考片段：按 type 字段识别，不依赖内容判空
+                    reasoningText += ev.text || '';
+                    state.currentReasoning = reasoningText;
                     if (!thinkingEl) {
                         thinkingEl = createThinkingBlock(bubble);
                         aiContentEl.innerHTML = '';
                         aiContentEl.classList.remove('typing-cursor');
-                        statusEl.classList.remove('hidden');
-                        statusEl.innerHTML = '<span class="status-dot"></span>思考中';
+                        // 思考开始时自动展开思考窗口（仅创建时展开一次，后续不反复强制，避免"一直刷新"）
+                        setThinkingCollapsed(thinkingEl, false);
                     }
-                    thinkingEl.querySelector('.thinking-text').textContent = reasoningText;
+                    reasoningActive = true; // 标记正在思考
+                    // 思考阶段：状态显示"思考中"
+                    statusEl.classList.remove('hidden');
+                    statusEl.innerHTML = '<span class="status-dot"></span>思考中';
+                    thinkingEl.querySelector('.thinking-text').textContent = stripMarkdown(reasoningText);
                     // 思考内容超出容器后始终滚动到底部，保证最新部分可见
                     const tb = thinkingEl.querySelector('.thinking-body');
                     if (tb) tb.scrollTop = tb.scrollHeight;
                     scrollToBottom();
-                } else {
+                } else if (ev.type === 'content') {
+                    // 正文片段：按 type 字段识别；思考结束进入正文时折叠思考窗口
                     if (firstToken) {
                         aiContentEl.innerHTML = '';
                         aiContentEl.classList.add('typing-cursor');
                         firstToken = false;
-                        // 回答正文开始输出，思考过程自动折叠收起（可手动点开查看）
-                        if (thinkingEl) setThinkingCollapsed(thinkingEl, true);
-                        // 显示回答中状态
-                        statusEl.classList.remove('hidden');
-                        statusEl.innerHTML = '<span class="status-dot"></span>回答中';
                     }
-                    fullAnswer += data;
+                    if (reasoningActive) {
+                        reasoningActive = false;
+                        if (thinkingEl) setThinkingCollapsed(thinkingEl, true);
+                    }
+                    // 正文阶段：状态显示"回答中"
+                    statusEl.classList.remove('hidden');
+                    statusEl.innerHTML = '<span class="status-dot"></span>回答中';
+                    fullAnswer += ev.text || '';
                     state.currentAnswer = fullAnswer;
                     aiContentEl.innerHTML = renderMarkdown(fullAnswer);
                     scrollToBottom();
@@ -488,7 +577,7 @@ async function askQuestion() {
                             answer: fullAnswer || '',
                             userId: getUser(),
                             sessionId: mySessionId,
-                            sources: JSON.stringify(state.currentSources || []),
+                            sources: JSON.stringify(state.currentSources || []), reasoning: reasoningText,
                             tenantCode: getTenant(),
                             systemType: getSystem()
                         })
@@ -537,7 +626,7 @@ function newChat() {
                 body: JSON.stringify({
                     question: q, answer: a || '',
                     userId: getUser(), sessionId: sid,
-                    sources: JSON.stringify(s || []),
+                    sources: JSON.stringify(s || []), reasoning: state.currentReasoning || '',
                     tenantCode: getTenant(), systemType: getSystem()
                 })
             }).then(() => loadHistory()).catch(e => console.warn('新对话前保存失败', e));
@@ -1010,7 +1099,7 @@ async function loadSession(sessionId) {
             // 后端倒序返回，反转后正序显示
             const asc = (messages || []).slice().reverse();
             state.msgHasMore = (messages || []).length >= 10;
-            renderConversationThread(asc);
+            renderThreadWithReasoning(asc);
             $('questionInput').value = state.draftMap[sessionId] || '';
             autoResizeTextarea();
         }
@@ -1057,7 +1146,7 @@ function prependOlderMessages(messages) {
     messages.forEach(m => {
         frag.appendChild(buildUserMessage(m));
         const aiRow = buildAIMessage(m);
-        if (aiRow) frag.appendChild(aiRow);
+        if (aiRow) { if (m.reasoning && m.reasoning.trim()) renderReasoningBlock(aiRow.querySelector('.msg-bubble'), m.reasoning); } frag.appendChild(aiRow);
     });
     container.insertBefore(frag, container.firstChild);
     // 保持滚动位置（跳到加载前的位置）
@@ -1069,6 +1158,47 @@ function buildUserMessage(m) {
     row.className = 'msg-row user';
     row.innerHTML = `<div class="msg-avatar">U</div><div class="msg-bubble">${escapeHtml(m.question || '')}</div>`;
     return row;
+}
+
+/** 在AI气泡中渲染历史思考内容（默认折叠，可点击展开） */
+function renderReasoningBlock(bubble, reasoning) {
+    if (!reasoning || !reasoning.trim()) return;
+    const el = document.createElement('div');
+    el.className = 'msg-thinking';
+    el.innerHTML = `
+        <div class="thinking-head" title="点击展开/收起思考过程">
+            <span class="thinking-dot"></span>
+            <span class="thinking-label"><i class="thinking-badge">AI</i>思考过程</span>
+            <span class="thinking-toggle">▾</span>
+        </div>
+        <div class="thinking-body"><div class="thinking-text"></div></div>`;
+    el.querySelector('.thinking-text').textContent = stripMarkdown(reasoning);
+    const body = el.querySelector('.thinking-body');
+    const toggle = el.querySelector('.thinking-toggle');
+    body.classList.add('hidden'); toggle.textContent = '▸'; el.querySelector('.thinking-head').addEventListener('click', () => {
+        const collapsed = body.classList.toggle('hidden');
+        toggle.textContent = collapsed ? '▸' : '▾';
+    });
+    const aiEl = bubble.querySelector('.ai-content');
+    if (aiEl) bubble.insertBefore(el, aiEl);
+}
+
+/** 渲染多轮对话线程（含历史思考内容展示） */
+function renderThreadWithReasoning(messages) {
+    if (!messages || messages.length === 0) { clearChat(); return; }
+    $('chatMessages').innerHTML = '';
+    messages.forEach(m => {
+        const userRow = document.createElement('div');
+        userRow.className = 'msg-row user';
+        userRow.innerHTML = `<div class="msg-avatar">U</div><div class="msg-bubble">${escapeHtml(m.question || '')}</div>`;
+        $('chatMessages').appendChild(userRow);
+        const aiRow = buildAIMessage(m);
+        if (aiRow) {
+            if (m.reasoning && m.reasoning.trim()) renderReasoningBlock(aiRow.querySelector('.msg-bubble'), m.reasoning);
+            $('chatMessages').appendChild(aiRow);
+        }
+    });
+    scrollToBottom();
 }
 
 function buildAIMessage(m) {

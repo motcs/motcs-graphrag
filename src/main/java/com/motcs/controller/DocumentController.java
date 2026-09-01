@@ -126,8 +126,12 @@ public class DocumentController {
     /**
      * GraphRAG 知识问答接口（SSE 流式返回，支持多轮对话 + 知识库来源）
      * POST /api/documents/query
-     * SSE 事件：先发送 event:sources（引用的知识库片段），再逐 token 发送回答
-     * 回答完成后自动保存对话记录（含 userId、sessionId、sources）
+     * SSE 事件（JSON，type 字段区分）：
+     *  - {"type":"session","sessionId":"xxx"}
+     *  - {"type":"sources","sources":[...]}
+     *  - {"type":"reasoning","text":"思考片段"}
+     *  - {"type":"content","text":"正文片段"}
+     * 回答完成后自动保存对话记录（含 userId、sessionId、sources、reasoning）
      */
     @PostMapping(value = "/query", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> graphRagQuery(GraphRagQuery ragQuery) {
@@ -136,33 +140,50 @@ public class DocumentController {
             ragQuery.setSessionId(java.util.UUID.randomUUID().toString());
         }
         final String sessionId = ragQuery.getSessionId();
-        StringBuilder answerBuilder = new StringBuilder();
+        StringBuilder answerBuilder = new StringBuilder(); // AI回答完整内容累积
+        StringBuilder reasoningBuilder = new StringBuilder(); // AI思考过程累积（入库）
         final String[] sourcesJson = {"[]"};
 
-        return graphRagKnowledgeService.graphRagQueryStream(ragQuery).flatMapMany(result -> {
+        return this.graphRagKnowledgeService.graphRagQueryStream(ragQuery).flatMapMany(result -> {
             // 序列化来源
             try {
                 sourcesJson[0] = objectMapper.writeValueAsString(result.sources());
             } catch (Exception e) {
                 sourcesJson[0] = "[]";
             }
-            // 发送顺序：1.sessionId 2.sources 3.回答token（其中思考token带__REASONING__:前缀，仅前端展示不入库）
+            // 发送顺序：1.session 2.sources 3.思考/正文事件（JSON type 字段区分思考/正文，不依赖内容判空）
             return Flux.concat(
-                    Mono.just("__SESSION__:" + sessionId),
-                    Mono.just("__SOURCES__:" + sourcesJson[0]),
-                    result.answer().doOnNext(seg -> {
-                        if (!seg.startsWith("__REASONING__:")) answerBuilder.append(seg);
-                    })
+                    Mono.just(jsonEvent("session", Map.of("sessionId", sessionId))),
+                    Mono.just(jsonEvent("sources", Map.of("sources", result.sources()))),
+                    result.answer().doOnNext(ev -> {
+                        if ("reasoning".equals(ev.type())) {
+                            reasoningBuilder.append(ev.text());
+                        } else if ("content".equals(ev.type())) {
+                            answerBuilder.append(ev.text());
+                        }
+                    }).map(ev -> jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())))
             );
         }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
             // 取消时由前端手动保存（避免重复），正常完成/出错时保存（answer 可为空，确保提问不丢失）
             if (signal == reactor.core.publisher.SignalType.CANCEL) return;
             if (ragQuery.getQuestion() != null && !ragQuery.getQuestion().isBlank()) {
-                graphRagKnowledgeService.saveConversation(ragQuery.getQuestion(), answerBuilder.toString(),
-                                ragQuery.getUserId(), sessionId, sourcesJson[0], ragQuery.getTenantCode(), ragQuery.getSystemType())
-                        .subscribe();
+                this.graphRagKnowledgeService.saveConversation(ragQuery.getQuestion(), answerBuilder.toString(),
+                        ragQuery.getUserId(), sessionId, sourcesJson[0], reasoningBuilder.toString(),
+                        ragQuery.getTenantCode(), ragQuery.getSystemType()).subscribe();
             }
         }).doOnError(e -> log.error("问答SSE流出错: {}", e.getMessage(), e));
+    }
+
+    /** 将事件对象序列化为 SSE data 行（JSON，前端按 type 字段区分思考/正文/来源/会话） */
+    private String jsonEvent(String type, Map<String, ?> payload) {
+        try {
+            Map<String, Object> ev = new HashMap<>();
+            if (payload != null) ev.putAll(payload);
+            ev.put("type", type);
+            return objectMapper.writeValueAsString(ev);
+        } catch (Exception e) {
+            return "{\"type\":\"" + type + "\"}";
+        }
     }
 
     /**
@@ -176,10 +197,11 @@ public class DocumentController {
         String userId = body.get("userId");
         String sessionId = body.get("sessionId");
         String sources = body.get("sources");
+        String reasoning = body.get("reasoning");
         String tenantCode = body.get("tenantCode");
         String systemType = body.get("systemType");
         return graphRagKnowledgeService.saveConversation(question, answer,
-                        userId, sessionId, sources, tenantCode, systemType)
+                        userId, sessionId, sources, reasoning, tenantCode, systemType)
                 .then(Mono.fromCallable(() -> {
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);

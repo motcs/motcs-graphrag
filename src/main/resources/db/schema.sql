@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS chat_message
     title       VARCHAR(200) COMMENT '会话标题（每条记录冗余存储，取最后一条即可）',
     question    TEXT COMMENT '用户提问',
     answer      TEXT COMMENT 'AI回答',
+    reasoning   MEDIUMTEXT COMMENT 'AI思考内容',
     sources     JSON COMMENT '引用知识库来源（JSON数组）',
     tenant_code VARCHAR(64) COMMENT '租户编码',
     system_type VARCHAR(64) COMMENT '系统类型',
@@ -40,4 +41,7 @@ CREATE TABLE IF NOT EXISTS chat_session_summary
 -- 兼容已有数据库：新增字段（已存在则跳过，continue-on-error）
 ALTER TABLE chat_message
     ADD COLUMN title VARCHAR(200) COMMENT '会话标题（每条记录冗余存储，取最后一条即可）';
+
+ALTER TABLE chat_message
+    ADD COLUMN reasoning MEDIUMTEXT COMMENT 'AI思考内容';
 

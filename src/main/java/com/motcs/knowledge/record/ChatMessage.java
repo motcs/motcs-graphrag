@@ -48,6 +48,10 @@ public class ChatMessage {
     @Column("answer")
     private String answer;
 
+    @Schema(description = "AI思考内容", example = "思考...")
+    @Column("reasoning")
+    private String reasoning;
+
     @Schema(description = "引用的知识库来源（JSON数组字符串，数据库列为JSON类型）")
     @Column("sources")
     private JsonNode sources;

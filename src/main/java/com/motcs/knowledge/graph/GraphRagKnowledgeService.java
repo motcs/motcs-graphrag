@@ -62,8 +62,7 @@ public class GraphRagKnowledgeService {
     private static final int HISTORY_KEEP_RECENT = 10;
 
     /**
-     * SSE 思考事件前缀：AI 思考内容（reasoning_content）以该前缀行输出，前端据此展示"思考过程"；
-     * 回答内容以原文输出。无思考时只输出回答。
+     * SSE 思考事件前缀（保留兼容，新协议已改为 JSON type 字段）
      */
     private static final String REASONING_EVENT_PREFIX = "__REASONING__:";
 
@@ -109,11 +108,15 @@ public class GraphRagKnowledgeService {
             - 引用来源已由界面单独展示，回答正文中无需再标注、引用或说明出处。
             - 依据上下文用自己的话组织答案，保证信息准确完整，直接给出用户需要的结论。
             
-            【格式要求】回答使用 Markdown 格式：
+            【格式要求】回答使用 标准的Markdown 格式：
             - 用 ### 标题分段
             - 用 **加粗** 突出关键点
             - 用 - 或 1. 列表列举
             - 代码用 ``` 包裹
+            
+            【重要约定】
+            - 回答正文中禁止出现孤立或多余的星号、井号等未闭合的 Markdown 标记（如单独成行的 *、**、***、#### 等），所有标记必须成对闭合，保证渲染后整洁。
+            - 思考过程请使用简洁的纯文本叙述，不要使用 **、*、#、`、- 等任何 Markdown 标记符号，也不要添加序号或列表符号。
             
             【历史对话】
             {history}
@@ -123,9 +126,16 @@ public class GraphRagKnowledgeService {
             """;
 
     /**
-     * 查询结果封装：知识库来源 + SSE 事件流（思考片段带 __REASONING__: 前缀，回答片段为原文）
+     * SSE 流式事件：type=reasoning 表示思考片段，type=content 表示正文片段。
+     * 通过 type 字段区分思考/正文，前端不依赖内容是否为空判断。
      */
-    public record QueryResult(List<Map<String, Object>> sources, Flux<String> answer) {
+    public record ChatStreamEvent(String type, String text) {
+    }
+
+    /**
+     * 查询结果封装：知识库来源 + SSE 事件流（思考/正文通过 type 字段区分）
+     */
+    public record QueryResult(List<Map<String, Object>> sources, Flux<ChatStreamEvent> answer) {
     }
 
     /**
@@ -156,7 +166,7 @@ public class GraphRagKnowledgeService {
             if (ctx == null) return null;
             return new ContextResult(ctx.fullContext(), ctx.sources(), historyContext);
         }).subscribeOn(Schedulers.boundedElastic()).map(ctx -> {
-            Flux<String> answer = streamChatEvents(this.chatClient.prompt()
+            Flux<ChatStreamEvent> answer = streamChatEvents(this.chatClient.prompt()
                     .system(s -> s.text(SYSTEM_PROMPT)
                             .param("context", ctx.fullContext())
                             .param("history", ctx.historyContext()))
@@ -174,8 +184,8 @@ public class GraphRagKnowledgeService {
                     3. 你主要能力：分析文档，通过私有知识库回答问题。
                     4. 回答的内容中不要带有文档原文这样的字眼，只需要根据文档内容回答即可，界面已经显示了引用的文档内容。
                     
-                    回复使用 Markdown 格式，简洁友好，不超过100字。""";
-            Flux<String> answer = streamChatEvents(this.chatClient.prompt()
+                    回复使用 标准的Markdown 格式，简洁友好，不超过100字。""";
+            Flux<ChatStreamEvent> answer = streamChatEvents(this.chatClient.prompt()
                     .system(noResultPrompt)
                     .user(ragQuery.getQuestion()));
             return new QueryResult(List.of(), answer);
@@ -185,9 +195,10 @@ public class GraphRagKnowledgeService {
     /**
      * 将 Spring AI 流式响应转换为 SSE 事件流。
      * 每个 chunk 可能携带思考片段（metadata["reasoningContent"]）或回答片段（getText()），
-     * 思考片段输出为 "__REASONING__:" 前缀行，回答片段输出原文；两者都不会为空字符串。
+     * 思考片段输出 type=reasoning，正文片段输出 type=content（仅当正文实际有文本时下发，
+     * 思考阶段 getText() 为空，不发送空 content 事件，避免前端误判为"正文开始"而折叠思考框）。
      */
-    private Flux<String> streamChatEvents(ChatClient.ChatClientRequestSpec promptSpec) {
+    private Flux<ChatStreamEvent> streamChatEvents(ChatClient.ChatClientRequestSpec promptSpec) {
         // Spring AI 2.0.1 每个流式 chunk 的 metadata["reasoningContent"] 是累计值，
         // 这里只取新增片段下发，避免前端重复拼接。
         AtomicReference<String> lastReasoning = new AtomicReference<>("");
@@ -196,29 +207,31 @@ public class GraphRagKnowledgeService {
                 return Flux.empty();
             }
             AssistantMessage output = response.getResult().getOutput();
-            List<String> events = new ArrayList<>(2);
+            List<ChatStreamEvent> events = new ArrayList<>(2);
             Object reasoning = output.getMetadata().get("reasoningContent");
             if (reasoning instanceof String r && StringUtils.hasText(r)) {
                 String prev = lastReasoning.getAndSet(r);
                 if (r.length() > prev.length()) {
-                    events.add(REASONING_EVENT_PREFIX + r.substring(prev.length()));
+                    events.add(new ChatStreamEvent("reasoning", r.substring(prev.length())));
                 }
             }
+            // 正文片段：仅当实际有文本时下发（思考阶段 getText() 为空，不发送空 content 事件）
             String text = output.getText();
-            if (StringUtils.hasText(text)) {
-                events.add(text);
+            if (text != null && !text.isEmpty()) {
+                events.add(new ChatStreamEvent("content", text));
             }
             return Flux.fromIterable(events);
         });
     }
 
     /**
-     * 便捷方法：拼接收到的回答文本（过滤思考内容），供测试等同步场景调用。
+     * 便捷方法：拼接收到的回答文本（只取正文，过滤思考内容），供测试等同步场景调用。
      */
     public Mono<String> graphRagQuery(GraphRagQuery ragQuery) {
         return this.graphRagQueryStream(ragQuery).flatMap(result -> {
-            // 思考内容仅供前端实时展示，阻塞式拼接时过滤掉
-            return result.answer().filter(s -> !s.startsWith(REASONING_EVENT_PREFIX))
+            // 思考内容仅供前端实时展示，阻塞式拼接时只取正文片段
+            return result.answer().filter(ev -> "content".equals(ev.type()))
+                    .map(ChatStreamEvent::text)
                     .collectList().map(list -> String.join("", list));
         });
     }
@@ -771,7 +784,7 @@ public class GraphRagKnowledgeService {
      */
     public Mono<Void> saveConversation(String question, String answer,
                                        String userId, String sessionId, String sources,
-                                       String tenantCode, String systemType) {
+                                       String reasoning, String tenantCode, String systemType) {
         if (question == null || question.isBlank()) {
             return Mono.empty();
         }
@@ -795,7 +808,8 @@ public class GraphRagKnowledgeService {
                 .defaultIfEmpty("").flatMap(existingTitle -> {
                     ChatMessage record = ChatMessage.builder()
                             .userId(userId).sessionId(sessionId).title(existingTitle)
-                            .question(question).answer(finalAnswer).sources(sourcesNode)
+                            .question(question).answer(finalAnswer)
+                            .reasoning(reasoning).sources(sourcesNode)
                             .tenantCode(tenantCode).systemType(systemType)
                             .createTime(LocalDateTime.now()).build();
                     return chatMessageRepository.save(record).doOnSuccess(r -> {
