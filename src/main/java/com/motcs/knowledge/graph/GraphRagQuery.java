@@ -37,6 +37,9 @@ public class GraphRagQuery {
     @Schema(description = "向量检索返回数量（默认5）", example = "5")
     private Integer topK;
 
+    @Schema(description = "AI模型名称（前端选择，空则用配置默认模型）", example = "deepseek-v3.2")
+    private String model;
+
     public Double getThreshold() {
         return threshold == null ? 0.5d : threshold;
     }

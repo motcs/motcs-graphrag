@@ -45,3 +45,18 @@ ALTER TABLE chat_message
 ALTER TABLE chat_message
     ADD COLUMN reasoning MEDIUMTEXT COMMENT 'AI思考内容';
 
+
+
+-- API Key 表（OpenAI 风格：只存 SHA-256 哈希与前缀掩码，明文仅创建时返回一次）
+CREATE TABLE IF NOT EXISTS api_key
+(
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    name         VARCHAR(100) NOT NULL COMMENT '用途备注',
+    key_prefix   VARCHAR(40)  NOT NULL COMMENT 'Key前缀（展示掩码）',
+    key_hash     CHAR(64)     NOT NULL COMMENT '完整Key的SHA-256哈希',
+    enabled      TINYINT(1)   DEFAULT 1 COMMENT '是否启用 1启用 0停用',
+    created_by   VARCHAR(64)  DEFAULT 'admin' COMMENT '创建人',
+    created_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    UNIQUE KEY uk_key_hash (key_hash)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='API Key 表';

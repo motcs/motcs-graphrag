@@ -4,6 +4,83 @@
 
 const API_BASE = '/api/documents';
 
+/* ============================================================
+ * 认证与 API Key 管理（登录 / 退出 / 401 处理 / API Key 管理）
+ * ============================================================ */
+const AUTH_BASE = '/api/auth';
+
+// 全局 401 拦截：未登录时弹出登录遮罩（排除登录/会话探测/健康检查）
+const _rawFetch = window.fetch;
+window.fetch = async function (...args) {
+    const res = await _rawFetch.apply(this, args);
+    if (res.status === 401) {
+        const url = String(args[0]);
+        if (!url.includes('/api/auth/login') && !url.includes('/api/auth/me') && !url.includes('/health')) {
+            showLogin();
+        }
+    }
+    return res;
+};
+
+function showLogin() {
+    // 隐藏主界面（顶部栏 + 主内容），显示登录界面
+    const v = $('loginView');
+    if (v) { v.classList.remove('hidden'); v.classList.add('flex'); }
+    const hd = $('appHeader'); if (hd) hd.classList.add('hidden');
+    const m = $('appMain'); if (m) m.classList.add('hidden');
+    setTimeout(() => { const u = $('loginUsername'); if (u) u.focus(); }, 50);
+}
+function hideLogin() {
+    // 显示主界面，隐藏登录界面
+    const v = $('loginView');
+    if (v) { v.classList.add('hidden'); v.classList.remove('flex'); }
+    const hd = $('appHeader'); if (hd) hd.classList.remove('hidden');
+    const m = $('appMain'); if (m) m.classList.remove('hidden');
+}
+
+async function checkAuth() {
+    try {
+        const res = await _rawFetch(`${AUTH_BASE}/me`);
+        if (res.ok) { hideLogin(); return true; }
+    } catch (e) { /* ignore */ }
+    showLogin();
+    return false;
+}
+
+async function doLogin() {
+    const username = $('loginUsername').value.trim();
+    const password = $('loginPassword').value;
+    const btn = $('loginBtn');
+    btn.disabled = true;
+    try {
+        const res = await _rawFetch(`${AUTH_BASE}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            hideLogin();
+            $('loginPassword').value = '';
+            showToast('登录成功', 'success');
+            location.reload();
+        } else {
+            showToast(data.message || '用户名或密码错误', 'error');
+        }
+    } catch (e) {
+        showToast('登录请求失败', 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function doLogout() {
+    try { await _rawFetch(`${AUTH_BASE}/logout`, { method: 'POST' }); } catch (e) {}
+    showLogin();
+    showToast('已退出登录', 'info');
+}
+
+
 /* ---------- 全局状态 ---------- */
 const state = {
     currentTab: 'search',
@@ -192,8 +269,11 @@ function switchTab(tab) {
     $(`tab-${tab}`).classList.remove('hidden');
 
     if (tab === 'documents') loadDocuments();
-    if (tab === 'graph' && !state.graphNetwork) {
-        // 首次进入图谱页不自动加载，等用户点击
+    if (tab === 'apikey') {
+        // 进入 API Key 管理面板：重置新 Key 展示区并加载列表
+        const r = $('apiKeyNewResult'); if (r) r.classList.add('hidden');
+        const n = $('apiKeyName'); if (n) n.value = '';
+        loadApiKeys();
     }
 }
 
@@ -464,6 +544,7 @@ async function askQuestion() {
         formData.append('systemType', getSystem());
         formData.append('userId', getUser());
         formData.append('sessionId', state.sessionId);
+        formData.append('model', $('modelSelect').value);
 
         const res = await fetch(`${API_BASE}/query`, {
             method: 'POST',
@@ -1859,6 +1940,7 @@ $('globalSystem').addEventListener('input', () => {
 /* ---------- 初始化 ---------- */
 function init() {
     loadCfg();
+    checkAuth();
     initMarkdown();
     syncLabels();
     loadHistory();
@@ -1885,3 +1967,87 @@ function init() {
 }
 
 init();
+
+/* ---------- API Key 管理（面板内） ---------- */
+async function loadApiKeys() {
+    const tbody = $('apiKeyList');
+    const empty = $('apiKeyEmpty');
+    tbody.innerHTML = '';
+    try {
+        const res = await fetch(`${AUTH_BASE}/api-keys`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const list = await res.json();
+        if (!list || list.length === 0) { empty.classList.remove('hidden'); return; }
+        empty.classList.add('hidden');
+        list.forEach(k => {
+            const tr = document.createElement('tr');
+            tr.className = 'border-b border-white/5';
+            tr.innerHTML = `
+                <td class="py-2.5 pr-3">${escapeHtml(k.name || '')}</td>
+                <td class="py-2.5 pr-3 font-mono text-xs text-gray-400">${escapeHtml(k.keyPrefix || '')}</td>
+                <td class="py-2.5 pr-3">${k.enabled ? '<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">启用</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-400">停用</span>'}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${formatTime(k.createdTime)}</td>
+                <td class="py-2.5 text-right"><button onclick="deleteApiKey(${k.id})" class="text-xs text-red-400 hover:text-red-300 transition">删除</button></td>`;
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        showToast('加载 API Key 列表失败', 'error');
+    }
+}
+
+async function createApiKey() {
+    const name = $('apiKeyName').value.trim();
+    if (!name) {
+        showToast('请填写用途备注', 'error');
+        $('apiKeyName').focus();
+        return;
+    }
+    try {
+        const res = await fetch(`${AUTH_BASE}/api-keys`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        $('apiKeyNewValue').textContent = data.key;
+        $('apiKeyNewResult').classList.remove('hidden');
+        await loadApiKeys();
+    } catch (e) {
+        showToast('生成 API Key 失败', 'error');
+    }
+}
+
+async function deleteApiKey(id) {
+    if (!confirm('确定删除该 API Key？删除后携带该 Key 的请求立即失效。')) return;
+    try {
+        const res = await fetch(`${AUTH_BASE}/api-keys/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        showToast('已删除', 'success');
+        await loadApiKeys();
+    } catch (e) {
+        showToast('删除失败', 'error');
+    }
+}
+
+function copyNewKey() {
+    const val = $('apiKeyNewValue').textContent;
+    if (!val) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(val).then(() => showToast('已复制', 'success'));
+    } else {
+        const ta = document.createElement('textarea');
+        ta.value = val; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
+        showToast('已复制', 'success');
+    }
+}
+
+/* ---------- 认证事件绑定 ---------- */
+function initAuth() {
+    $('loginForm').addEventListener('submit', e => { e.preventDefault(); doLogin(); });
+    $('logoutBtn').addEventListener('click', doLogout);
+    $('apiKeyCreateBtn').addEventListener('click', createApiKey);
+    $('apiKeyCopyBtn').addEventListener('click', copyNewKey);
+}
+initAuth();

@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
@@ -166,11 +167,13 @@ public class GraphRagKnowledgeService {
             if (ctx == null) return null;
             return new ContextResult(ctx.fullContext(), ctx.sources(), historyContext);
         }).subscribeOn(Schedulers.boundedElastic()).map(ctx -> {
-            Flux<ChatStreamEvent> answer = streamChatEvents(this.chatClient.prompt()
+            ChatClient.ChatClientRequestSpec answerSpec = this.chatClient.prompt()
                     .system(s -> s.text(SYSTEM_PROMPT)
                             .param("context", ctx.fullContext())
                             .param("history", ctx.historyContext()))
-                    .user(ragQuery.getQuestion()));
+                    .user(ragQuery.getQuestion());
+            applyModelOptions(answerSpec, ragQuery.getModel());
+            Flux<ChatStreamEvent> answer = streamChatEvents(answerSpec);
             return new QueryResult(ctx.sources(), answer);
         }).switchIfEmpty(Mono.fromCallable(() -> {
             // 向量检索无结果：仍调用 AI，让其判断是打招呼/闲聊还是知识问题
@@ -185,11 +188,24 @@ public class GraphRagKnowledgeService {
                     4. 回答的内容中不要带有文档原文这样的字眼，只需要根据文档内容回答即可，界面已经显示了引用的文档内容。
                     
                     回复使用 标准的Markdown 格式，简洁友好，不超过100字。""";
-            Flux<ChatStreamEvent> answer = streamChatEvents(this.chatClient.prompt()
+            ChatClient.ChatClientRequestSpec noResultSpec = this.chatClient.prompt()
                     .system(noResultPrompt)
-                    .user(ragQuery.getQuestion()));
+                    .user(ragQuery.getQuestion());
+            applyModelOptions(noResultSpec, ragQuery.getModel());
+            Flux<ChatStreamEvent> answer = streamChatEvents(noResultSpec);
             return new QueryResult(List.of(), answer);
         })).doOnError(e -> log.error("GraphRAG查询出错: {}", e.getMessage(), e));
+    }
+
+    /**
+     * 按用户前端选择的模型动态覆盖 ChatClient 请求（per-request options），
+     * 不传或空白时使用配置文件里的默认模型。
+     */
+    private void applyModelOptions(ChatClient.ChatClientRequestSpec spec, String model) {
+        if (model != null && !model.isBlank()) {
+            spec.options(OpenAiChatOptions.builder().model(model));
+            log.info("本次问答使用用户选择模型: {}", model);
+        }
     }
 
     /**

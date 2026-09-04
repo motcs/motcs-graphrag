@@ -65,7 +65,6 @@ jib {
         jvmFlags = [
                 "--enable-native-access=ALL-UNNAMED",
                 "-Dfile.encoding=UTF-8",
-                "-Dspring.profiles.active=prod",
                 "-XX:+UseG1GC",
                 "-XX:MaxGCPauseMillis=200",
                 "-XX:+HeapDumpOnOutOfMemoryError"
@@ -84,6 +83,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webclient'
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
     implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
 
     implementation("cn.hutool:hutool-core:${hutoolVersion}")
     implementation("com.google.guava:guava:33.+")

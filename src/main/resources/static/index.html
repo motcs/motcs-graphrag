@@ -25,7 +25,7 @@
 <body class="bg-dark-950 text-gray-100 min-h-screen">
 
 <!-- 顶部导航栏 -->
-<header class="bg-dark-900/80 backdrop-blur border-b border-white/5 sticky top-0 z-50">
+<header id="appHeader" class="bg-dark-900/80 backdrop-blur border-b border-white/5 sticky top-0 z-50">
     <div class="max-w-[1600px] mx-auto px-6 h-16 flex items-center justify-between">
         <div class="flex items-center gap-3">
             <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center">
@@ -61,11 +61,15 @@
                 <span class="w-2 h-2 rounded-full bg-gray-500" id="healthDot"></span>
                 <span class="text-xs text-gray-400" id="healthText">检测中</span>
             </div>
+            <button id="logoutBtn" title="退出登录" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-850 hover:bg-white/5 border border-white/10 text-xs text-gray-300 transition">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                退出
+            </button>
         </div>
     </div>
 </header>
 
-<div class="max-w-[1400px] mx-auto px-4 py-6 flex gap-5">
+<div id="appMain" class="max-w-[1400px] mx-auto px-4 py-6 flex gap-5">
 
     <!-- 左侧导航 -->
     <nav class="w-[336px] shrink-0">
@@ -84,6 +88,10 @@
             <button data-tab="documents" class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 文档管理
+            </button>
+            <button data-tab="apikey" class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                API Key 管理
             </button>
             <button data-tab="graph" class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5" stroke-width="2"/><circle cx="5" cy="19" r="2.5" stroke-width="2"/><circle cx="19" cy="19" r="2.5" stroke-width="2"/><path d="M12 7.5v4M10.5 13L6.5 17M13.5 13l4 4" stroke-width="2" stroke-linecap="round"/></svg>
@@ -147,6 +155,16 @@
                             class="w-full px-4 py-3 text-sm bg-transparent border-none resize-none focus:outline-none placeholder-gray-500 text-gray-200 max-h-32"></textarea>
                         <div class="flex items-center justify-between px-3 pb-2">
                             <div class="flex items-center gap-3 text-xs text-gray-500">
+                                <label class="flex items-center gap-1.5 text-gray-400">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                                    模型
+                                </label>
+                                <select id="modelSelect" title="选择AI模型"
+                                    class="px-2 py-1 text-xs bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition text-gray-300">
+                                    <option value="deepseek-v3.2" selected>deepseek-v3.2</option>
+                                    <option value="deepseek-v3.2-think">deepseek-v3.2-think</option>
+                                    <option value="deepseek-v4-flash-0731">deepseek-v4-flash-0731</option>
+                                </select>
                                 <span>会话: <span id="currentSessionId" class="text-primary-400 font-mono">未开始</span></span>
                             </div>
                             <button id="askBtn" class="w-8 h-8 rounded-lg bg-primary-600 hover:bg-primary-500 flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed">
@@ -346,6 +364,44 @@
             </div>
         </section>
 
+        <!-- ===== API Key 管理 ===== -->
+        <section id="tab-apikey" class="tab-panel hidden">
+            <div class="bg-dark-900/60 rounded-2xl border border-white/5 p-5">
+                <div class="mb-5">
+                    <h2 class="text-2xl font-bold">API Key 管理</h2>
+                    <p class="text-sm text-gray-400 mt-1">对外调用接口的访问凭证：调用方携带该 Key 即可访问 AI 对话接口（登录态或 Key 二选一），明文仅生成时展示一次，超管生成后人工分发</p>
+                </div>
+                <div class="flex gap-3 mb-4">
+                    <input id="apiKeyName" type="text" placeholder="用途备注，如：第三方系统对接"
+                        class="flex-1 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition placeholder-gray-500">
+                    <button id="apiKeyCreateBtn" class="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition">生成新 Key</button>
+                </div>
+                <div id="apiKeyNewResult" class="hidden p-4 mb-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                    <div class="text-xs text-emerald-400 mb-2 flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        新 Key 已生成，请立即复制保存（仅此一次可见）
+                    </div>
+                    <div class="flex gap-2">
+                        <code id="apiKeyNewValue" class="flex-1 text-xs bg-dark-950 rounded-lg px-3 py-2 break-all text-emerald-300 select-all"></code>
+                        <button id="apiKeyCopyBtn" class="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 transition shrink-0">复制</button>
+                    </div>
+                </div>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-xs text-gray-400 border-b border-white/5">
+                            <th class="text-left py-2 font-medium">备注</th>
+                            <th class="text-left py-2 font-medium">Key</th>
+                            <th class="text-left py-2 font-medium">状态</th>
+                            <th class="text-left py-2 font-medium">创建时间</th>
+                            <th class="text-right py-2 font-medium">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="apiKeyList"></tbody>
+                </table>
+                <div id="apiKeyEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无 API Key，点击上方按钮生成</div>
+            </div>
+        </section>
+
     </main>
 </div>
 
@@ -372,6 +428,35 @@
     <div class="px-5 py-3 rounded-xl shadow-2xl text-sm flex items-center gap-2" id="toastInner"></div>
 </div>
 
-<script src="js/app.js?v=97"></script>
+<!-- 登录界面（未登录时显示，替代遮罩） -->
+<div id="loginView" class="hidden min-h-screen items-center justify-center bg-dark-950">
+    <div class="bg-dark-900 rounded-2xl border border-white/10 w-full max-w-sm m-4 p-6 shadow-2xl">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center">
+                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            </div>
+            <div>
+                <h2 class="text-lg font-bold">管理员登录</h2>
+                <p class="text-xs text-gray-400">访问管理界面需先登录</p>
+            </div>
+        </div>
+        <form id="loginForm" class="space-y-4">
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">用户名</label>
+                <input id="loginUsername" type="text" autocomplete="username" value=""
+                    class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">密码</label>
+                <input id="loginPassword" type="password" autocomplete=""
+                    class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+            </div>
+            <button type="submit" id="loginBtn"
+                class="w-full py-2.5 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition disabled:opacity-40">登 录</button>
+        </form>
+    </div>
+</div>
+
+<script src="js/app.js?v=100"></script>
 </body>
 </html>

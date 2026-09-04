@@ -21,3 +21,10 @@ springdoc:
   swagger-ui:
     path: /swagger-ui
     operationsSorter: method
+
+# 超管账号（唯一管理员，用于登录管理界面和生成 API Key）
+app:
+  auth:
+    username: ${AUTH_USERNAME:xxhzj}
+    password: ${AUTH_PASSWORD:sx2011++}
+    api.key.length: ${API_KEY_LEN:40}
