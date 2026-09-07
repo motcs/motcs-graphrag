@@ -61,8 +61,8 @@ spring:
       chat:
         # 免费档推荐 ernie-speed-128k（128k 上下文，不会被 RAG 上下文撑爆）；
         # 要质量/更稳的 JSON 抽取换 ernie-4.5-turbo-128k
-#        model: ${AI_CHAT_MODEL:deepseek-v3.2}
-        model: ${AI_CHAT_MODEL:deepseek-v3.2-think}
+        #        model: ${AI_CHAT_MODEL:deepseek-v3.2}
+        model: ${app.ai.default-chat-model}
         temperature: ${AI_CHAT_TEMPERATURE:0.1}
     vectorstore:
       neo4j:
@@ -89,13 +89,20 @@ app:
       model: ${AI_EMBEDDING_MODEL:bge-large-zh}
       dimension: ${AI_EMBEDDING_DIMENSION:1024}
 
-  # 兼容 AiConfig 读取的旧键名（代码无需改动），值统一引用上方 qianfan 配置
+  # 兼容 AiConfiguration 读取的旧键名（代码无需改动），值统一引用上方 qianfan 配置
   zhipu:
     url: ${app.qianfan.url}
     api-key: ${app.qianfan.api-key}
     embedding:
       model: ${app.qianfan.embedding.model}
       dimension: ${app.qianfan.embedding.dimension}
+
+  # 当前 AI 平台标识（覆盖 application.yaml，前端据此渲染模型下拉框）
+  ai:
+    provider: ${AI_PROVIDER:baidu}
+    provider-name: ${AI_PROVIDER_NAME:百度千帆}
+    chat-models: ${AI_CHAT_MODELS:deepseek-v3.2,deepseek-v3.2-think,deepseek-v4-flash-0731}
+    default-chat-model: ${AI_CHAT_MODEL:deepseek-v3.2}
 
   r2dbc:
     url: ${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:motcs}

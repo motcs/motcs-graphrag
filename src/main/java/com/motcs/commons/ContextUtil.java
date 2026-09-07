@@ -3,6 +3,7 @@ package com.motcs.commons;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.google.common.base.CaseFormat;
+import com.motcs.commons.utils.ParameterSql;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.data.domain.Pageable;

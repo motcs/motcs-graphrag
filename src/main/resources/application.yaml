@@ -28,3 +28,5 @@ app:
     username: ${AUTH_USERNAME:xxhzj}
     password: ${AUTH_PASSWORD:sx2011++}
     api.key.length: ${API_KEY_LEN:40}
+    # 登录 x-token 过期时间（秒），默认 2 小时；每次有效请求自动续期（滑动过期）
+    token.ttl-seconds: ${AUTH_TOKEN_TTL:7200}

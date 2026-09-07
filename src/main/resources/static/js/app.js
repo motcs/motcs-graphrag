@@ -9,11 +9,34 @@ const API_BASE = '/api/documents';
  * ============================================================ */
 const AUTH_BASE = '/api/auth';
 
-// 全局 401 拦截：未登录时弹出登录遮罩（排除登录/会话探测/健康检查）
+// 读取 cookie 值（CSRF token 由后端经 Set-Cookie: XSRF-TOKEN 下发）
+function getCookie(name) {
+    const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
+    return match ? decodeURIComponent(match[1]) : '';
+}
+
+// 全局 401 拦截：未登录时弹出登录遮罩（排除登录/会话探测/健康检查）；
+// 所有请求统一携带 x-token（登录接口除外，登录时用 Basic Auth 换取新 token）；
+// POST/PUT/DELETE 等非安全方法额外携带 X-CSRF-TOKEN（取自 cookie，API Key 调用不需要）
 const _rawFetch = window.fetch;
 window.fetch = async function (...args) {
+    const token = localStorage.getItem('motcs_token');
+    if (token) {
+        const url = String(args[0]);
+        if (!url.includes('/api/auth/login')) {
+            const init = args[1] || (args[1] = {});
+            init.headers = Object.assign({}, init.headers, { 'x-token': token });
+            // CSRF 后端仅对 POST 校验，因此只有 POST 需要携带 X-CSRF-TOKEN
+            const method = String(init.method || 'GET').toUpperCase();
+            if (method === 'POST') {
+                const csrf = getCookie('XSRF-TOKEN');
+                if (csrf) init.headers = Object.assign({}, init.headers, { 'X-CSRF-TOKEN': csrf });
+            }
+        }
+    }
     const res = await _rawFetch.apply(this, args);
-    if (res.status === 401) {
+    // 401：未登录/过期；POST 403：多为 CSRF cookie 缺失或不匹配（会话异常），均重新登录恢复
+    if (res.status === 401 || (res.status === 403 && String((args[1] && args[1].method) || 'GET').toUpperCase() === 'POST')) {
         const url = String(args[0]);
         if (!url.includes('/api/auth/login') && !url.includes('/api/auth/me') && !url.includes('/health')) {
             showLogin();
@@ -40,8 +63,19 @@ function hideLogin() {
 
 async function checkAuth() {
     try {
-        const res = await _rawFetch(`${AUTH_BASE}/me`);
-        if (res.ok) { hideLogin(); return true; }
+        // 走包装 fetch：自动携带 x-token 校验登录态；/me 已在 401 排除列表，不会误弹登录框
+        const res = await fetch(`${AUTH_BASE}/me`);
+        if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            if (data && data.username) {
+                localStorage.setItem('motcs_username', data.username);
+                // 用户编码固定为登录账号（输入框只读，仅作展示）
+                const gu = $('globalUser');
+                if (gu) gu.value = data.username;
+            }
+            hideLogin();
+            return true;
+        }
     } catch (e) { /* ignore */ }
     showLogin();
     return false;
@@ -53,19 +87,27 @@ async function doLogin() {
     const btn = $('loginBtn');
     btn.disabled = true;
     try {
+        // Basic Auth 登录：Authorization 头携带 base64(username:password)
+        // （unescape/encodeURIComponent 兼容用户名密码中的非 Latin-1 字符）
         const res = await _rawFetch(`${AUTH_BASE}/login`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
+            headers: { 'Authorization': 'Basic ' + btoa(unescape(encodeURIComponent(username + ':' + password))) }
         });
         const data = await res.json().catch(() => ({}));
-        if (res.ok && data.success) {
+        // 后端登录成功返回 AuthenticationToken（含 token 字段，无 success 字段），
+        // 以 res.ok && data.token 判定登录成功；CSRF token 由 Set-Cookie 下发，无需前端保存
+        if (res.ok && data.token) {
+            localStorage.setItem('motcs_token', data.token);
+            // 保存登录账号：界面用户编码固定为登录账号（只读）
+            localStorage.setItem('motcs_username', username);
+            const gu = $('globalUser');
+            if (gu) gu.value = username;
             hideLogin();
             $('loginPassword').value = '';
             showToast('登录成功', 'success');
             location.reload();
         } else {
-            showToast(data.message || '用户名或密码错误', 'error');
+            showToast((data && data.message) || '用户名或密码错误', 'error');
         }
     } catch (e) {
         showToast('登录请求失败', 'error');
@@ -75,7 +117,10 @@ async function doLogin() {
 }
 
 async function doLogout() {
-    try { await _rawFetch(`${AUTH_BASE}/logout`, { method: 'POST' }); } catch (e) {}
+    try { await fetch(`${AUTH_BASE}/logout`, { method: 'POST' }); } catch (e) {}
+    localStorage.removeItem('motcs_token');
+    localStorage.removeItem('motcs_username');
+    document.cookie = 'XSRF-TOKEN=; Path=/; Max-Age=0';
     showLogin();
     showToast('已退出登录', 'info');
 }
@@ -109,13 +154,13 @@ const state = {
 const CFG_KEY = 'motcs_cfg';
 function saveCfg() {
     localStorage.setItem(CFG_KEY, JSON.stringify({
-        user: $('globalUser').value, tenant: $('globalTenant').value, system: $('globalSystem').value
+        tenant: $('globalTenant').value, system: $('globalSystem').value
     }));
 }
 function loadCfg() {
     try {
         const c = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
-        if (c.user) $('globalUser').value = c.user;
+        // 用户编码固定为登录账号，不参与配置持久化/恢复
         if (c.tenant) $('globalTenant').value = c.tenant;
         if (c.system) $('globalSystem').value = c.system;
     } catch {}
@@ -158,9 +203,14 @@ function showToast(msg, type = 'info') {
     showToast._t = setTimeout(() => toast.classList.add('hidden'), 3500);
 }
 
-function getTenant() { return $('globalTenant').value.trim() || 'default'; }
-function getSystem() { return $('globalSystem').value.trim() || 'default'; }
-function getUser() { return $('globalUser').value.trim() || 'anonymous'; }
+function getTenant() { return $('globalTenant').value.trim() || '0'; }
+function getSystem() { return $('globalSystem').value.trim() || 'other'; }
+function getUser() {
+    const v = $('globalUser').value.trim();
+    if (v) return v;
+    // 用户编码默认取登录账号（超管 xxhzj），登录后由 doLogin/checkAuth 写入
+    return localStorage.getItem('motcs_username') || 'xxhzj';
+}
 
 /**
  * Markdown 渲染（带 marked 库检测和降级）
@@ -538,18 +588,18 @@ async function askQuestion() {
     state.currentReasoning = ''; // 当前思考内容（供新对话/中断保存用）
 
     try {
-        const formData = new URLSearchParams();
-        formData.append('question', question);
-        formData.append('tenantCode', getTenant());
-        formData.append('systemType', getSystem());
-        formData.append('userId', getUser());
-        formData.append('sessionId', state.sessionId);
-        formData.append('model', $('modelSelect').value);
-
+        // POST /query 使用 JSON body 传参
         const res = await fetch(`${API_BASE}/query`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: formData,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question,
+                tenantCode: getTenant(),
+                systemType: getSystem(),
+                userId: getUser(),
+                sessionId: state.sessionId,
+                model: $('modelSelect').value
+            }),
             signal: state.abortController.signal
         });
         if (!res.ok) {
@@ -801,7 +851,8 @@ async function loadHistory() {
         params.append('userId', getUser());
         params.append('tenantCode', getTenant());
         params.append('systemType', getSystem());
-        params.append('limit', '20');
+        params.append('page', '0');
+        params.append('size', '20');
         const res = await fetch(`${API_BASE}/sessions?${params.toString()}`);
         if (res.ok) {
             state.history = await res.json();
@@ -1017,7 +1068,7 @@ async function exportConversation(sessionId, title) {
         let total = 0;
         // 分页正序查询，依次写出
         while (true) {
-            const res = await fetch(`${API_BASE}/conversations/session?sessionId=${encodeURIComponent(sessionId)}&limit=${pageSize}&offset=${offset}&order=asc`);
+            const res = await fetch(`${API_BASE}/conversations/session?sessionId=${encodeURIComponent(sessionId)}&page=${Math.floor(offset / pageSize)}&size=${pageSize}&order=asc`);
             if (!res.ok) { showToast('导出失败', 'error'); return; }
             const messages = await res.json();
             if (!messages || messages.length === 0) break;
@@ -1061,7 +1112,7 @@ async function exportConversationPDF(sessionId, title) {
         const pageSize = 50;
         let total = 0;
         while (true) {
-            const res = await fetch(`${API_BASE}/conversations/session?sessionId=${encodeURIComponent(sessionId)}&limit=${pageSize}&offset=${offset}&order=asc`);
+            const res = await fetch(`${API_BASE}/conversations/session?sessionId=${encodeURIComponent(sessionId)}&page=${Math.floor(offset / pageSize)}&size=${pageSize}&order=asc`);
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const messages = await res.json();
             if (!messages || messages.length === 0) break;
@@ -1137,7 +1188,7 @@ async function batchDeleteHistory() {
         const res = await fetch(`${API_BASE}/conversations/batch`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify([...state.historySelected])
+            body: JSON.stringify({ sessionIds: [...state.historySelected] })
         });
         if (res.ok) {
             showToast(`已删除 ${state.historySelected.size} 条对话`, 'success');
@@ -1174,7 +1225,7 @@ async function loadSession(sessionId) {
     $('chatMessages').innerHTML = '<div class="text-center text-gray-500 text-sm py-8">加载对话中...</div>';
 
     try {
-        const res = await fetch(`${API_BASE}/conversations/session?sessionId=${encodeURIComponent(sessionId)}&limit=10&offset=0`);
+        const res = await fetch(`${API_BASE}/conversations/session?sessionId=${encodeURIComponent(sessionId)}&page=0&size=10`);
         if (res.ok) {
             const messages = await res.json();
             // 后端倒序返回，反转后正序显示
@@ -1195,9 +1246,9 @@ async function loadSession(sessionId) {
 async function loadOlderMessages() {
     if (state.msgLoading || !state.msgHasMore || !state.sessionId) return;
     state.msgLoading = true;
-    state.msgOffset += 10;
+    state.msgOffset += 1;
     try {
-        const res = await fetch(`${API_BASE}/conversations/session?sessionId=${encodeURIComponent(state.sessionId)}&limit=10&offset=${state.msgOffset}`);
+        const res = await fetch(`${API_BASE}/conversations/session?sessionId=${encodeURIComponent(state.sessionId)}&page=${state.msgOffset}&size=10`);
         if (res.ok) {
             const messages = await res.json();
             if (!messages || messages.length === 0) {
@@ -1501,7 +1552,7 @@ async function uploadByUrl() {
     };
 
     try {
-        const res = await fetch(`${API_BASE}/upload-by-url`, {
+        const res = await fetch(`${API_BASE}/upload/url`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -1941,6 +1992,7 @@ $('globalSystem').addEventListener('input', () => {
 function init() {
     loadCfg();
     checkAuth();
+    loadAiProvider();
     initMarkdown();
     syncLabels();
     loadHistory();
@@ -1968,6 +2020,29 @@ function init() {
 
 init();
 
+/* ---------- AI 平台探测（动态填充模型下拉框） ---------- */
+async function loadAiProvider() {
+    try {
+        const res = await fetch('/api/ai/provider');
+        if (!res.ok) return;
+        const info = await res.json();
+        const sel = $('modelSelect');
+        if (!sel || !info || !Array.isArray(info.models) || info.models.length === 0) return;
+        sel.innerHTML = '';
+        info.models.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            if (m === info.defaultModel) opt.selected = true;
+            sel.appendChild(opt);
+        });
+        const pv = info.name || info.provider || '';
+        if (pv && $('aiProviderLabel')) $('aiProviderLabel').textContent = pv;
+    } catch (e) {
+        // 接口不可用时保留 HTML 默认选项（deepseek 三模型）
+    }
+}
+
 /* ---------- API Key 管理（面板内） ---------- */
 async function loadApiKeys() {
     const tbody = $('apiKeyList');
@@ -1985,6 +2060,7 @@ async function loadApiKeys() {
             tr.innerHTML = `
                 <td class="py-2.5 pr-3">${escapeHtml(k.name || '')}</td>
                 <td class="py-2.5 pr-3 font-mono text-xs text-gray-400">${escapeHtml(k.keyPrefix || '')}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(k.tenantCode || '-')} / ${escapeHtml(k.systemType || '-')}</td>
                 <td class="py-2.5 pr-3">${k.enabled ? '<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">启用</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-400">停用</span>'}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${formatTime(k.createdTime)}</td>
                 <td class="py-2.5 text-right"><button onclick="deleteApiKey(${k.id})" class="text-xs text-red-400 hover:text-red-300 transition">删除</button></td>`;
@@ -1997,16 +2073,27 @@ async function loadApiKeys() {
 
 async function createApiKey() {
     const name = $('apiKeyName').value.trim();
+    const tenantCode = $('apiKeyTenant').value.trim();
+    const systemType = $('apiKeySystem').value.trim();
     if (!name) {
         showToast('请填写用途备注', 'error');
         $('apiKeyName').focus();
+        return;
+    }
+    if (!tenantCode || !systemType) {
+        showToast('租户编码和系统类型必填', 'error');
+        return;
+    }
+    if (tenantCode === '0') {
+        showToast('API Key 不允许绑定租户 0（超管全局租户），请填写具体租户编码', 'error');
+        $('apiKeyTenant').focus();
         return;
     }
     try {
         const res = await fetch(`${AUTH_BASE}/api-keys`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name })
+            body: JSON.stringify({ name, tenantCode, systemType })
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();

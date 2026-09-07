@@ -1,13 +1,14 @@
 package com.motcs;
 
-import com.motcs.dto.DocumentResponse;
-import com.motcs.dto.DocumentUploadRequest;
-import com.motcs.knowledge.graph.GraphRagQuery;
-import com.motcs.knowledge.graph.GraphRagKnowledgeService;
+import com.motcs.core.document.DocumentResponse;
+import com.motcs.core.document.DocumentUploadRequest;
+import com.motcs.core.knowledge.graph.GraphRagService;
+import com.motcs.core.knowledge.graph.GraphRagRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.util.ObjectUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -41,7 +42,7 @@ class DocumentVectorSearchTest {
     private static final String TEST_SYSTEM_TYPE = "travel-guide";
 
     @Autowired
-    private GraphRagKnowledgeService graphRagKnowledgeService;
+    private GraphRagService graphRagService;
 
     @Test
     void testUploadAndGraphRagQuery() throws IOException, InterruptedException {
@@ -71,9 +72,12 @@ class DocumentVectorSearchTest {
                 .systemType(TEST_SYSTEM_TYPE)
                 .build();
 
-        DocumentResponse response = graphRagKnowledgeService.insertKnowledgeDoc(request).block();
+        DocumentResponse response = graphRagService.insertKnowledgeDoc(request).block();
 
         System.out.println("\n========== 上传结果 ==========");
+        if (ObjectUtils.isEmpty(response)) {
+            fail("分片数量应大于0");
+        }
         System.out.println("状态: " + response.getStatus());
         System.out.println("文档ID: " + response.getDocumentId());
         System.out.println("业务编码: " + response.getDocCode());
@@ -95,10 +99,10 @@ class DocumentVectorSearchTest {
         System.out.println("\n========== GraphRAG 多跳查询 ==========");
         System.out.println("用户问题: " + userQuestion);
         System.out.println("正在执行：向量检索 → 多跳图谱召回 → 合并上下文 → AI 总结...\n");
-        GraphRagQuery ragQuery = GraphRagQuery.builder()
+        GraphRagRequest ragQuery = GraphRagRequest.builder()
                 .question(userQuestion).tenantCode(TEST_TENANT_CODE)
                 .systemType(TEST_SYSTEM_TYPE).build();
-        String answer = graphRagKnowledgeService.graphRagQuery(ragQuery)
+        String answer = graphRagService.graphRagQuery(ragQuery)
                 .blockOptional().orElse("没有回答内容！");
 
         System.out.println("========== AI 系统性总结回答 ==========");
@@ -118,10 +122,10 @@ class DocumentVectorSearchTest {
         System.out.println("用户问题: " + userQuestion);
         System.out.println("正在执行：向量检索 → 多跳图谱召回 → 合并上下文 → AI 总结...\n");
 
-        GraphRagQuery ragQuery = GraphRagQuery.builder()
+        GraphRagRequest ragQuery = GraphRagRequest.builder()
                 .question(userQuestion).tenantCode(TEST_TENANT_CODE)
                 .systemType(TEST_SYSTEM_TYPE).build();
-        String answer = graphRagKnowledgeService.graphRagQuery(ragQuery)
+        String answer = graphRagService.graphRagQuery(ragQuery)
                 .blockOptional().orElse("没有回答内容！");
 
         System.out.println("========== AI 系统性总结回答 ==========");

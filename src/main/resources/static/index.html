@@ -44,17 +44,17 @@
         <div class="flex items-center gap-4">
             <div class="flex items-center gap-2">
                 <label class="text-xs text-gray-400">用户</label>
-                <input id="globalUser" type="text" value="user0001"
-                    class="w-24 px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                <input id="globalUser" type="text" value="xxhzj" readonly title="登录账号，不可修改"
+                    class="w-24 px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg cursor-not-allowed opacity-60">
             </div>
             <div class="flex items-center gap-2">
                 <label class="text-xs text-gray-400">租户</label>
-                <input id="globalTenant" type="text" value="test-tenant"
+                <input id="globalTenant" type="text" value="0"
                     class="w-28 px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
             </div>
             <div class="flex items-center gap-2">
                 <label class="text-xs text-gray-400">系统</label>
-                <input id="globalSystem" type="text" value="文档守护"
+                <input id="globalSystem" type="text" value="other"
                     class="w-28 px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
             </div>
             <div id="healthBadge" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-dark-850 border border-white/10">
@@ -165,6 +165,7 @@
                                     <option value="deepseek-v3.2-think">deepseek-v3.2-think</option>
                                     <option value="deepseek-v4-flash-0731">deepseek-v4-flash-0731</option>
                                 </select>
+                                <span id="aiProviderLabel" class="px-2 py-1 rounded-md bg-primary-600/10 text-primary-300 border border-primary-500/20" title="当前启用的 AI 平台">检测中…</span>
                                 <span>会话: <span id="currentSessionId" class="text-primary-400 font-mono">未开始</span></span>
                             </div>
                             <button id="askBtn" class="w-8 h-8 rounded-lg bg-primary-600 hover:bg-primary-500 flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed">
@@ -371,9 +372,13 @@
                     <h2 class="text-2xl font-bold">API Key 管理</h2>
                     <p class="text-sm text-gray-400 mt-1">对外调用接口的访问凭证：调用方携带该 Key 即可访问 AI 对话接口（登录态或 Key 二选一），明文仅生成时展示一次，超管生成后人工分发</p>
                 </div>
-                <div class="flex gap-3 mb-4">
+                <div class="flex flex-wrap gap-3 mb-4">
                     <input id="apiKeyName" type="text" placeholder="用途备注，如：第三方系统对接"
-                        class="flex-1 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition placeholder-gray-500">
+                        class="flex-1 min-w-40 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition placeholder-gray-500">
+                    <input id="apiKeyTenant" type="text" value="" title="该 Key 绑定的租户编码（对话/上传文档归属），不允许为 0（超管全局租户）"
+                        class="w-28 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="租户编码≠0">
+                    <input id="apiKeySystem" type="text" value="other" title="该 Key 绑定的系统类型（对话/上传文档归属）"
+                        class="w-28 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="系统类型">
                     <button id="apiKeyCreateBtn" class="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition">生成新 Key</button>
                 </div>
                 <div id="apiKeyNewResult" class="hidden p-4 mb-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
@@ -391,6 +396,7 @@
                         <tr class="text-xs text-gray-400 border-b border-white/5">
                             <th class="text-left py-2 font-medium">备注</th>
                             <th class="text-left py-2 font-medium">Key</th>
+                            <th class="text-left py-2 font-medium">租户/系统</th>
                             <th class="text-left py-2 font-medium">状态</th>
                             <th class="text-left py-2 font-medium">创建时间</th>
                             <th class="text-right py-2 font-medium">操作</th>
@@ -457,6 +463,6 @@
     </div>
 </div>
 
-<script src="js/app.js?v=100"></script>
+<script src="js/app.js?v=115"></script>
 </body>
 </html>
