@@ -1,5 +1,7 @@
 # Motcs Graphrag — GraphRAG 多跳智能搜索系统
 
+> **中文** | [English](./README.en.md)
+
 基于 **Spring Boot 4.1.1 + Neo4j + MySQL + Spring AI 2.0.1** 的企业级文档知识库与多跳智能问答系统。采用纯 WebFlux
 响应式架构，支持文档异步入库、企业级双层切分、向量检索 + 知识图谱多跳推理、流式对话、引用溯源等核心能力，
 内置**超管登录 + API Key 鉴权**，接口权限分级管控。

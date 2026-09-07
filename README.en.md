@@ -1,5 +1,7 @@
 # Motcs Graphrag — GraphRAG Multi-Hop Intelligent Search System
 
+> [中文](./README.md) | **English**
+
 An enterprise-grade document knowledge base and multi-hop intelligent Q&A system built on **Spring Boot 4.1.1 + Neo4j + MySQL + Spring AI 2.0.1**. Built with a pure WebFlux reactive architecture, supporting async document ingestion, enterprise-grade dual-layer chunking, vector retrieval + knowledge graph multi-hop reasoning, streaming conversations, and citation traceability. Ships with **admin login + API Key authentication** and tiered API authorization.
 
 ---
