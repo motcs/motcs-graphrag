@@ -51,6 +51,8 @@ An enterprise-grade document knowledge base and multi-hop intelligent Q&A system
 - **API Key chat endpoint**: `POST /keys/v1/chat` — callers only send question / userId / sessionId; tenant & system are resolved from the key binding
 - Four authorization tiers: public / admin-only / login-or-API-Key / API-Key-only (see [Authentication & Authorization](#authentication--authorization))
 - OpenAI-style key design: only SHA-256 hashes stored, plaintext shown once at creation, note/tenant/system required
+- **Key enable/disable**: disable anytime (requests with the key return 401 immediately, temporarily invalid) or re-enable; history is kept
+- **Usage monitoring**: token cost per call (prompt/completion/total) is recorded automatically; admin views per-key summary and detail on a dedicated monitor page
 
 ### Architecture
 
@@ -236,25 +238,12 @@ services:
 
 ## Database Initialization (MySQL)
 
-API Key usage monitoring relies on one table `api_key_usage` (token cost detail per `/keys/v1/chat` call). Run once on first deployment (idempotent):
+API Key usage monitoring relies on one MySQL table `api_key_usage` (auto-created from the entity on first deployment). Features:
 
-```sql
-CREATE TABLE IF NOT EXISTS api_key_usage (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  api_key_id BIGINT NOT NULL COMMENT 'API Key primary key',
-  user_id VARCHAR(100) DEFAULT '' COMMENT 'Caller user code',
-  session_id VARCHAR(100) DEFAULT '' COMMENT 'Session ID',
-  model VARCHAR(100) DEFAULT '' COMMENT 'Model used',
-  prompt_tokens INT DEFAULT 0 COMMENT 'Prompt tokens',
-  completion_tokens INT DEFAULT 0 COMMENT 'Completion tokens',
-  total_tokens INT DEFAULT 0 COMMENT 'Total tokens',
-  created_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT 'Call time',
-  KEY idx_usage_api_key (api_key_id),
-  KEY idx_usage_created (created_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='API Key usage monitoring (token cost detail)';
-```
-
-> If the table is missing, usage records are silently skipped without affecting chat.
+- Records token cost per `/keys/v1/chat` call: prompt, completion and total
+- Records caller user code, session ID, model used and call time
+- Admin can view per-key summary (call count + total tokens) and per-call detail (time-desc paged)
+- Disabled keys produce no new records; history is kept
 
 ---
 
@@ -366,6 +355,7 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 | `PUT` | `/auth/v1/api-keys/{id}/enabled` | Admin | Enable/disable key (Body: {"enabled":true/false}; disabled key returns 401, can be re-enabled anytime) |
 | `GET` | `/auth/v1/api-keys/{id}/usage-summary` | Admin | Usage summary: call count + total tokens (prompt/completion/total) |
 | `GET` | `/auth/v1/api-keys/{id}/usage` | Admin | Usage detail (token cost per call, standard Pageable paging) |
+| `GET` | `/auth/v1/usage-overview` | Admin | Usage overview: per-key usage summary + global totals (monitor page) |
 | `DELETE` | `/auth/v1/api-keys/{id}` | Admin | Delete key (immediately invalid) |
 
 ### AI Platform Probe

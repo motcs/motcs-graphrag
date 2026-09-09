@@ -54,6 +54,8 @@
 - **API Key 专属对话接口**：`POST /keys/v1/chat`，调用方只需传 问题 / 用户编码 / 会话ID，租户与系统类型由 Key 绑定值自动赋值
 - 接口权限分级：公开 / 仅超管登录 / 仅 API Key 三类（详见 [认证与权限控制](#认证与权限控制)）
 - API Key 参考 OpenAI 设计：数据库只存哈希、明文仅生成时展示一次、备注/租户/系统类型必填
+- **API Key 启用/停用**：可随时停用（携带该 Key 的请求立即 401，临时失效）或重新启用，历史记录保留
+- **用量监控**：自动记录每次对话消耗的 token（prompt/completion/total），管理端按 Key 查看汇总与明细（独立监控界面）
 
 ### 系统架构
 
@@ -239,25 +241,12 @@ services:
 
 ## 数据库初始化（MySQL）
 
-API Key 使用监控依赖一张表 `api_key_usage`（每次 `/keys/v1/chat` 对话消耗的 token 明细），首次部署执行（幂等）：
+API Key 使用监控依赖一张 MySQL 表 `api_key_usage`（首次部署时自动按实体建表），功能：
 
-```sql
-CREATE TABLE IF NOT EXISTS api_key_usage (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  api_key_id BIGINT NOT NULL COMMENT 'API Key 主键ID',
-  user_id VARCHAR(100) DEFAULT '' COMMENT '调用方用户编码',
-  session_id VARCHAR(100) DEFAULT '' COMMENT '会话ID',
-  model VARCHAR(100) DEFAULT '' COMMENT '使用的模型',
-  prompt_tokens INT DEFAULT 0 COMMENT '输入 token 数',
-  completion_tokens INT DEFAULT 0 COMMENT '输出 token 数',
-  total_tokens INT DEFAULT 0 COMMENT '总 token 数',
-  created_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '调用时间',
-  KEY idx_usage_api_key (api_key_id),
-  KEY idx_usage_created (created_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='API Key 使用监控（token 消耗明细）';
-```
-
-> 表不存在时用量记录静默跳过，不影响对话功能。
+- 记录每次 `/keys/v1/chat` 对话消耗的 token：输入（prompt）、输出（completion）、总计（total）
+- 记录调用方用户编码、会话 ID、使用的模型、调用时间
+- 管理端按 Key 查看汇总（调用次数 + token 总量）与每次对话明细（时间倒序分页）
+- Key 停用期间不产生新记录，历史记录保留
 
 ---
 
@@ -369,6 +358,7 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 | `PUT`    | `/auth/v1/api-keys/{id}/enabled` | 仅登录     | 启用/停用 Key（Body：{"enabled":true/false}；停用后临时失效 401，可随时重新开启） |
 | `GET`    | `/auth/v1/api-keys/{id}/usage-summary` | 仅登录 | Key 使用汇总：调用次数 + 总 token（prompt/completion/total） |
 | `GET`    | `/auth/v1/api-keys/{id}/usage` | 仅登录       | Key 使用明细（每次对话的 token 消耗，标准 Pageable 分页）   |
+| `GET`    | `/auth/v1/usage-overview`    | 仅登录         | 用量监控总览：全部 Key 的用量汇总 + 全局合计（监控界面）   |
 | `DELETE` | `/auth/v1/api-keys/{id}`    | 仅登录         | 删除 Key（立即失效）                                        |
 
 ### AI 平台探测
