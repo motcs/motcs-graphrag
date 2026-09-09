@@ -1,5 +1,7 @@
 package com.motcs.core.document;
 
+import com.motcs.commons.utils.AnyDocConverterUtil;
+import com.motcs.commons.utils.EnterpriseChunker;
 import com.motcs.commons.utils.FileUtils;
 import com.motcs.commons.utils.Utils;
 import com.motcs.core.knowledge.KnowledgeEntity;
@@ -7,8 +9,6 @@ import com.motcs.core.knowledge.chunk.DocumentChunk;
 import com.motcs.core.knowledge.chunk.DocumentChunkRepository;
 import com.motcs.core.knowledge.record.ChatMessage;
 import com.motcs.core.knowledge.record.ChatMessageRepository;
-import com.motcs.commons.utils.AnyDocConverterUtil;
-import com.motcs.commons.utils.EnterpriseChunker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
@@ -185,7 +185,7 @@ public class DocumentService {
                 log.info("文档已成功添加到向量库，共 {} 个细粒度片段", documents.size());
 
                 // 5. 删除占位分片
-                chunkRepository.deleteById(context.getPlaceholderId());
+                this.chunkRepository.deleteById(context.getPlaceholderId());
 
                 // 6. 保存所有分片到图谱（细粒度 + 粗粒度）
                 saveChunksToGraph(allChunks, documents, documentId, request.getDocCode(),
@@ -199,12 +199,11 @@ public class DocumentService {
                 failUpload(context, e.getMessage());
                 throw new RuntimeException(e);
             }
-        })
-        // 整个处理块均为阻塞操作（文件转换/切分/向量入库/分片库JPA调用），
-        // 显式切到 boundedElastic 线程池执行，避免在 Netty 事件循环等非阻塞线程上
-        // 直接执行阻塞调用（如 chunkRepository.deleteById）导致线程匮乏
-        .subscribeOn(Schedulers.boundedElastic())
-        .then();
+
+            // 整个处理块均为阻塞操作（文件转换/切分/向量入库/分片库JPA调用），
+            // 显式切到 boundedElastic 线程池执行，避免在 Netty 事件循环等非阻塞线程上
+            // 直接执行阻塞调用（如 chunkRepository.deleteById）导致线程匮乏
+        }).subscribeOn(Schedulers.boundedElastic()).then();
     }
 
     /**
@@ -230,7 +229,7 @@ public class DocumentService {
      */
     public void markDocumentSuccess(String documentId) {
         if (documentId != null) {
-            chunkRepository.updateStatusByDocumentId(documentId, "SUCCESS", null);
+            this.chunkRepository.updateStatusByDocumentId(documentId, "SUCCESS", null);
             log.info("文档处理完成，已标记 documentId={} 为 SUCCESS", documentId);
         }
     }
@@ -240,9 +239,9 @@ public class DocumentService {
      */
     private void deleteByDocCodeSync(String docCode) {
         try {
-            List<String> chunkIds = chunkRepository.findChunkIdsByDocCode(docCode);
-            if (!chunkIds.isEmpty()) vectorStore.delete(chunkIds);
-            chunkRepository.deleteChunksByDocCode(docCode);
+            List<String> chunkIds = this.chunkRepository.findChunkIdsByDocCode(docCode);
+            if (!chunkIds.isEmpty()) this.vectorStore.delete(chunkIds);
+            this.chunkRepository.deleteChunksByDocCode(docCode);
             log.info("重新上传前已清理 docCode={} 的旧数据（{} 个分片）", docCode, chunkIds.size());
         } catch (Exception e) {
             log.warn("重新上传前清理旧数据失败: {}", e.getMessage());

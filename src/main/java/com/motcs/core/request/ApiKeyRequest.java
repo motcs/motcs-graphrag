@@ -7,7 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * 创建 API Key 请求 DTO（POST /api/auth/api-keys）
+ * 创建 API Key 请求 DTO（POST /auth/v1/api-keys）
  * 备注/租户编码/系统类型均必填
  */
 @Data

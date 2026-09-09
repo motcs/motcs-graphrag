@@ -25,23 +25,23 @@ import java.util.UUID;
 
 /**
  * 认证与 API Key 管理接口
- * - POST /api/auth/login    超管登录（账号密码来自配置 app.auth.*）
- * - POST /api/auth/logout   退出登录
- * - GET  /api/auth/me       当前登录状态
- * - GET  /api/auth/api-keys 已生成的 Key 列表（仅掩码）
- * - POST /api/auth/api-keys 生成新 Key（返回明文一次）
- * - DELETE /api/auth/api-keys/{id} 删除 Key
+ * - POST /auth/v1/login    超管登录（账号密码来自配置 app.auth.*）
+ * - POST /auth/v1/logout   退出登录
+ * - GET  /auth/v1/me       当前登录状态
+ * - GET  /auth/v1/api-keys 已生成的 Key 列表（仅掩码）
+ * - POST /auth/v1/api-keys 生成新 Key（返回明文一次）
+ * - DELETE /auth/v1/api-keys/{id} 删除 Key
  */
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/auth")
+@RequestMapping("/auth/v1")
 public class AuthController {
 
     private final TokenStore tokenStore;
     private final ApiKeyService apiKeyService;
 
     /**
-     * 超管登录（HTTP Basic Auth）：POST /api/auth/login 携带
+     * 超管登录（HTTP Basic Auth）：POST /auth/v1/login 携带
      * Authorization: Basic base64(username:password)，由 Spring Security Basic 认证
      * 过滤链完成校验，认证通过后进入本方法：以 WebSession id 作为 x-token，
      * 登记到 TokenStore（带过期时间，跟随会话空闲超时）并返回给前端；
@@ -109,9 +109,9 @@ public class AuthController {
     @PostMapping("/api-keys")
     public Mono<ResponseEntity<?>> createApiKey(@RequestBody ApiKeyRequest request,
                                                 @AuthenticationPrincipal Object principal) {
-        String name = ObjectUtils.isEmpty(request.getName()) ? request.getName().trim() : "";
-        String tenantCode = ObjectUtils.isEmpty(request.getTenantCode()) ? request.getTenantCode().trim() : "";
-        String systemType = ObjectUtils.isEmpty(request.getSystemType()) ? request.getSystemType().trim() : "";
+        String name = ObjectUtils.isEmpty(request.getName()) ? "" : request.getName().trim();
+        String tenantCode = ObjectUtils.isEmpty(request.getTenantCode()) ? "" : request.getTenantCode().trim();
+        String systemType = ObjectUtils.isEmpty(request.getSystemType()) ? "" : request.getSystemType().trim();
         if (name.isEmpty() || tenantCode.isEmpty() || systemType.isEmpty()) {
             return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false,
                     "message", "备注（name）、租户编码（tenantCode）、系统类型（systemType）均必填")));

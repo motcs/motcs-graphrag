@@ -27,22 +27,22 @@ import java.util.UUID;
 /**
  * API Key 专用对话接口（GraphRAG 问答，SSE 流式返回）
  * <pre>
- *   POST /api/keys/chat
+ *   POST /keys/v1/chat
  *   请求头：Authorization: Bearer sk-... 或 X-API-Key: sk-...
  *   Body: {"question":"...","userId":"...","sessionId":"...(可选)","model":"...(可选)"}
  * </pre>
  * 设计要点：
  * - 租户编码 / 系统类型由 API Key 绑定值自动赋值，调用方只需传 问题/用户编码/会话ID；
  * - 对话历史按 API Key 隔离（chat_message.api_key_id = 该 Key 的 id）；
- * - 仅 API Key 认证可访问（SecurityConfiguration /api/keys/** = hasRole(API_KEY)，
+ * - 仅 API Key 认证可访问（SecurityConfiguration /keys/v1/** = hasRole(API_KEY)，
  * 登录用户无 API_KEY 角色将被 403），API Key 请求自动豁免 CSRF；
- * - SSE 事件格式与 /api/documents/query 一致：
+ * - SSE 事件格式与 /documents/v1/query 一致：
  * {"type":"session","sessionId":...} → {"type":"sources","sources":[...]}
  * → {"type":"reasoning"|"content","text":...}
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/keys")
+@RequestMapping("/keys/v1")
 @RequiredArgsConstructor
 public class ApiChatController {
 

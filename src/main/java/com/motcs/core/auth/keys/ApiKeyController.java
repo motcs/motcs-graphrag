@@ -16,18 +16,18 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * API Key 专属对话历史接口（请求头必须携带有效 API Key，登录态不可访问，见 SecurityConfiguration /api/keys/**）
+ * API Key 专属对话历史接口（请求头必须携带有效 API Key，登录态不可访问，见 SecurityConfiguration /keys/v1/**）
  * <pre>
- *   GET    /api/keys/conversations                     按 apikey + 用户名 + 租户 + 系统类型 查询会话列表（后三者可选）
- *   GET    /api/keys/session?sessionId=  按会话ID查询消息（仅本 Key 创建的）
- *   DELETE /api/keys/session/{sessionId} 删除单个会话（仅限本 Key 创建的，否则 404）
- *   DELETE /api/keys/batch               批量删除（Body: ["sess1","sess2"]，仅删本 Key 的，返回实际删除数）
+ *   GET    /keys/v1/conversations                     按 apikey + 用户名 + 租户 + 系统类型 查询会话列表（后三者可选）
+ *   GET    /keys/v1/session?sessionId=  按会话ID查询消息（仅本 Key 创建的）
+ *   DELETE /keys/v1/session/{sessionId} 删除单个会话（仅限本 Key 创建的，否则 404）
+ *   DELETE /keys/v1/batch               批量删除（Body: ["sess1","sess2"]，仅删本 Key 的，返回实际删除数）
  * </pre>
  * 鉴权头：Authorization: Bearer sk-... 或 X-API-Key: sk-...（解析规则与 SecurityConfiguration.extractApiKey 一致）
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/keys")
+@RequestMapping("/keys/v1")
 @RequiredArgsConstructor
 public class ApiKeyController {
 

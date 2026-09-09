@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 
 /**
- * 批量删除会话请求 DTO（DELETE /api/documents/conversations/batch）
+ * 批量删除会话请求 DTO（DELETE /documents/v1/conversations/batch）
  */
 @Data
 @Builder

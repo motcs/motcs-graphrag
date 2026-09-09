@@ -28,7 +28,7 @@ import java.util.Map;
  * 均可用环境变量 AI_PROVIDER 覆盖。
  */
 @RestController
-@RequestMapping("/api/ai")
+@RequestMapping("/ai/v1")
 public class AiProviderController {
 
     @Value("${app.ai.provider:zhipu}")

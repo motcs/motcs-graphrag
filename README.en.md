@@ -11,7 +11,7 @@ An enterprise-grade document knowledge base and multi-hop intelligent Q&A system
 ### Intelligent Q&A
 
 - Multi-turn conversations with automatic context via `sessionId`
-- **Selectable models**: dropdown below the input toggles `deepseek-v3.2` / `deepseek-v3.2-think` / `deepseek-v4-flash-0731` (options are served by `GET /api/ai/provider` based on the active AI platform, preventing invalid selections)
+- **Selectable models**: dropdown below the input toggles `deepseek-v3.2` / `deepseek-v3.2-think` / `deepseek-v4-flash-0731` (options are served by `GET /ai/v1/provider` based on the active AI platform, preventing invalid selections)
 - SSE streaming output (JSON events: session / sources / reasoning / content) with real-time Markdown rendering
 - Dual-path retrieval: vector search + Neo4j multi-hop graph recall
 - Each answer displays cited knowledge chunks, clickable to view source (with page navigation)
@@ -48,7 +48,7 @@ An enterprise-grade document knowledge base and multi-hop intelligent Q&A system
 
 - **Admin login**: single management account (env-configured). Issues an expiring `x-token` on success; subsequent requests carry the `x-token` header
 - **API Key auth**: admins generate keys for manual distribution; callers use the key to access AI chat endpoints. **Each key binds a tenant + system type**, and chat automatically searches that tenant's knowledge
-- **API Key chat endpoint**: `POST /api/keys/chat` — callers only send question / userId / sessionId; tenant & system are resolved from the key binding
+- **API Key chat endpoint**: `POST /keys/v1/chat` — callers only send question / userId / sessionId; tenant & system are resolved from the key binding
 - Four authorization tiers: public / admin-only / login-or-API-Key / API-Key-only (see [Authentication & Authorization](#authentication--authorization))
 - OpenAI-style key design: only SHA-256 hashes stored, plaintext shown once at creation, note/tenant/system required
 
@@ -247,7 +247,7 @@ The system uses **Spring Security (WebFlux)** dual-channel authentication: **adm
 
 | Method | Description |
 |--------|-------------|
-| Admin login | `POST /api/auth/login` with **HTTP Basic Auth** (`Authorization: Basic base64(username:password)`), verified by Spring Security Basic filter (`AUTH_USERNAME` / `AUTH_PASSWORD`). Returns an **x-token**; subsequent requests carry the `x-token` header |
+| Admin login | `POST /auth/v1/login` with **HTTP Basic Auth** (`Authorization: Basic base64(username:password)`), verified by Spring Security Basic filter (`AUTH_USERNAME` / `AUTH_PASSWORD`). Returns an **x-token**; subsequent requests carry the `x-token` header |
 | API Key | `Authorization: Bearer sk-...` or `X-API-Key: sk-...` header; stateless validation (SHA-256 hash comparison per request). For machines / third-party callers |
 
 ### 2. API Key Design (OpenAI-style)
@@ -256,7 +256,7 @@ The system uses **Spring Security (WebFlux)** dual-channel authentication: **adm
 - **Storage**: only the SHA-256 hash and a prefix mask (e.g. `sk-Ab3Xy7...`) are stored; **the plaintext is returned once at creation** — regenerate if lost
 - **Note required**: `name` is mandatory, empty returns `400`
 - **Tenant/system required**: must bind `tenantCode` and `systemType` at creation (used for chat/doc ownership); **tenant `0` is forbidden** (admin global tenant), returns `400`
-- **Authorization**: API Key identity is `ROLE_API_KEY` — it can access the AI chat endpoints and `/api/keys/**`; admin endpoints return `403`
+- **Authorization**: API Key identity is `ROLE_API_KEY` — it can access the AI chat endpoints and `/keys/v1/**`; admin endpoints return `403`
 - **Management**: only the admin can generate / list / delete keys (deleting a key instantly invalidates requests carrying it)
 
 ### 3. Endpoint Authorization Matrix
@@ -264,13 +264,13 @@ The system uses **Spring Security (WebFlux)** dual-channel authentication: **adm
 | Path | Access |
 |------|--------|
 | `/`, `/index.html`, `/css/**`, `/js/**`, `/img/**`, favicon, Swagger (`/v3/api-docs/**`, `/swagger-ui/**`, `/webjars/**`) | **Public** |
-| `POST /api/auth/login` | **Public** |
-| `GET /api/documents/health` (health check) | **Public** |
-| `GET /api/ai/provider` (AI platform probe, drives model dropdown before login) | **Public** |
-| `POST /api/auth/logout`, `GET /api/auth/me` | **Admin only** |
-| `GET/POST /api/auth/api-keys`, `DELETE /api/auth/api-keys/{id}` (key management) | **Admin only** |
-| **`POST /api/documents/query` (AI chat)** | **Login OR valid API Key** |
-| **`/api/keys/**` (API-Key-only: `/chat` + `/conversations`)** | **API Key only** (admin login gets 403) |
+| `POST /auth/v1/login` | **Public** |
+| `GET /documents/v1/health` (health check) | **Public** |
+| `GET /ai/v1/provider` (AI platform probe, drives model dropdown before login) | **Public** |
+| `POST /auth/v1/logout`, `GET /auth/v1/me` | **Admin only** |
+| `GET/POST /auth/v1/api-keys`, `DELETE /auth/v1/api-keys/{id}` (key management) | **Admin only** |
+| **`POST /documents/v1/query` (AI chat)** | **Login OR valid API Key** |
+| **`/keys/v1/**` (API-Key-only: `/chat` + `/conversations`)** | **API Key only** (admin login gets 403) |
 | All other business endpoints (upload/list/delete/stats/graph/sessions) | **Admin only** |
 
 ### 4. Usage Examples
@@ -278,7 +278,7 @@ The system uses **Spring Security (WebFlux)** dual-channel authentication: **adm
 **Admin login (Basic Auth → x-token)**
 
 ```bash
-curl -X POST http://localhost:8080/api/auth/login \
+curl -X POST http://localhost:8080/auth/v1/login \
   -H "Authorization: Basic $(echo -n 'admin:your_password' | base64)"
 ```
 
@@ -287,12 +287,12 @@ curl -X POST http://localhost:8080/api/auth/login \
 Returns: `{"token":"xxx","expires":7200,"lastAccessTime":...}`. Carry `x-token` in subsequent requests.
 Tokens are registered in TokenStore with a TTL (default 2h, `AUTH_TOKEN_TTL`), sliding-expired on each valid use.
 
-**CSRF (double-submit cookie, POST only)**: the backend issues `Set-Cookie: XSRF-TOKEN=...` (httpOnly=false). The frontend reads the cookie and sends `X-CSRF-TOKEN` on authenticated **POST** requests; the backend compares header vs cookie. **GET and other methods are not checked.** Exempt: login, `/api/keys/**`, and **API Key requests (`Authorization: Bearer` / `X-API-Key`)**.
+**CSRF (double-submit cookie, POST only)**: the backend issues `Set-Cookie: XSRF-TOKEN=...` (httpOnly=false). The frontend reads the cookie and sends `X-CSRF-TOKEN` on authenticated **POST** requests; the backend compares header vs cookie. **GET and other methods are not checked.** Exempt: login, `/keys/v1/**`, and **API Key requests (`Authorization: Bearer` / `X-API-Key`)**.
 
 **AI chat with an API Key (SSE)**
 
 ```bash
-curl -N -X POST http://localhost:8080/api/documents/query \
+curl -N -X POST http://localhost:8080/documents/v1/query \
   -H "Authorization: Bearer sk-Ab3Xy7..." \
   -H "Content-Type: application/json" \
   -d '{"question":"What is multi-hop retrieval?","userId":"user0001","tenantCode":"test-tenant","systemType":"docs"}'
@@ -301,7 +301,7 @@ curl -N -X POST http://localhost:8080/api/documents/query \
 **API-Key-only chat (tenant/system auto-resolved from the key; just send question / userId / sessionId)**
 
 ```bash
-curl -N -X POST http://localhost:8080/api/keys/chat \
+curl -N -X POST http://localhost:8080/keys/v1/chat \
   -H "X-API-Key: sk-Ab3Xy7..." \
   -H "Content-Type: application/json" \
   -d '{"question":"What was discussed in the meeting?","userId":"test0101","sessionId":"sess_001"}'
@@ -310,7 +310,7 @@ curl -N -X POST http://localhost:8080/api/keys/chat \
 **Create an API Key (admin login; note/tenant/system required)**
 
 ```bash
-curl -X POST http://localhost:8080/api/auth/api-keys \
+curl -X POST http://localhost:8080/auth/v1/api-keys \
   -H "Content-Type: application/json" \
   -H "x-token: tok-xxx..." \
   -d '{"name":"Third-party integration","tenantCode":"410725","systemType":"congress"}'
@@ -318,7 +318,7 @@ curl -X POST http://localhost:8080/api/auth/api-keys \
 
 **Unauthenticated business call** → `401` `{"code":401,"message":"未登录或登录已过期"}`
 **API Key accessing admin endpoints** → `403` `{"code":403,"message":"无权限访问"}`
-**Admin login accessing `/api/keys/**`** → `403` (API Key only)
+**Admin login accessing `/keys/v1/**`** → `403` (API Key only)
 
 ---
 
@@ -330,36 +330,36 @@ curl -X POST http://localhost:8080/api/auth/api-keys \
 
 | Method | Path | Access | Description |
 |--------|------|--------|-------------|
-| `POST` | `/api/auth/login` | Public | Admin login (Basic Auth) |
-| `POST` | `/api/auth/logout` | Admin | Logout (invalidates x-token) |
-| `GET` | `/api/auth/me` | Admin | Current login state |
-| `GET` | `/api/auth/api-keys` | Admin | Key list (masked only) |
-| `POST` | `/api/auth/api-keys` | Admin | Create key (Body: name/**tenantCode**/**systemType** required; plaintext returned once) |
-| `DELETE` | `/api/auth/api-keys/{id}` | Admin | Delete key (immediately invalid) |
+| `POST` | `/auth/v1/login` | Public | Admin login (Basic Auth) |
+| `POST` | `/auth/v1/logout` | Admin | Logout (invalidates x-token) |
+| `GET` | `/auth/v1/me` | Admin | Current login state |
+| `GET` | `/auth/v1/api-keys` | Admin | Key list (masked only) |
+| `POST` | `/auth/v1/api-keys` | Admin | Create key (Body: name/**tenantCode**/**systemType** required; plaintext returned once) |
+| `DELETE` | `/auth/v1/api-keys/{id}` | Admin | Delete key (immediately invalid) |
 
 ### AI Platform Probe
 
 | Method | Path | Access | Description |
 |--------|------|--------|-------------|
-| `GET` | `/api/ai/provider` | Public | Active AI platform (provider/providerName) + model list (chatModels) driving the frontend dropdown |
+| `GET` | `/ai/v1/provider` | Public | Active AI platform (provider/providerName) + model list (chatModels) driving the frontend dropdown |
 
 ### Document Management
 
 | Method | Path | Access | Description |
 |--------|------|--------|-------------|
-| `POST` | `/api/documents/upload` | Admin | Upload (multipart/form-data: file/title/description/docCode/tenantCode/systemType/userId) |
-| `POST` | `/api/documents/upload/url` | Admin | Upload via URL (Body: FileUploadRequest) |
-| `GET` | `/api/documents/list` | Admin | List documents (tenantCode + systemType; tenant 0 → all) |
-| `DELETE` | `/api/documents/docCode/{docCode}` | Admin | Delete by docCode (cascade: chunks/vectors/entities/relations/files) |
-| `GET` | `/api/documents/stats` | Admin | Document statistics (lightweight aggregation) |
-| `GET` | `/api/documents/health` | Public | Health check |
+| `POST` | `/documents/v1/upload` | Admin | Upload (multipart/form-data: file/title/description/docCode/tenantCode/systemType/userId) |
+| `POST` | `/documents/v1/upload/url` | Admin | Upload via URL (Body: FileUploadRequest) |
+| `GET` | `/documents/v1/list` | Admin | List documents (tenantCode + systemType; tenant 0 → all) |
+| `DELETE` | `/documents/v1/docCode/{docCode}` | Admin | Delete by docCode (cascade: chunks/vectors/entities/relations/files) |
+| `GET` | `/documents/v1/stats` | Admin | Document statistics (lightweight aggregation) |
+| `GET` | `/documents/v1/health` | Public | Health check |
 
 ### Intelligent Q&A
 
 | Method | Path | Access | Description |
 |--------|------|--------|-------------|
-| `POST` | `/api/documents/query` | **Login OR API Key** | GraphRAG Q&A (SSE; params: question/userId/sessionId/tenantCode/systemType/model optional) |
-| `POST` | `/api/keys/chat` | **API Key only** | API-Key-only Q&A (SSE; params: question/userId/sessionId optional/model optional; tenant/system from key binding; history isolated per key) |
+| `POST` | `/documents/v1/query` | **Login OR API Key** | GraphRAG Q&A (SSE; params: question/userId/sessionId/tenantCode/systemType/model optional) |
+| `POST` | `/keys/v1/chat` | **API Key only** | API-Key-only Q&A (SSE; params: question/userId/sessionId optional/model optional; tenant/system from key binding; history isolated per key) |
 
 `model` values: `deepseek-v3.2` / `deepseek-v3.2-think` / `deepseek-v4-flash-0731` (defaults to the configured model).
 
@@ -376,28 +376,28 @@ curl -X POST http://localhost:8080/api/auth/api-keys \
 
 | Method | Path | Access | Description |
 |--------|------|--------|-------------|
-| `POST` | `/api/documents/conversations` | Admin | Manually save a conversation (frontend interruption) |
-| `GET` | `/api/documents/sessions` | Admin | Session list (userId + tenantCode + systemType, distinct sessionId) |
-| `GET` | `/api/documents/conversations/session` | Admin | Full multi-turn conversation by sessionId |
-| `GET` | `/api/documents/conversations` | Admin | Conversation records by user |
-| `PUT` | `/api/documents/conversations/session/{sessionId}/title` | Admin | Update session title (Body: {"title":"..."}) |
-| `DELETE` | `/api/documents/conversations/session/{sessionId}` | Admin | Delete a session (all its records) |
-| `DELETE` | `/api/documents/conversations/batch` | Admin | Batch delete (Body: sessionId array) |
+| `POST` | `/documents/v1/conversations` | Admin | Manually save a conversation (frontend interruption) |
+| `GET` | `/documents/v1/sessions` | Admin | Session list (userId + tenantCode + systemType, distinct sessionId) |
+| `GET` | `/documents/v1/conversations/session` | Admin | Full multi-turn conversation by sessionId |
+| `GET` | `/documents/v1/conversations` | Admin | Conversation records by user |
+| `PUT` | `/documents/v1/conversations/session/{sessionId}/title` | Admin | Update session title (Body: {"title":"..."}) |
+| `DELETE` | `/documents/v1/conversations/session/{sessionId}` | Admin | Delete a session (all its records) |
+| `DELETE` | `/documents/v1/conversations/batch` | Admin | Batch delete (Body: sessionId array) |
 
 ### Conversation History (API-Key-only; must carry the key; only records created by this key)
 
 | Method | Path | Access | Description |
 |--------|------|--------|-------------|
-| `GET` | `/api/keys/conversations` | API Key only | Session list (apikey + userId + tenantCode + systemType; last three optional) |
-| `GET` | `/api/keys/conversations/session` | API Key only | Messages by sessionId (404 if not owned by this key) |
-| `DELETE` | `/api/keys/conversations/session/{sessionId}` | API Key only | Delete a session (only if owned by this key, else 404) |
-| `DELETE` | `/api/keys/conversations/batch` | API Key only | Batch delete (Body: sessionId array; only this key's sessions; returns actual count) |
+| `GET` | `/keys/v1/conversations` | API Key only | Session list (apikey + userId + tenantCode + systemType; last three optional) |
+| `GET` | `/keys/v1/conversations/session` | API Key only | Messages by sessionId (404 if not owned by this key) |
+| `DELETE` | `/keys/v1/conversations/session/{sessionId}` | API Key only | Delete a session (only if owned by this key, else 404) |
+| `DELETE` | `/keys/v1/conversations/batch` | API Key only | Batch delete (Body: sessionId array; only this key's sessions; returns actual count) |
 
 ### Knowledge Graph
 
 | Method | Path | Access | Description |
 |--------|------|--------|-------------|
-| `GET` | `/api/documents/graph` | Admin | Graph data (tenantCode + systemType + limit, default 200; tenant 0 → all relations) |
+| `GET` | `/documents/v1/graph` | Admin | Graph data (tenantCode + systemType + limit, default 200; tenant 0 → all relations) |
 
 ---
 
@@ -411,8 +411,8 @@ The chat endpoints support switching between `deepseek-v3.2`, `deepseek-v3.2-thi
 | `deepseek-v3.2-think` | Deep reasoning, for complex questions | Config default (`AI_CHAT_MODEL`) |
 | `deepseek-v4-flash-0731` | Lightweight fast variant | - |
 
-- **Frontend**: dropdown below the input; options come from `GET /api/ai/provider` (per active platform); the selection is submitted as `model`
-- **Backend**: the `model` field of `/api/documents/query` and `/api/keys/chat` overrides the default; empty uses `AI_CHAT_MODEL`
+- **Frontend**: dropdown below the input; options come from `GET /ai/v1/provider` (per active platform); the selection is submitted as `model`
+- **Backend**: the `model` field of `/documents/v1/query` and `/keys/v1/chat` overrides the default; empty uses `AI_CHAT_MODEL`
 - **Note**: all three models must be **manually enabled** in the Qianfan console; otherwise you get `401 The model does not exist or you do not have access to it.`
 
 ---
@@ -495,10 +495,10 @@ A: The batch timeout budget now matches `AI_TIMEOUT` (300s per batch). Thinking 
 A: Not logged in or session expired. The system uses custom JSON 401 (no native popup). Re-login in the UI, or send `Authorization: Bearer sk-...` / `X-API-Key: sk-...`.
 
 **Q: API Key gets 403 无权限访问 (no permission)**
-A: API Keys can only access the AI chat endpoints (`/api/documents/query`, `/api/keys/chat`) and `/api/keys/**` history endpoints. Upload/list/graph/session management are admin-only.
+A: API Keys can only access the AI chat endpoints (`/documents/v1/query`, `/keys/v1/chat`) and `/keys/v1/**` history endpoints. Upload/list/graph/session management are admin-only.
 
 **Q: 403 `CSRF 校验失败` on POST after login**
-A: Authenticated POST/PUT/DELETE requests must send `X-CSRF-TOKEN` equal to the `XSRF-TOKEN` cookie. API Key requests and `/api/keys/**` are CSRF-exempt.
+A: Authenticated POST/PUT/DELETE requests must send `X-CSRF-TOKEN` equal to the `XSRF-TOKEN` cookie. API Key requests and `/keys/v1/**` are CSRF-exempt.
 
 **Q: Document stays "Processing" forever**
 A: Graph construction is async; the frontend polls every 30s. If stuck, check logs for entity extraction timeout or an expired API key.
@@ -542,12 +542,12 @@ motcs-graphrag/
 │       │   │   ├── ApiKeyInfo.java          # Creation result (plaintext, once)
 │       │   │   ├── ApiKeyRepository.java    # R2DBC repository
 │       │   │   ├── ApiKeyService.java       # Generate/validate/list/delete
-│       │   │   └── ApiKeyController.java    # /api/keys/conversations (key-only history)
+│       │   │   └── ApiKeyController.java    # /keys/v1/conversations (key-only history)
 │       │   └── token/
 │       │       ├── AuthenticationToken.java # Login response (token/expires/lastAccessTime)
 │       │       └── TokenStore.java          # x-token session store (sliding expiry)
 │       ├── chat/
-│       │   └── ApiChatController.java       # POST /api/keys/chat (key-only chat, SSE)
+│       │   └── ApiChatController.java       # POST /keys/v1/chat (key-only chat, SSE)
 │       ├── document/
 │       │   ├── DocumentController.java      # Documents / Q&A / conversations / graph
 │       │   ├── DocumentService.java         # Async ingestion / cascade delete / stats
@@ -557,8 +557,8 @@ motcs-graphrag/
 │       │   ├── chunk/DocumentChunk.java / DocumentChunkRepository.java # Chunks (tenant-isolated Cypher)
 │       │   ├── graph/GraphRagRequest.java / GraphRagResult.java / GraphRagService.java  # GraphRAG core
 │       │   └── record/ChatMessage.java / ChatMessageRepository.java / ChatSessionSummary.java / ChatSessionSummaryRepository.java
-│       ├── provider/AiProviderController.java   # GET /api/ai/provider (AI platform probe)
-│       └── request/ConversationRequest.java / SessionRequest.java / FileUploadRequest.java / ApiKeyRequest.java
+│       ├── provider/AiProviderController.java   # GET /ai/v1/provider (AI platform probe)
+│       └── request/ SessionRequest.java / FileUploadRequest.java / ApiKeyRequest.java
 ├── src/main/resources/
 │   ├── application.yaml                    # Base config (Jackson/virtual threads/HTTP2/auth)
 │   ├── application-baidu.yaml              # Baidu Qianfan profile (--spring.profiles.active=baidu)

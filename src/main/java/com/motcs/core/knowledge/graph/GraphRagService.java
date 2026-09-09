@@ -466,23 +466,20 @@ public class GraphRagService {
             }
 
             // 触发完整异步处理链：文档处理 → 图谱构建 → 标记SUCCESS；失败则清理并标记FAILED
+            Mono<Object> fromRunnable = Mono.fromRunnable(() -> {
+                if (request.getDocCode() != null && !request.getDocCode().isBlank()) {
+                    buildKnowledgeGraph(request.getDocCode());
+                    log.info("图谱构建完成: docCode={}", request.getDocCode());
+                }
+            });
+            Mono<Object> other = Mono.fromRunnable(() -> this.documentService
+                    .markDocumentSuccess(context.getDocumentId()));
             this.documentService.processDocumentAsync(request, context)
-                    .then(Mono.fromRunnable(() -> {
-                        if (request.getDocCode() != null && !request.getDocCode().isBlank()) {
-                            buildKnowledgeGraph(request.getDocCode());
-                            log.info("图谱构建完成: docCode={}", request.getDocCode());
-                        }
-                    }))
-                    .then(Mono.fromRunnable(() ->
-                            documentService.markDocumentSuccess(context.getDocumentId())))
-                    .onErrorResume(e -> {
+                    .then(fromRunnable).then(other).onErrorResume(e -> {
                         log.error("异步文档处理失败: {}", e.getMessage(), e);
-                        documentService.failUpload(context, e.getMessage());
+                        this.documentService.failUpload(context, e.getMessage());
                         return Mono.empty();
-                    })
-                    .subscribeOn(Schedulers.boundedElastic())
-                    .subscribe();
-
+                    }).subscribeOn(Schedulers.boundedElastic()).subscribe();
             log.info("文档已提交异步处理: documentId={}, fileName={}, status=PROCESSING",
                     response.getDocumentId(), response.getFileName());
             return Mono.just(response);
@@ -699,12 +696,12 @@ public class GraphRagService {
         if (sessionId == null || sessionId.isBlank()) return "（无历史对话）";
 
         // 1. 准确统计会话总条数
-        Long count = chatMessageRepository.countBySessionId(sessionId).block();
+        Long count = this.chatMessageRepository.countBySessionId(sessionId).block();
         int totalCount = count != null ? count.intValue() : 0;
         if (totalCount == 0) return "（无历史对话）";
 
         // 2. 取最近5条原始对话（倒序查询后反转为正序）
-        List<ChatMessage> recent = chatMessageRepository
+        List<ChatMessage> recent = this.chatMessageRepository
                 .findRecentBySessionId(sessionId, HISTORY_KEEP_RECENT, 0).collectList().block();
         if (recent == null || recent.isEmpty()) return "（无历史对话）";
         Collections.reverse(recent);
@@ -722,7 +719,7 @@ public class GraphRagService {
         // 3. 超过5条，查询已有摘要
         ChatSessionSummary summaryRecord = null;
         try {
-            summaryRecord = summaryRepository.findBySessionId(sessionId).block();
+            summaryRecord = this.summaryRepository.findBySessionId(sessionId).block();
         } catch (Exception e) {
             log.warn("查询会话摘要失败: {}", e.getMessage());
         }
@@ -742,7 +739,7 @@ public class GraphRagService {
                     ? summaryRecord.getSummary() : "";
             Mono.fromRunnable(() -> {
                 // 加载老对话（正序，取最早的 olderCount 条，即除最近5条外的全部）
-                List<ChatMessage> older = chatMessageRepository
+                List<ChatMessage> older = this.chatMessageRepository
                         .findBySessionId(sessionId, olderCount).collectList().block();
                 if (older == null || older.isEmpty()) return;
                 String olderText = older.stream()
@@ -788,7 +785,7 @@ public class GraphRagService {
      */
     private void saveSummary(String sessionId, String summary, int totalCount) {
         try {
-            ChatSessionSummary existing = summaryRepository.findBySessionId(sessionId).block();
+            ChatSessionSummary existing = this.summaryRepository.findBySessionId(sessionId).block();
             LocalDateTime now = LocalDateTime.now();
             if (existing == null) {
                 ChatSessionSummary record = new ChatSessionSummary();
@@ -797,12 +794,12 @@ public class GraphRagService {
                 record.setLastMessageCount(totalCount);
                 record.setCreatedTime(now);
                 record.setUpdatedTime(now);
-                summaryRepository.save(record).block();
+                this.summaryRepository.save(record).block();
             } else {
                 existing.setSummary(summary);
                 existing.setLastMessageCount(totalCount);
                 existing.setUpdatedTime(now);
-                summaryRepository.save(existing).block();
+                this.summaryRepository.save(existing).block();
             }
         } catch (Exception e) {
             log.warn("保存会话摘要失败: {}", e.getMessage());
@@ -836,7 +833,7 @@ public class GraphRagService {
             sourcesNode = null;
         }
         // 查询该会话已有的标题（取最新一条记录的title），新记录继承相同标题
-        return chatMessageRepository.findRecentBySessionId(request.getSessionId(), 1, 0)
+        return this.chatMessageRepository.findRecentBySessionId(request.getSessionId(), 1, 0)
                 .next().map(latest -> StringUtils.hasLength(latest.getTitle()) ? latest.getTitle() : "")
                 .defaultIfEmpty("").flatMap(existingTitle -> {
                     ChatMessage record = ChatMessage.builder().userId(request.getUserId())
@@ -845,7 +842,7 @@ public class GraphRagService {
                             .reasoning(request.getReasoning()).sources(sourcesNode)
                             .tenantCode(request.getTenantCode()).systemType(request.getSystemType())
                             .apiKeyId(apiKeyId).createTime(LocalDateTime.now()).build();
-                    return chatMessageRepository.save(record).doOnSuccess(r -> {
+                    return this.chatMessageRepository.save(record).doOnSuccess(r -> {
                         if (!ObjectUtils.isEmpty(r)) {
                             log.info("对话记录已保存: id={}, userId={}, sessionId={}, question={}", r.getId(), request.getUserId(), request.getSessionId(),
                                     request.getQuestion().length() > 50 ? request.getQuestion().substring(0, 50) + "..." : request.getQuestion());
@@ -866,16 +863,16 @@ public class GraphRagService {
             try {
                 log.info("开始生成对话的主题！");
                 // 计数检查（异步线程内block安全）：第一次问答完成后即生成标题
-                Long count = chatMessageRepository.countBySessionId(sessionId).block();
+                Long count = this.chatMessageRepository.countBySessionId(sessionId).block();
                 if (count != null && count > 1) {
                     return;
                 }
                 // 再次确认尚无标题
-                ChatMessage latest = chatMessageRepository.findRecentBySessionId(sessionId, 1, 0).next().block();
+                ChatMessage latest = this.chatMessageRepository.findRecentBySessionId(sessionId, 1, 0).next().block();
                 if (latest != null && latest.getTitle() != null && !latest.getTitle().isBlank()) {
                     return;
                 }
-                String title = chatClient.prompt()
+                String title = this.chatClient.prompt()
                         .system("你是对话主题生成助手，只返回主题名称，不要任何解释、引号或标点，不超过15个字。")
                         .user("请根据以下对话生成一个简洁的主题名称：\n用户：" + firstQuestion + "\n助手：" + firstAnswer)
                         .call()
@@ -883,7 +880,7 @@ public class GraphRagService {
                 if (title != null && !title.isBlank()) {
                     title = title.trim().replaceAll("[\"'`]", "").replaceAll("\\s+", " ");
                     if (title.length() > 30) title = title.substring(0, 30);
-                    chatMessageRepository.updateTitleBySessionId(title, sessionId).block();
+                    this.chatMessageRepository.updateTitleBySessionId(title, sessionId).block();
                     log.info("会话主题已生成并更新: sessionId={}, title={}", sessionId, title);
                 }
             } catch (Exception e) {
@@ -897,7 +894,7 @@ public class GraphRagService {
      */
     public Mono<List<ChatMessage>> getConversations(String userId, String tenantCode,
                                                     String systemType, int limit) {
-        return chatMessageRepository.findByUser(userId, tenantCode, systemType, limit)
+        return this.chatMessageRepository.findByUser(userId, tenantCode, systemType, limit)
                 .collectList();
     }
 
@@ -907,9 +904,9 @@ public class GraphRagService {
      */
     public Mono<List<ChatMessage>> getConversationsBySession(String sessionId, int limit, int offset, String order) {
         if ("asc".equalsIgnoreCase(order)) {
-            return chatMessageRepository.findBySessionIdAsc(sessionId, limit, offset).collectList();
+            return this.chatMessageRepository.findBySessionIdAsc(sessionId, limit, offset).collectList();
         }
-        return chatMessageRepository.findRecentBySessionId(sessionId, limit, offset).collectList();
+        return this.chatMessageRepository.findRecentBySessionId(sessionId, limit, offset).collectList();
     }
 
     /**
@@ -917,7 +914,7 @@ public class GraphRagService {
      */
     public Mono<List<Map<String, Object>>> getSessions(String userId, String tenantCode,
                                                        String systemType, int limit) {
-        return chatMessageRepository.findByUser(userId, tenantCode, systemType, 500)
+        return this.chatMessageRepository.findByUser(userId, tenantCode, systemType, 500)
                 .collectList().map(records -> aggregateSessions(records, limit));
     }
 
@@ -926,7 +923,7 @@ public class GraphRagService {
      */
     public Mono<List<Map<String, Object>>> getSessionsByApiKey(Long apiKeyId, String userId,
                                                                String tenantCode, String systemType, int limit) {
-        return chatMessageRepository.findByApiKey(apiKeyId,
+        return this.chatMessageRepository.findByApiKey(apiKeyId,
                         blankToNull(userId), blankToNull(tenantCode), blankToNull(systemType))
                 .collectList().map(records -> aggregateSessions(records, limit));
     }
@@ -950,7 +947,8 @@ public class GraphRagService {
             }
             return chatMessageRepository.deleteBySessionIdAndApiKey(sessionId, apiKeyId)
                     .then(chatMessageRepository.countBySessionId(sessionId))
-                    .flatMap(remain -> remain == 0 ? summaryRepository.deleteBySessionId(sessionId) : Mono.empty())
+                    .flatMap(remain -> remain == 0 ? summaryRepository
+                            .deleteBySessionId(sessionId) : Mono.empty())
                     .thenReturn(true);
         });
     }

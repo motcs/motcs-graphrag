@@ -2,12 +2,12 @@
  * Motcs 知识图谱前端 - 主逻辑
  * ============================================================ */
 
-const API_BASE = '/api/documents';
+const API_BASE = '/documents/v1';
 
 /* ============================================================
  * 认证与 API Key 管理（登录 / 退出 / 401 处理 / API Key 管理）
  * ============================================================ */
-const AUTH_BASE = '/api/auth';
+const AUTH_BASE = '/auth/v1';
 
 // 读取 cookie 值（CSRF token 由后端经 Set-Cookie: XSRF-TOKEN 下发）
 function getCookie(name) {
@@ -23,7 +23,7 @@ window.fetch = async function (...args) {
     const token = localStorage.getItem('motcs_token');
     if (token) {
         const url = String(args[0]);
-        if (!url.includes('/api/auth/login')) {
+        if (!url.includes('/auth/v1/login')) {
             const init = args[1] || (args[1] = {});
             init.headers = Object.assign({}, init.headers, { 'x-token': token });
             // CSRF 后端仅对 POST 校验，因此只有 POST 需要携带 X-CSRF-TOKEN
@@ -38,7 +38,7 @@ window.fetch = async function (...args) {
     // 401：未登录/过期；POST 403：多为 CSRF cookie 缺失或不匹配（会话异常），均重新登录恢复
     if (res.status === 401 || (res.status === 403 && String((args[1] && args[1].method) || 'GET').toUpperCase() === 'POST')) {
         const url = String(args[0]);
-        if (!url.includes('/api/auth/login') && !url.includes('/api/auth/me') && !url.includes('/health')) {
+        if (!url.includes('/auth/v1/login') && !url.includes('/auth/v1/me') && !url.includes('/health')) {
             showLogin();
         }
     }
@@ -2023,7 +2023,7 @@ init();
 /* ---------- AI 平台探测（动态填充模型下拉框） ---------- */
 async function loadAiProvider() {
     try {
-        const res = await fetch('/api/ai/provider');
+        const res = await fetch('/ai/v1/provider');
         if (!res.ok) return;
         const info = await res.json();
         const sel = $('modelSelect');

@@ -14,7 +14,7 @@
 
 - 多轮对话，基于 `sessionId` 自动关联上下文
 - **模型可选**：对话框下方下拉框切换 `deepseek-v3.2` / `deepseek-v3.2-think` / `deepseek-v4-flash-0731`
-  （下拉选项由后端 `GET /api/ai/provider` 按当前启用的 AI 平台动态下发，避免选到不存在的模型）
+  （下拉选项由后端 `GET /ai/v1/provider` 按当前启用的 AI 平台动态下发，避免选到不存在的模型）
 - SSE 流式输出（JSON 事件：session / sources / reasoning / content），AI 回答实时渲染 Markdown
 - 向量检索 + Neo4j 多跳图谱召回，双路融合
 - 每轮回答同步展示引用的知识库片段，可点击查看原文（含页码导航）
@@ -51,7 +51,7 @@
 
 - **超管登录**：唯一管理账号（环境变量配置），登录成功后签发 x-token（带过期时间），后续请求携带 `x-token` 请求头完成鉴权
 - **API Key 鉴权**：超管生成 Key 后人工分发，调用方携带 Key 即可访问 AI 对话接口；**Key 绑定租户 + 系统类型**，对话时自动以此检索对应租户的知识库
-- **API Key 专属对话接口**：`POST /api/keys/chat`，调用方只需传 问题 / 用户编码 / 会话ID，租户与系统类型由 Key 绑定值自动赋值
+- **API Key 专属对话接口**：`POST /keys/v1/chat`，调用方只需传 问题 / 用户编码 / 会话ID，租户与系统类型由 Key 绑定值自动赋值
 - 接口权限分级：公开 / 仅超管登录 / 登录或 API Key / 仅 API Key 四类（详见 [认证与权限控制](#认证与权限控制)）
 - API Key 参考 OpenAI 设计：数据库只存哈希、明文仅生成时展示一次、备注/租户/系统类型必填
 
@@ -250,7 +250,7 @@ services:
 
 | 方式     | 说明                                                                                                  |
 |----------|-------------------------------------------------------------------------------------------------------|
-| 超管登录 | `POST /api/auth/login` **HTTP Basic Auth**（`Authorization: Basic base64(username:password)`），由 Spring Security Basic 认证过滤链校验（`AUTH_USERNAME` / `AUTH_PASSWORD`），成功后**签发 x-token 返回**，后续请求携带请求头 `x-token` 即视为已登录 |
+| 超管登录 | `POST /auth/v1/login` **HTTP Basic Auth**（`Authorization: Basic base64(username:password)`），由 Spring Security Basic 认证过滤链校验（`AUTH_USERNAME` / `AUTH_PASSWORD`），成功后**签发 x-token 返回**，后续请求携带请求头 `x-token` 即视为已登录 |
 | API Key  | 请求头携带 `Authorization: Bearer sk-...` 或 `X-API-Key: sk-...`，无状态校验（每次请求比对 SHA-256 哈希），适合机器/第三方调用 |
 
 ### 2. API Key 设计（参考 OpenAI）
@@ -259,7 +259,7 @@ services:
 - **存储**：数据库只保存 SHA-256 哈希与前缀掩码（如 `sk-Ab3Xy7...`），**明文仅在生成时返回一次**，丢失需重新生成
 - **备注必填**：生成时 `name`（备注）必填，为空返回 `400`
 - **租户/系统必填**：生成时必须绑定 `tenantCode`（具体租户编码）与 `systemType`（系统类型），对话/上传时以此归属；**不允许绑定租户 `0`**（超管全局租户），传 `0` 返回 `400`
-- **权限**：API Key 认证身份为 `ROLE_API_KEY`，**可访问 AI 对话接口与 `/api/keys/**` 专属接口**，无法访问管理类接口（403）
+- **权限**：API Key 认证身份为 `ROLE_API_KEY`，**可访问 AI 对话接口与 `/keys/v1/**` 专属接口**，无法访问管理类接口（403）
 - **管理**：仅超管可生成 / 查看列表 / 删除（删除后携带该 Key 的请求立即失效）
 
 ### 3. 接口权限矩阵
@@ -267,13 +267,13 @@ services:
 | 路径 | 权限 |
 |------|------|
 | `/`、`/index.html`、`/css/**`、`/js/**`、`/img/**`、favicon、Swagger 文档（`/v3/api-docs/**`、`/swagger-ui/**`、`/webjars/**`） | **公开** |
-| `POST /api/auth/login` | **公开** |
-| `GET /api/documents/health`（健康检查） | **公开** |
-| `GET /api/ai/provider`（AI 平台探测，登录前渲染模型下拉） | **公开** |
-| `POST /api/auth/logout`、`GET /api/auth/me` | **仅超管登录** |
-| `GET/POST /api/auth/api-keys`、`DELETE /api/auth/api-keys/{id}`（API Key 管理） | **仅超管登录** |
-| **`POST /api/documents/query`（AI 对话接口）** | **登录 或 有效 API Key（二选一）** |
-| **`/api/keys/**`（API Key 专属：`/chat` 对话 + `/conversations` 历史查询/删除）** | **仅 API Key**（登录用户 403） |
+| `POST /auth/v1/login` | **公开** |
+| `GET /documents/v1/health`（健康检查） | **公开** |
+| `GET /ai/v1/provider`（AI 平台探测，登录前渲染模型下拉） | **公开** |
+| `POST /auth/v1/logout`、`GET /auth/v1/me` | **仅超管登录** |
+| `GET/POST /auth/v1/api-keys`、`DELETE /auth/v1/api-keys/{id}`（API Key 管理） | **仅超管登录** |
+| **`POST /documents/v1/query`（AI 对话接口）** | **登录 或 有效 API Key（二选一）** |
+| **`/keys/v1/**`（API Key 专属：`/chat` 对话 + `/conversations` 历史查询/删除）** | **仅 API Key**（登录用户 403） |
 | 其余所有业务接口（上传/列表/删除/统计/图谱/会话记录等） | **仅超管登录** |
 
 ### 4. 调用示例
@@ -281,7 +281,7 @@ services:
 **超管登录（Basic Auth，换取 x-token）**
 
 ```bash
-curl -X POST http://localhost:8080/api/auth/login \
+curl -X POST http://localhost:8080/auth/v1/login \
   -H "Authorization: Basic $(echo -n 'admin:your_password' | base64)"
 ```
 
@@ -290,12 +290,12 @@ curl -X POST http://localhost:8080/api/auth/login \
 成功返回：`{"token":"xxx","expires":7200,"lastAccessTime":...}`，后续请求携带 `x-token` 请求头调用业务接口。
 token 登记到 TokenStore，**带过期时间（默认 2 小时，可配置 `AUTH_TOKEN_TTL`，每次有效使用自动续期/滑动过期）**，过期后自动失效需重新登录。
 
-**CSRF 防护（双提交 Cookie 模式，仅 POST 校验）**：CSRF token 由后端经响应头 **`Set-Cookie: XSRF-TOKEN=...`** 下发（httpOnly=false），前端读取 cookie 后，在登录态的 **POST** 请求头携带 `X-CSRF-TOKEN`，后端比对请求头与 cookie 值；**GET 及其它方法不校验 CSRF**。豁免：登录接口、`/api/keys/**` 专属接口、以及 **API Key 请求（`Authorization: Bearer` / `X-API-Key`）**。
+**CSRF 防护（双提交 Cookie 模式，仅 POST 校验）**：CSRF token 由后端经响应头 **`Set-Cookie: XSRF-TOKEN=...`** 下发（httpOnly=false），前端读取 cookie 后，在登录态的 **POST** 请求头携带 `X-CSRF-TOKEN`，后端比对请求头与 cookie 值；**GET 及其它方法不校验 CSRF**。豁免：登录接口、`/keys/v1/**` 专属接口、以及 **API Key 请求（`Authorization: Bearer` / `X-API-Key`）**。
 
 **用 API Key 调用 AI 对话接口（SSE 流式）**
 
 ```bash
-curl -N -X POST http://localhost:8080/api/documents/query \
+curl -N -X POST http://localhost:8080/documents/v1/query \
   -H "Authorization: Bearer sk-Ab3Xy7..." \
   -H "Content-Type: application/json" \
   -d '{"question":"什么是多跳检索？","userId":"user0001","tenantCode":"test-tenant","systemType":"文档守护"}'
@@ -304,7 +304,7 @@ curl -N -X POST http://localhost:8080/api/documents/query \
 **用 API Key 调用专属对话接口（租户/系统自动从 Key 读取，只需传 问题/用户编码/会话ID）**
 
 ```bash
-curl -N -X POST http://localhost:8080/api/keys/chat \
+curl -N -X POST http://localhost:8080/keys/v1/chat \
   -H "X-API-Key: sk-Ab3Xy7..." \
   -H "Content-Type: application/json" \
   -d '{"question":"会议的核心内容是什么？","userId":"test0101","sessionId":"sess_001"}'
@@ -313,7 +313,7 @@ curl -N -X POST http://localhost:8080/api/keys/chat \
 **生成 API Key（需登录，备注/租户/系统类型必填）**
 
 ```bash
-curl -X POST http://localhost:8080/api/auth/api-keys \
+curl -X POST http://localhost:8080/auth/v1/api-keys \
   -H "Content-Type: application/json" \
   -H "x-token: tok-xxx..." \
   -d '{"name":"第三方系统对接","tenantCode":"410725","systemType":"congress"}'
@@ -321,7 +321,7 @@ curl -X POST http://localhost:8080/api/auth/api-keys \
 
 **未认证访问业务接口** → `401` `{"code":401,"message":"未登录或登录已过期"}`
 **API Key 越权访问管理接口** → `403` `{"code":403,"message":"无权限访问"}`
-**登录用户访问 `/api/keys/**`** → `403`（仅 API Key 可用）
+**登录用户访问 `/keys/v1/**`** → `403`（仅 API Key 可用）
 
 ---
 
@@ -333,36 +333,36 @@ curl -X POST http://localhost:8080/api/auth/api-keys \
 
 | 方法     | 路径                         | 权限           | 说明                                                        |
 |----------|------------------------------|----------------|-------------------------------------------------------------|
-| `POST`   | `/api/auth/login`            | 公开           | 超管登录（Basic Auth：Authorization: Basic base64(username:password)） |
-| `POST`   | `/api/auth/logout`           | 仅登录         | 退出登录（注销 x-token，从请求头读取）                      |
-| `GET`    | `/api/auth/me`               | 仅登录         | 当前登录状态                                                |
-| `GET`    | `/api/auth/api-keys`         | 仅登录         | Key 列表（仅掩码，不含哈希与明文）                          |
-| `POST`   | `/api/auth/api-keys`         | 仅登录         | 生成新 Key（Body：name 备注/**tenantCode 租户**/**systemType 系统**均必填；返回明文一次） |
-| `DELETE` | `/api/auth/api-keys/{id}`    | 仅登录         | 删除 Key（立即失效）                                        |
+| `POST`   | `/auth/v1/login`            | 公开           | 超管登录（Basic Auth：Authorization: Basic base64(username:password)） |
+| `POST`   | `/auth/v1/logout`           | 仅登录         | 退出登录（注销 x-token，从请求头读取）                      |
+| `GET`    | `/auth/v1/me`               | 仅登录         | 当前登录状态                                                |
+| `GET`    | `/auth/v1/api-keys`         | 仅登录         | Key 列表（仅掩码，不含哈希与明文）                          |
+| `POST`   | `/auth/v1/api-keys`         | 仅登录         | 生成新 Key（Body：name 备注/**tenantCode 租户**/**systemType 系统**均必填；返回明文一次） |
+| `DELETE` | `/auth/v1/api-keys/{id}`    | 仅登录         | 删除 Key（立即失效）                                        |
 
 ### AI 平台探测
 
 | 方法  | 路径                | 权限   | 说明                                                                   |
 |-------|---------------------|--------|------------------------------------------------------------------------|
-| `GET` | `/api/ai/provider`  | 公开   | 当前启用 AI 平台（provider/providerName）+ 可选模型列表（chatModels），前端据此渲染模型下拉框 |
+| `GET` | `/ai/v1/provider`  | 公开   | 当前启用 AI 平台（provider/providerName）+ 可选模型列表（chatModels），前端据此渲染模型下拉框 |
 
 ### 文档管理
 
 | 方法     | 路径                               | 权限   | 说明                                                                                               |
 |----------|------------------------------------|--------|----------------------------------------------------------------------------------------------------|
-| `POST`   | `/api/documents/upload`            | 仅登录 | 上传文档（multipart/form-data，字段：file/title/description/docCode/tenantCode/systemType/userId） |
-| `POST`   | `/api/documents/upload/url`        | 仅登录 | 通过 URL 上传文档（Body：FileUploadRequest）                                                        |
-| `GET`    | `/api/documents/list`              | 仅登录 | 查询文档列表（tenantCode + systemType；租户 0 查全部）                                              |
-| `DELETE` | `/api/documents/docCode/{docCode}` | 仅登录 | 按 docCode 删除文档（级联删除分片/向量/实体/关系/文件）                                            |
-| `GET`    | `/api/documents/stats`             | 仅登录 | 文档统计（文档数 + 分片数，轻量聚合）                                                              |
-| `GET`    | `/api/documents/health`            | 公开   | 健康检查                                                                                           |
+| `POST`   | `/documents/v1/upload`            | 仅登录 | 上传文档（multipart/form-data，字段：file/title/description/docCode/tenantCode/systemType/userId） |
+| `POST`   | `/documents/v1/upload/url`        | 仅登录 | 通过 URL 上传文档（Body：FileUploadRequest）                                                        |
+| `GET`    | `/documents/v1/list`              | 仅登录 | 查询文档列表（tenantCode + systemType；租户 0 查全部）                                              |
+| `DELETE` | `/documents/v1/docCode/{docCode}` | 仅登录 | 按 docCode 删除文档（级联删除分片/向量/实体/关系/文件）                                            |
+| `GET`    | `/documents/v1/stats`             | 仅登录 | 文档统计（文档数 + 分片数，轻量聚合）                                                              |
+| `GET`    | `/documents/v1/health`            | 公开   | 健康检查                                                                                           |
 
 ### 智能问答
 
 | 方法   | 路径                   | 权限                    | 说明                                                                                             |
 |--------|------------------------|-------------------------|--------------------------------------------------------------------------------------------------|
-| `POST` | `/api/documents/query` | **登录 或 API Key**     | GraphRAG 问答（SSE 流式，参数：question/userId/sessionId/tenantCode/systemType/model 可选）      |
-| `POST` | `/api/keys/chat`       | **仅 API Key**          | API Key 专属问答（SSE 流式，参数：question/userId/sessionId 可选/model 可选；租户/系统由 Key 绑定值自动赋值，历史按 Key 隔离） |
+| `POST` | `/documents/v1/query` | **登录 或 API Key**     | GraphRAG 问答（SSE 流式，参数：question/userId/sessionId/tenantCode/systemType/model 可选）      |
+| `POST` | `/keys/v1/chat`       | **仅 API Key**          | API Key 专属问答（SSE 流式，参数：question/userId/sessionId 可选/model 可选；租户/系统由 Key 绑定值自动赋值，历史按 Key 隔离） |
 
 `model` 可选值：`deepseek-v3.2` / `deepseek-v3.2-think` / `deepseek-v4-flash-0731`（不传则用配置默认模型）。
 
@@ -379,28 +379,28 @@ curl -X POST http://localhost:8080/api/auth/api-keys \
 
 | 方法     | 路径                                               | 权限   | 说明                                                            |
 |----------|----------------------------------------------------|--------|-----------------------------------------------------------------|
-| `POST`   | `/api/documents/conversations`                     | 仅登录 | 手动保存对话记录（前端中断回答时调用）                          |
-| `GET`    | `/api/documents/sessions`                          | 仅登录 | 会话列表（按 userId + tenantCode + systemType，去重 sessionId） |
-| `GET`    | `/api/documents/conversations/session`             | 仅登录 | 按 sessionId 查询完整多轮对话                                   |
-| `GET`    | `/api/documents/conversations`                     | 仅登录 | 按用户查询对话记录                                              |
-| `PUT`    | `/api/documents/conversations/session/{sessionId}/title` | 仅登录 | 更新会话标题（Body: {"title":"新标题"}）                  |
-| `DELETE` | `/api/documents/conversations/session/{sessionId}` | 仅登录 | 删除单个会话（含所有对话记录）                                  |
-| `DELETE` | `/api/documents/conversations/batch`               | 仅登录 | 批量删除会话（Body: sessionId 数组）                            |
+| `POST`   | `/documents/v1/conversations`                     | 仅登录 | 手动保存对话记录（前端中断回答时调用）                          |
+| `GET`    | `/documents/v1/sessions`                          | 仅登录 | 会话列表（按 userId + tenantCode + systemType，去重 sessionId） |
+| `GET`    | `/documents/v1/conversations/session`             | 仅登录 | 按 sessionId 查询完整多轮对话                                   |
+| `GET`    | `/documents/v1/conversations`                     | 仅登录 | 按用户查询对话记录                                              |
+| `PUT`    | `/documents/v1/conversations/session/{sessionId}/title` | 仅登录 | 更新会话标题（Body: {"title":"新标题"}）                  |
+| `DELETE` | `/documents/v1/conversations/session/{sessionId}` | 仅登录 | 删除单个会话（含所有对话记录）                                  |
+| `DELETE` | `/documents/v1/conversations/batch`               | 仅登录 | 批量删除会话（Body: sessionId 数组）                            |
 
 ### 对话记录（API Key 专属，请求头必须携带 Key，仅操作本 Key 创建的记录）
 
 | 方法     | 路径                                               | 权限      | 说明                                                            |
 |----------|----------------------------------------------------|-----------|-----------------------------------------------------------------|
-| `GET`    | `/api/keys/conversations`                          | 仅 API Key | 会话列表（按 apikey + userId + tenantCode + systemType 搜索，后三者可选） |
-| `GET`    | `/api/keys/conversations/session`                  | 仅 API Key | 按 sessionId 查询消息（仅本 Key 创建的，否则 404）              |
-| `DELETE` | `/api/keys/conversations/session/{sessionId}`      | 仅 API Key | 删除单个会话（仅限本 Key 创建的，否则 404）                     |
-| `DELETE` | `/api/keys/conversations/batch`                    | 仅 API Key | 批量删除（Body: sessionId 数组，仅删本 Key 的，返回实际删除数） |
+| `GET`    | `/keys/v1/conversations`                          | 仅 API Key | 会话列表（按 apikey + userId + tenantCode + systemType 搜索，后三者可选） |
+| `GET`    | `/keys/v1/conversations/session`                  | 仅 API Key | 按 sessionId 查询消息（仅本 Key 创建的，否则 404）              |
+| `DELETE` | `/keys/v1/conversations/session/{sessionId}`      | 仅 API Key | 删除单个会话（仅限本 Key 创建的，否则 404）                     |
+| `DELETE` | `/keys/v1/conversations/batch`                    | 仅 API Key | 批量删除（Body: sessionId 数组，仅删本 Key 的，返回实际删除数） |
 
 ### 知识图谱
 
 | 方法  | 路径                   | 权限   | 说明                                                         |
 |-------|------------------------|--------|--------------------------------------------------------------|
-| `GET` | `/api/documents/graph` | 仅登录 | 获取图谱数据（tenantCode + systemType + limit，默认200节点；租户 0 查所有关系） |
+| `GET` | `/documents/v1/graph` | 仅登录 | 获取图谱数据（tenantCode + systemType + limit，默认200节点；租户 0 查所有关系） |
 
 ---
 
@@ -414,8 +414,8 @@ AI 对话接口支持在 `deepseek-v3.2`、`deepseek-v3.2-think`、`deepseek-v4-
 | `deepseek-v3.2-think` | 深度思考模式，适合复杂推理问题 | 配置默认（`AI_CHAT_MODEL`） |
 | `deepseek-v4-flash-0731` | 轻量快速版 | - |
 
-- **前端**：对话输入框下方下拉框直接切换，下拉选项来自 `GET /api/ai/provider`（按当前启用的 AI 平台下发，避免选到不存在的模型），随请求提交 `model` 参数
-- **后端**：`POST /api/documents/query` 与 `POST /api/keys/chat` 的 `model` 字段覆盖默认配置；不传则用 `AI_CHAT_MODEL`
+- **前端**：对话输入框下方下拉框直接切换，下拉选项来自 `GET /ai/v1/provider`（按当前启用的 AI 平台下发，避免选到不存在的模型），随请求提交 `model` 参数
+- **后端**：`POST /documents/v1/query` 与 `POST /keys/v1/chat` 的 `model` 字段覆盖默认配置；不传则用 `AI_CHAT_MODEL`
 - **注意**：三个模型均需在千帆控制台**手动开通**后才可使用，未开通报 `401 The model does not exist or you do not have access to it.`
 
 ---
@@ -511,12 +511,12 @@ A: 未登录或登录已过期。系统已配置自定义 JSON 401 入口（不�
 `Authorization: Bearer sk-...` 或 `X-API-Key: sk-...`。
 
 **Q: API Key 报 403 无权限访问**
-A: API Key 仅能访问 AI 对话接口（`/api/documents/query`、`/api/keys/chat`）与 `/api/keys/**` 专属历史接口，
+A: API Key 仅能访问 AI 对话接口（`/documents/v1/query`、`/keys/v1/chat`）与 `/keys/v1/**` 专属历史接口，
 访问上传、列表、图谱等管理业务接口会被拒绝（仅超管登录可用）。
 
 **Q: 登录后 POST 接口报 403 `CSRF 校验失败`**
 A: 登录态的 POST/PUT/DELETE 请求必须在请求头携带 `X-CSRF-TOKEN`（值等于 cookie 中的 `XSRF-TOKEN`）。
-API Key 请求（`Bearer` / `X-API-Key`）与 `/api/keys/**` 已豁免 CSRF，无需携带。
+API Key 请求（`Bearer` / `X-API-Key`）与 `/keys/v1/**` 已豁免 CSRF，无需携带。
 
 **Q: 文档一直显示"处理中"**
 A: 图谱构建为异步操作，前端每30秒轮询状态。若长时间未完成，检查日志中实体抽取是否超时或 API 密钥是否过期。
@@ -560,12 +560,12 @@ motcs-graphrag/
 │       │   │   ├── ApiKeyInfo.java          # 生成结果（含明文，仅一次）
 │       │   │   ├── ApiKeyRepository.java    # R2DBC 仓库
 │       │   │   ├── ApiKeyService.java       # Key 生成/校验/列表/删除
-│       │   │   └── ApiKeyController.java    # /api/keys/conversations（Key 专属历史）
+│       │   │   └── ApiKeyController.java    # /keys/v1/conversations（Key 专属历史）
 │       │   └── token/
 │       │       ├── AuthenticationToken.java # 登录响应（token/expires/lastAccessTime）
 │       │       └── TokenStore.java          # x-token 会话存储（滑动过期）
 │       ├── chat/
-│       │   └── ApiChatController.java       # POST /api/keys/chat（Key 专属对话，SSE）
+│       │   └── ApiChatController.java       # POST /keys/v1/chat（Key 专属对话，SSE）
 │       ├── document/
 │       │   ├── DocumentController.java      # 文档/问答/对话/图谱接口
 │       │   ├── DocumentService.java         # 文档服务（异步入库/级联删除/统计）
@@ -575,8 +575,8 @@ motcs-graphrag/
 │       │   ├── chunk/DocumentChunk.java / DocumentChunkRepository.java # 分片（租户隔离 Cypher）
 │       │   ├── graph/GraphRagRequest.java / GraphRagResult.java / GraphRagService.java  # GraphRAG 核心
 │       │   └── record/ChatMessage.java / ChatMessageRepository.java / ChatSessionSummary.java / ChatSessionSummaryRepository.java
-│       ├── provider/AiProviderController.java   # GET /api/ai/provider（AI 平台探测）
-│       └── request/ConversationRequest.java / SessionRequest.java / FileUploadRequest.java / ApiKeyRequest.java
+│       ├── provider/AiProviderController.java   # GET /ai/v1/provider（AI 平台探测）
+│       └── request/ SessionRequest.java / FileUploadRequest.java / ApiKeyRequest.java
 ├── src/main/resources/
 │   ├── application.yaml                    # 基础配置（Jackson/虚拟线程/HTTP2/认证账号）
 │   ├── application-baidu.yaml              # 百度千帆专项配置（--spring.profiles.active=baidu）

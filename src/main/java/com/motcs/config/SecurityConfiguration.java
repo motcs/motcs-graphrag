@@ -40,7 +40,7 @@ import java.util.Optional;
  * 安全配置（WebFlux + Spring Security）
  * <p>
  * 认证途径（二选一即可访问业务接口）：
- * 1. 超管登录（HTTP Basic Auth + Token）：POST /api/auth/login 携带
+ * 1. 超管登录（HTTP Basic Auth + Token）：POST /auth/v1/login 携带
  * Authorization: Basic base64(username:password)，认证成功后签发 x-token 返回给前端；
  * 后续所有请求携带请求头 x-token，由 Token 过滤器校验并恢复登录态（ROLE_ADMIN）。
  * 2. API Key：请求头 Authorization: Bearer sk-... 或 X-API-Key: sk-...，
@@ -48,8 +48,8 @@ import java.util.Optional;
  * <p>
  * 接口权限：
  * - 静态资源 / 登录接口 / health：公开
- * - /api/auth/**（API Key 管理）：仅超管登录（ROLE_ADMIN）
- * - /api/documents/query（AI 对话）：登录态 或 有效 API Key 均可访问
+ * - /auth/v1/**（API Key 管理）：仅超管登录（ROLE_ADMIN）
+ * - /documents/v1/query（AI 对话）：登录态 或 有效 API Key 均可访问
  * - 其余所有业务接口：仅超管登录（ROLE_ADMIN）可访问
  */
 @Getter
@@ -134,12 +134,12 @@ public class SecurityConfiguration {
                                 return ServerWebExchangeMatcher.MatchResult.notMatch();
                             }
                             // 登录接口豁免（Basic 认证换取 token，尚无 CSRF token）
-                            if ("/api/auth/login".equals(exchange.getRequest().getPath().value())) {
+                            if ("/auth/v1/login".equals(exchange.getRequest().getPath().value())) {
                                 return ServerWebExchangeMatcher.MatchResult.notMatch();
                             }
-                            // API Key 专属路径整体豁免 CSRF（/api/keys/** 仅 API Key 访问，
+                            // API Key 专属路径整体豁免 CSRF（/keys/v1/** 仅 API Key 访问，
                             // 无 cookie 会话，CSRF 防护无意义；未带 Key 的请求由认证过滤器 401 拦截）
-                            if (exchange.getRequest().getPath().value().startsWith("/api/keys/")) {
+                            if (exchange.getRequest().getPath().value().startsWith("/keys/v1/")) {
                                 return ServerWebExchangeMatcher.MatchResult.notMatch();
                             }
                             // API Key 请求免 CSRF：Authorization: Bearer 或 X-API-Key 请求头
@@ -182,15 +182,15 @@ public class SecurityConfiguration {
                         .pathMatchers("/", "/index.html", "/favicon.ico", "/favicon.png",
                                 "/css/**", "/js/**", "/img/**",
                                 "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/webjars/**").permitAll()
-                        .pathMatchers("/api/auth/login").permitAll()
-                        .pathMatchers("/api/documents/health").permitAll()
+                        .pathMatchers("/auth/v1/login").permitAll()
+                        .pathMatchers("/documents/v1/health").permitAll()
                         // AI 平台探测（前端登录前即需调用，用于渲染模型下拉框）
-                        .pathMatchers("/api/ai/provider").permitAll()
-                        .pathMatchers("/api/auth/**").hasRole("ADMIN")
+                        .pathMatchers("/ai/v1/provider").permitAll()
+                        .pathMatchers("/auth/v1/**").hasRole("ADMIN")
                         // AI 对话接口（GraphRAG 问答）：登录 或 有效 API Key 均可访问
-                        .pathMatchers("/api/documents/query").authenticated()
+                        .pathMatchers("/documents/v1/query").authenticated()
                         // API Key 专属接口（对话历史查询/删除）：仅 API Key 认证可访问，登录用户不可用
-                        .pathMatchers("/api/keys/**").hasRole("API_KEY")
+                        .pathMatchers("/keys/v1/**").hasRole("API_KEY")
                         // 其余所有业务接口：仅超管登录可访问（API Key 无 ADMIN 角色将被拒绝）
                         .anyExchange().hasRole("ADMIN"))
                 // 自定义认证入口/拒绝处理器：返回 JSON，避免浏览器原生 Basic Auth 弹窗
@@ -298,7 +298,7 @@ public class SecurityConfiguration {
         return (exchange, chain) -> {
             // 登录接口仅走 Basic Auth 认证，API Key 不参与，
             // 避免请求同时携带 Key 时把 Basic 登录用户覆盖为 api-key
-            if ("/api/auth/login".equals(exchange.getRequest().getPath().value())) {
+            if ("/auth/v1/login".equals(exchange.getRequest().getPath().value())) {
                 return chain.filter(exchange);
             }
             String key = extractApiKey(exchange);

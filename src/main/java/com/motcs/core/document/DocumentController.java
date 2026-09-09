@@ -38,7 +38,7 @@ import java.util.UUID;
 @Log4j2
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/documents")
+@RequestMapping("/documents/v1")
 public class DocumentController {
 
     private final DocumentService documentService;
@@ -49,7 +49,7 @@ public class DocumentController {
 
     /**
      * 上传文档接口（WebFlux 响应式，使用 FilePart）
-     * POST /api/documents/upload
+     * POST /documents/v1/upload
      * Content-Type: multipart/form-data
      */
     @PostMapping("/upload")
@@ -79,7 +79,7 @@ public class DocumentController {
 
     /**
      * 通过远程 URL 上传文档接口（WebClient 非阻塞下载）
-     * POST /api/documents/upload/url
+     * POST /documents/v1/upload/url
      */
     @PostMapping("/upload/url")
     public Mono<ResponseEntity<DocumentResponse>> uploadByUrl(@RequestBody FileUploadRequest uploadRequest) {
@@ -106,7 +106,7 @@ public class DocumentController {
 
     /**
      * GraphRAG 知识问答接口（SSE 流式返回，支持多轮对话 + 知识库来源）
-     * POST /api/documents/query
+     * POST /documents/v1/query
      * SSE 事件（JSON，type 字段区分）：
      * - {"type":"session","sessionId":"xxx"}
      * - {"type":"sources","sources":[...]}
@@ -124,40 +124,53 @@ public class DocumentController {
         }
         final String sessionId = ObjectUtils.isEmpty(request.getSessionId())
                 ? UUID.randomUUID().toString() : request.getSessionId();
-        StringBuilder answerBuilder = new StringBuilder(); // AI回答完整内容累积
-        StringBuilder reasoningBuilder = new StringBuilder(); // AI思考过程累积（入库）
-        final String[] sourcesJson = {"[]"};
 
-        return this.graphRagService.graphRagQueryStream(request).flatMapMany(result -> {
-            // 序列化来源
-            try {
-                sourcesJson[0] = objectMapper.writeValueAsString(result.sources());
-            } catch (Exception e) {
-                sourcesJson[0] = "[]";
+        // API Key 请求自动带出租户/系统类型（调用方只需传 问题/用户编码/会话ID；
+        // 显式传入的 tenantCode/systemType 优先，未传则用 Key 绑定值）
+        return resolveApiKey(exchange).map(apiKey -> {
+            if (ObjectUtils.isEmpty(request.getTenantCode())) {
+                request.setTenantCode(apiKey.getTenantCode());
             }
-            // 发送顺序：1.session 2.sources 3.思考/正文事件（JSON type 字段区分思考/正文，不依赖内容判空）
-            Mono<String> sessionMono = Mono.just(jsonEvent("session", Map.of("sessionId", sessionId)));
-            Mono<String> sourcesMono = Mono.just(jsonEvent("sources", Map.of("sources", result.sources())));
-            Flux<String> answerMono = result.answer().doOnNext(ev -> {
-                if ("reasoning".equals(ev.type())) {
-                    reasoningBuilder.append(ev.text());
-                } else if ("content".equals(ev.type())) {
-                    answerBuilder.append(ev.text());
+            if (ObjectUtils.isEmpty(request.getSystemType())) {
+                request.setSystemType(apiKey.getSystemType());
+            }
+            return request;
+        }).defaultIfEmpty(request).flatMapMany(ignored -> {
+            StringBuilder answerBuilder = new StringBuilder(); // AI回答完整内容累积
+            StringBuilder reasoningBuilder = new StringBuilder(); // AI思考过程累积（入库）
+            final String[] sourcesJson = {"[]"};
+
+            return this.graphRagService.graphRagQueryStream(request).flatMapMany(result -> {
+                // 序列化来源
+                try {
+                    sourcesJson[0] = objectMapper.writeValueAsString(result.sources());
+                } catch (Exception e) {
+                    sourcesJson[0] = "[]";
                 }
-            }).map(ev -> jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
-            return Flux.concat(sessionMono, sourcesMono, answerMono);
-        }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
-            // 取消时由前端手动保存（避免重复），正常完成/出错时保存（answer 可为空，确保提问不丢失）
-            if (signal == reactor.core.publisher.SignalType.CANCEL) return;
-            if (request.getQuestion() != null && !request.getQuestion().isBlank()) {
-                resolveApiKeyId(exchange).defaultIfEmpty(0L).flatMap(apiKeyId -> {
-                    request.setAnswer(answerBuilder.toString());
-                    request.setSessionId(sessionId);
-                    request.setSources(sourcesJson[0]);
-                    request.setReasoning(reasoningBuilder.toString());
-                    return this.graphRagService.saveConversation(request, apiKeyId);
-                }).subscribe();
-            }
+                // 发送顺序：1.session 2.sources 3.思考/正文事件（JSON type 字段区分思考/正文，不依赖内容判空）
+                Mono<String> sessionMono = Mono.just(jsonEvent("session", Map.of("sessionId", sessionId)));
+                Mono<String> sourcesMono = Mono.just(jsonEvent("sources", Map.of("sources", result.sources())));
+                Flux<String> answerMono = result.answer().doOnNext(ev -> {
+                    if ("reasoning".equals(ev.type())) {
+                        reasoningBuilder.append(ev.text());
+                    } else if ("content".equals(ev.type())) {
+                        answerBuilder.append(ev.text());
+                    }
+                }).map(ev -> jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
+                return Flux.concat(sessionMono, sourcesMono, answerMono);
+            }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
+                // 取消时由前端手动保存（避免重复），正常完成/出错时保存（answer 可为空，确保提问不丢失）
+                if (signal == reactor.core.publisher.SignalType.CANCEL) return;
+                if (request.getQuestion() != null && !request.getQuestion().isBlank()) {
+                    resolveApiKeyId(exchange).defaultIfEmpty(0L).flatMap(apiKeyId -> {
+                        request.setAnswer(answerBuilder.toString());
+                        request.setSessionId(sessionId);
+                        request.setSources(sourcesJson[0]);
+                        request.setReasoning(reasoningBuilder.toString());
+                        return this.graphRagService.saveConversation(request, apiKeyId);
+                    }).subscribe();
+                }
+            });
         }).doOnError(e -> log.error("问答SSE流出错: {}", e.getMessage(), e));
     }
 
@@ -166,12 +179,16 @@ public class DocumentController {
      * 从请求头解析 API Key 并返回其归属 ID（无 Key / 无效 Key 返回 empty，即按登录用户创建记录）
      * 解析规则与 SecurityConfiguration.extractApiKey 一致：Authorization: Bearer 或 X-API-Key
      */
-    private Mono<Long> resolveApiKeyId(ServerWebExchange exchange) {
+    private Mono<ApiKey> resolveApiKey(ServerWebExchange exchange) {
         String key = SecurityConfiguration.extractApiKey(exchange);
         if (key == null || key.isBlank()) {
             return Mono.empty();
         }
-        return apiKeyService.findEnabled(key).map(ApiKey::getId);
+        return apiKeyService.findEnabled(key);
+    }
+
+    private Mono<Long> resolveApiKeyId(ServerWebExchange exchange) {
+        return resolveApiKey(exchange).map(ApiKey::getId);
     }
 
     private String jsonEvent(String type, Map<String, ?> payload) {
@@ -187,7 +204,7 @@ public class DocumentController {
 
     /**
      * 手动保存对话记录（前端中断回答时调用，确保部分回答入库）
-     * POST /api/documents/conversations
+     * POST /documents/v1/conversations
      */
     @PostMapping("/conversations")
     public Mono<ResponseEntity<Map<String, Object>>> saveConversation(@RequestBody GraphRagRequest request,
@@ -200,7 +217,7 @@ public class DocumentController {
 
     /**
      * 对话记录查询接口（按用户）
-     * GET /api/documents/conversations
+     * GET /documents/v1/conversations
      */
     @GetMapping("/conversations")
     public Mono<ResponseEntity<List<ChatMessage>>> getConversations(
@@ -216,7 +233,7 @@ public class DocumentController {
 
     /**
      * 按会话ID分页查询对话
-     * GET /api/documents/conversations/session?sessionId=xxx&limit=10&offset=0&order=desc
+     * GET /documents/v1/conversations/session?sessionId=xxx&limit=10&offset=0&order=desc
      * order=desc（默认，倒序，前端反转后正序展示）；order=asc（正序，导出用）
      */
     @GetMapping("/conversations/session")
@@ -231,7 +248,7 @@ public class DocumentController {
 
     /**
      * 会话列表查询接口（按用户，去重 sessionId）
-     * GET /api/documents/sessions
+     * GET /documents/v1/sessions
      */
     @GetMapping("/sessions")
     public Mono<ResponseEntity<List<Map<String, Object>>>> getSessions(
@@ -244,7 +261,7 @@ public class DocumentController {
 
     /**
      * 更新会话标题（批量更新该会话所有记录的title）
-     * PUT /api/documents/conversations/session/{sessionId}/title
+     * PUT /documents/v1/conversations/session/{sessionId}/title
      * Body: {"title": "新标题"}
      */
     @PutMapping("/conversations/session/{sessionId}/title")
@@ -264,7 +281,7 @@ public class DocumentController {
 
     /**
      * 删除单个会话（该会话下所有对话记录）
-     * DELETE /api/documents/conversations/session/{sessionId}
+     * DELETE /documents/v1/conversations/session/{sessionId}
      */
     @DeleteMapping("/conversations/session/{sessionId}")
     public Mono<ResponseEntity<Map<String, Object>>> deleteSession(@PathVariable("sessionId") String sessionId) {
@@ -279,7 +296,7 @@ public class DocumentController {
 
     /**
      * 批量删除会话
-     * DELETE /api/documents/conversations/batch
+     * DELETE /documents/v1/conversations/batch
      * Body: ["sessionId1", "sessionId2", ...]
      */
     @DeleteMapping("/conversations/batch")
@@ -296,7 +313,7 @@ public class DocumentController {
 
     /**
      * 查询文档列表接口
-     * GET /api/documents/list
+     * GET /documents/v1/list
      */
     @GetMapping("/list")
     public Mono<ResponseEntity<List<DocumentResponse>>> listDocuments(DocumentRequest request) {
@@ -308,7 +325,7 @@ public class DocumentController {
 
     /**
      * 删除文档接口（按 docCode 级联删除：分片、独占知识点、关系、向量、原始文件）
-     * DELETE /api/documents/docCode/{docCode}
+     * DELETE /documents/v1/docCode/{docCode}
      */
     @DeleteMapping("/docCode/{docCode}")
     public Mono<ResponseEntity<Map<String, Object>>> deleteDocument(@PathVariable("docCode") String docCode) {
@@ -324,7 +341,7 @@ public class DocumentController {
 
     /**
      * 文档统计接口（轻量聚合，不返回明细）
-     * GET /api/documents/stats?tenantCode=xxx
+     * GET /documents/v1/stats?tenantCode=xxx
      */
     @GetMapping("/stats")
     public Mono<ResponseEntity<DocumentStatsResponse>> getStats(DocumentRequest request) {
@@ -333,7 +350,7 @@ public class DocumentController {
 
     /**
      * 健康检查接口
-     * GET /api/documents/health
+     * GET /documents/v1/health
      */
     @GetMapping("/health")
     public Mono<String> health() {
@@ -342,7 +359,7 @@ public class DocumentController {
 
     /**
      * 知识图谱数据接口（供前端可视化）
-     * GET /api/documents/graph
+     * GET /documents/v1/graph
      */
     @GetMapping("/graph")
     public Mono<ResponseEntity<Map<String, Object>>> getGraph(
