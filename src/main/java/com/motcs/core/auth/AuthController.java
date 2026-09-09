@@ -4,12 +4,15 @@ import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.utils.Utils;
 import com.motcs.core.auth.keys.ApiKey;
 import com.motcs.core.auth.keys.ApiKeyService;
+import com.motcs.core.auth.keys.ApiKeyUsage;
+import com.motcs.core.auth.keys.ApiKeyUsageService;
 import com.motcs.core.auth.token.AuthenticationToken;
 import com.motcs.core.auth.token.TokenStore;
 import com.motcs.core.request.ApiKeyRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -37,6 +40,7 @@ public class AuthController {
 
     private final TokenStore tokenStore;
     private final ApiKeyService apiKeyService;
+    private final ApiKeyUsageService apiKeyUsageService;
 
     /**
      * 超管登录（HTTP Basic Auth）：POST /auth/v1/login 携带
@@ -120,6 +124,53 @@ public class AuthController {
     @Operation(summary = "删除 Key（撤销后携带该 Key 的请求立即失效）")
     public Mono<ResponseEntity<Void>> deleteApiKey(@PathVariable Long id) {
         return apiKeyService.delete(id).thenReturn(ResponseEntity.ok().build());
+    }
+
+    /**
+     * 启用/停用 Key：关闭后该 Key 临时失效（携带它的请求立即 401），可随时重新开启
+     * Body: {"enabled": true} 或 {"enabled": false}
+     */
+    @PutMapping("/api-keys/{id}/enabled")
+    @Operation(summary = "启用/停用 Key（关闭后临时失效，可随时重新开启）")
+    public Mono<ResponseEntity<?>> setApiKeyEnabled(@PathVariable Long id, @RequestBody Map<String, Boolean> body) {
+        Boolean enabled = body == null ? null : body.get("enabled");
+        if (enabled == null) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of(
+                    "success", false, "message", "enabled 字段必填（true/false）")));
+        }
+        return apiKeyService.setEnabled(id, enabled)
+                .map(updated -> updated == null
+                        ? ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                        "success", false, "message", "API Key 不存在"))
+                        : ResponseEntity.ok(Map.of(
+                        "success", true, "id", updated.getId(), "enabled", updated.getEnabled())));
+    }
+
+    /**
+     * Key 使用监控汇总：调用次数 + 总 token 消耗（prompt/completion/total）
+     */
+    @GetMapping("/api-keys/{id}/usage-summary")
+    @Operation(summary = "Key 使用汇总：调用次数 + 总 token 消耗")
+    public Mono<ResponseEntity<Map<String, Object>>> apiKeyUsageSummary(@PathVariable Long id) {
+        return apiKeyUsageService.summary(id).map(ResponseEntity::ok);
+    }
+
+    /**
+     * Key 使用监控明细：按时间倒序分页（标准 Pageable）
+     */
+    @GetMapping("/api-keys/{id}/usage")
+    @Operation(summary = "Key 使用明细（每次对话的 token 消耗，分页）")
+    public Mono<ResponseEntity<Flux<ApiKeyUsage>>> apiKeyUsageList(@PathVariable Long id, Pageable pageable) {
+        return Mono.just(ResponseEntity.ok(apiKeyUsageService.list(id, pageable)));
+    }
+
+    /**
+     * 用量监控总览：所有 Key 的用量汇总 + 全局合计（监控界面）
+     */
+    @GetMapping("/usage-overview")
+    @Operation(summary = "用量监控总览：全部 Key 汇总 + 全局合计")
+    public Mono<ResponseEntity<Map<String, Object>>> apiKeyUsageOverview() {
+        return apiKeyUsageService.overview(apiKeyService.list()).map(ResponseEntity::ok);
     }
 
 }

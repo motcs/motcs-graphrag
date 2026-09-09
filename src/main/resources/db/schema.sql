@@ -61,7 +61,6 @@ ALTER TABLE api_key
     ADD COLUMN system_type VARCHAR(64) DEFAULT NULL COMMENT '绑定的系统类型（对话/上传文档归属）';
 
 
-
 -- API Key 表（OpenAI 风格：只存 SHA-256 哈希与前缀掩码，明文仅创建时返回一次）
 CREATE TABLE IF NOT EXISTS api_key
 (
@@ -69,11 +68,27 @@ CREATE TABLE IF NOT EXISTS api_key
     name         VARCHAR(100) NOT NULL COMMENT '用途备注',
     key_prefix   VARCHAR(40)  NOT NULL COMMENT 'Key前缀（展示掩码）',
     key_hash     CHAR(64)     NOT NULL COMMENT '完整Key的SHA-256哈希',
-    tenant_code  VARCHAR(64)  DEFAULT NULL COMMENT '绑定的租户编码（对话/上传文档归属）',
-    system_type  VARCHAR(64)  DEFAULT NULL COMMENT '绑定的系统类型（对话/上传文档归属）',
-    enabled      TINYINT(1)   DEFAULT 1 COMMENT '是否启用 1启用 0停用',
-    created_by   VARCHAR(64)  DEFAULT 'admin' COMMENT '创建人',
-    created_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    tenant_code  VARCHAR(64) DEFAULT NULL COMMENT '绑定的租户编码（对话/上传文档归属）',
+    system_type  VARCHAR(64) DEFAULT NULL COMMENT '绑定的系统类型（对话/上传文档归属）',
+    enabled      TINYINT(1)  DEFAULT 1 COMMENT '是否启用 1启用 0停用',
+    created_by   VARCHAR(64) DEFAULT 'admin' COMMENT '创建人',
+    created_time DATETIME    DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     UNIQUE KEY uk_key_hash (key_hash)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='API Key 表';
+
+CREATE TABLE IF NOT EXISTS api_key_usage
+(
+    id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+    api_key_id        BIGINT NOT NULL COMMENT 'API Key 主键ID',
+    user_id           VARCHAR(100) DEFAULT '',
+    session_id        VARCHAR(100) DEFAULT '',
+    model             VARCHAR(100) DEFAULT '',
+    prompt_tokens     INT          DEFAULT 0,
+    completion_tokens INT          DEFAULT 0,
+    total_tokens      INT          DEFAULT 0,
+    created_time      DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_usage_api_key (api_key_id),
+    KEY idx_usage_created (created_time)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4;

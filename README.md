@@ -237,6 +237,30 @@ services:
 
 ---
 
+## 数据库初始化（MySQL）
+
+API Key 使用监控依赖一张表 `api_key_usage`（每次 `/keys/v1/chat` 对话消耗的 token 明细），首次部署执行（幂等）：
+
+```sql
+CREATE TABLE IF NOT EXISTS api_key_usage (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  api_key_id BIGINT NOT NULL COMMENT 'API Key 主键ID',
+  user_id VARCHAR(100) DEFAULT '' COMMENT '调用方用户编码',
+  session_id VARCHAR(100) DEFAULT '' COMMENT '会话ID',
+  model VARCHAR(100) DEFAULT '' COMMENT '使用的模型',
+  prompt_tokens INT DEFAULT 0 COMMENT '输入 token 数',
+  completion_tokens INT DEFAULT 0 COMMENT '输出 token 数',
+  total_tokens INT DEFAULT 0 COMMENT '总 token 数',
+  created_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '调用时间',
+  KEY idx_usage_api_key (api_key_id),
+  KEY idx_usage_created (created_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='API Key 使用监控（token 消耗明细）';
+```
+
+> 表不存在时用量记录静默跳过，不影响对话功能。
+
+---
+
 ## 认证与权限控制
 
 > **租户语义**：租户 `0` 为超管全局租户。
@@ -342,6 +366,9 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 | `GET`    | `/auth/v1/me`               | 仅登录         | 当前登录状态                                                |
 | `GET`    | `/auth/v1/api-keys`         | 仅登录         | Key 列表（仅掩码，不含哈希与明文）                          |
 | `POST`   | `/auth/v1/api-keys`         | 仅登录         | 生成新 Key（Body：name 备注/**tenantCode 租户**/**systemType 系统**均必填；返回明文一次） |
+| `PUT`    | `/auth/v1/api-keys/{id}/enabled` | 仅登录     | 启用/停用 Key（Body：{"enabled":true/false}；停用后临时失效 401，可随时重新开启） |
+| `GET`    | `/auth/v1/api-keys/{id}/usage-summary` | 仅登录 | Key 使用汇总：调用次数 + 总 token（prompt/completion/total） |
+| `GET`    | `/auth/v1/api-keys/{id}/usage` | 仅登录       | Key 使用明细（每次对话的 token 消耗，标准 Pageable 分页）   |
 | `DELETE` | `/auth/v1/api-keys/{id}`    | 仅登录         | 删除 Key（立即失效）                                        |
 
 ### AI 平台探测

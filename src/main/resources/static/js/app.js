@@ -325,6 +325,51 @@ function switchTab(tab) {
         const n = $('apiKeyName'); if (n) n.value = '';
         loadApiKeys();
     }
+    if (tab === 'monitor') loadUsageOverview();
+}
+
+/* ---------- 用量监控 ---------- */
+async function loadUsageOverview() {
+    const tbody = $('monitorUsageList');
+    const empty = $('monitorUsageEmpty');
+    try {
+        const res = await fetch(`${AUTH_BASE}/usage-overview`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        // 统计卡片
+        $('monTotalKeys').textContent = data.totalKeys ?? 0;
+        $('monTotalCalls').textContent = data.totalCalls ?? 0;
+        $('monPrompt').textContent = (data.promptTokens ?? 0).toLocaleString();
+        $('monCompletion').textContent = (data.completionTokens ?? 0).toLocaleString();
+        $('monTotal').textContent = (data.totalTokens ?? 0).toLocaleString();
+        // 表格
+        tbody.innerHTML = '';
+        const keys = data.keys || [];
+        empty.classList.toggle('hidden', keys.length > 0);
+        keys.forEach(k => {
+            const tr = document.createElement('tr');
+            tr.className = 'border-b border-white/5';
+            const enabledBadge = k.enabled
+                ? '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-emerald-500/15 text-emerald-400">启用</span>'
+                : '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>';
+            tr.innerHTML = `
+                <td class="py-2.5 pr-3 font-mono text-xs text-gray-300">${escapeHtml(k.prefix || 'sk-…')}…</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-300">${escapeHtml(k.name || '-')}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(k.tenantCode || '-')} / ${escapeHtml(k.systemType || '-')}</td>
+                <td class="py-2.5 pr-3">${enabledBadge}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-300">${k.totalCalls ?? 0}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400">${(k.promptTokens ?? 0).toLocaleString()}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400">${(k.completionTokens ?? 0).toLocaleString()}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-300 font-medium">${(k.totalTokens ?? 0).toLocaleString()}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未使用'}</td>
+                <td class="py-2.5 text-right">
+                    <button onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\\'"))}')" class="text-xs px-2 py-1 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition">明细</button>
+                </td>`;
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        showToast('加载用量监控失败', 'error');
+    }
 }
 
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -2062,13 +2107,96 @@ async function loadApiKeys() {
                 <td class="py-2.5 pr-3 font-mono text-xs text-gray-400">${escapeHtml(k.keyPrefix || '')}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(k.tenantCode || '-')} / ${escapeHtml(k.systemType || '-')}</td>
                 <td class="py-2.5 pr-3">${k.enabled ? '<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">启用</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-400">停用</span>'}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400" id="usage-${k.id}">加载中…</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${formatTime(k.createdTime)}</td>
-                <td class="py-2.5 text-right"><button onclick="deleteApiKey(${k.id})" class="text-xs text-red-400 hover:text-red-300 transition">删除</button></td>`;
+                <td class="py-2.5 text-right whitespace-nowrap">
+                    <button onclick="toggleApiKey(${k.id}, ${k.enabled})" class="text-xs px-2 py-1 rounded-lg ${k.enabled ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'} transition mr-1">${k.enabled ? '停用' : '启用'}</button>
+                    <button onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\\'"))}')" class="text-xs px-2 py-1 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition mr-1">用量</button>
+                    <button onclick="deleteApiKey(${k.id})" class="text-xs px-2 py-1 rounded-lg text-red-400 hover:bg-red-500/10 transition">删除</button>
+                </td>`;
             tbody.appendChild(tr);
+            loadKeyUsageSummary(k.id);
         });
     } catch (e) {
         showToast('加载 API Key 列表失败', 'error');
     }
+}
+
+/** 异步加载单个 Key 的用量汇总（调用次数 / 总 token） */
+async function loadKeyUsageSummary(id) {
+    const el = $('usage-' + id);
+    if (!el) return;
+    try {
+        const res = await fetch(`${AUTH_BASE}/api-keys/${id}/usage-summary`);
+        if (!res.ok) { el.textContent = '-'; return; }
+        const s = await res.json();
+        const total = s.totalTokens || 0;
+        el.textContent = `${s.totalCalls || 0} 次 / ${total} token`;
+        el.title = `输入 ${s.promptTokens || 0} · 输出 ${s.completionTokens || 0} token`;
+    } catch (e) {
+        el.textContent = '-';
+    }
+}
+
+/** 启用/停用 Key：关闭后该 Key 临时失效，可随时重新开启 */
+async function toggleApiKey(id, currentEnabled) {
+    const action = currentEnabled ? '停用' : '启用';
+    if (!confirm(`确定${action}该 API Key？${currentEnabled ? '停用后携带该 Key 的请求将立即失效（可随时重新启用）。' : '启用后该 Key 立即恢复可用。'}`)) return;
+    try {
+        const res = await fetch(`${AUTH_BASE}/api-keys/${id}/enabled`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: !currentEnabled })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        showToast(`已${action}`, 'success');
+        await loadApiKeys();
+    } catch (e) {
+        showToast(`${action}失败`, 'error');
+    }
+}
+
+/** 查看 Key 用量明细弹窗 */
+async function showApiKeyUsage(id, name) {
+    $('apiKeyUsageTitle').textContent = '用量明细' + (name ? ' — ' + name : '');
+    $('apiKeyUsageSub').textContent = 'Key #' + id + ' · 加载中…';
+    const tbody = $('apiKeyUsageList');
+    tbody.innerHTML = '';
+    $('apiKeyUsageEmpty').classList.add('hidden');
+    $('apiKeyUsageModal').classList.remove('hidden');
+    try {
+        // 汇总：调用次数 + 总 token（显示在弹窗头部）
+        const sRes = await fetch(`${AUTH_BASE}/api-keys/${id}/usage-summary`);
+        if (sRes.ok) {
+            const s = await sRes.json();
+            $('apiKeyUsageSub').textContent =
+                `Key #${id} · 累计 ${s.totalCalls || 0} 次调用 / ${(s.totalTokens || 0).toLocaleString()} token` +
+                `（输入 ${(s.promptTokens || 0).toLocaleString()} · 输出 ${(s.completionTokens || 0).toLocaleString()}）`;
+        }
+        const res = await fetch(`${AUTH_BASE}/api-keys/${id}/usage?page=0&size=50&sort=createdTime,desc`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const list = await res.json();
+        if (!list || list.length === 0) { $('apiKeyUsageEmpty').classList.remove('hidden'); return; }
+        list.forEach(u => {
+            const tr = document.createElement('tr');
+            tr.className = 'border-b border-white/5';
+            tr.innerHTML = `
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${formatTime(u.createdTime)}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(u.userId || '-')}</td>
+                <td class="py-2.5 pr-3 font-mono text-xs text-gray-400">${escapeHtml(u.sessionId || '-')}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(u.model || '-')}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400">${u.promptTokens || 0}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400">${u.completionTokens || 0}</td>
+                <td class="py-2.5 text-right text-xs text-gray-300 font-medium">${u.totalTokens || 0}</td>`;
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        showToast('加载用量明细失败', 'error');
+    }
+}
+
+function closeApiKeyUsage() {
+    $('apiKeyUsageModal').classList.add('hidden');
 }
 
 async function createApiKey() {
@@ -2136,5 +2264,6 @@ function initAuth() {
     $('logoutBtn').addEventListener('click', doLogout);
     $('apiKeyCreateBtn').addEventListener('click', createApiKey);
     $('apiKeyCopyBtn').addEventListener('click', copyNewKey);
+    $('monitorRefreshBtn').addEventListener('click', loadUsageOverview);
 }
 initAuth();

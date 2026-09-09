@@ -100,6 +100,20 @@ public class ApiKeyService {
         return apiKeyRepository.deleteById(id);
     }
 
+    /**
+     * 启用/停用 Key：关闭后该 Key 临时失效（findEnabledByKeyHash 查不到 → 请求 401），
+     * 重新开启后立即恢复。返回更新后的实体；不存在返回 empty。
+     */
+    public Mono<ApiKey> setEnabled(Long id, Boolean enabled) {
+        if (id == null || enabled == null) {
+            return Mono.empty();
+        }
+        return apiKeyRepository.findById(id).flatMap(existing -> {
+            existing.setEnabled(enabled);
+            return apiKeyRepository.save(existing);
+        });
+    }
+
     private String randomString() {
         StringBuilder sb = new StringBuilder(apiKeyLen);
         for (int i = 0; i < apiKeyLen; i++) {

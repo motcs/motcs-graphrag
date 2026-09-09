@@ -234,6 +234,30 @@ services:
 
 ---
 
+## Database Initialization (MySQL)
+
+API Key usage monitoring relies on one table `api_key_usage` (token cost detail per `/keys/v1/chat` call). Run once on first deployment (idempotent):
+
+```sql
+CREATE TABLE IF NOT EXISTS api_key_usage (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  api_key_id BIGINT NOT NULL COMMENT 'API Key primary key',
+  user_id VARCHAR(100) DEFAULT '' COMMENT 'Caller user code',
+  session_id VARCHAR(100) DEFAULT '' COMMENT 'Session ID',
+  model VARCHAR(100) DEFAULT '' COMMENT 'Model used',
+  prompt_tokens INT DEFAULT 0 COMMENT 'Prompt tokens',
+  completion_tokens INT DEFAULT 0 COMMENT 'Completion tokens',
+  total_tokens INT DEFAULT 0 COMMENT 'Total tokens',
+  created_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT 'Call time',
+  KEY idx_usage_api_key (api_key_id),
+  KEY idx_usage_created (created_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='API Key usage monitoring (token cost detail)';
+```
+
+> If the table is missing, usage records are silently skipped without affecting chat.
+
+---
+
 ## Authentication & Authorization
 
 > **Tenant semantics**: tenant `0` is the admin global tenant.
@@ -339,6 +363,9 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 | `GET` | `/auth/v1/me` | Admin | Current login state |
 | `GET` | `/auth/v1/api-keys` | Admin | Key list (masked only) |
 | `POST` | `/auth/v1/api-keys` | Admin | Create key (Body: name/**tenantCode**/**systemType** required; plaintext returned once) |
+| `PUT` | `/auth/v1/api-keys/{id}/enabled` | Admin | Enable/disable key (Body: {"enabled":true/false}; disabled key returns 401, can be re-enabled anytime) |
+| `GET` | `/auth/v1/api-keys/{id}/usage-summary` | Admin | Usage summary: call count + total tokens (prompt/completion/total) |
+| `GET` | `/auth/v1/api-keys/{id}/usage` | Admin | Usage detail (token cost per call, standard Pageable paging) |
 | `DELETE` | `/auth/v1/api-keys/{id}` | Admin | Delete key (immediately invalid) |
 
 ### AI Platform Probe

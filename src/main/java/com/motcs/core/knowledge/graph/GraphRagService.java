@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
@@ -137,8 +138,9 @@ public class GraphRagService {
                             .param("history", ctx.historyContext()))
                     .user(ragQuery.getQuestion());
             applyModelOptions(answerSpec, ragQuery.getModel());
-            Flux<ChatStreamEvent> answer = streamChatEvents(answerSpec);
-            return new QueryResult(ctx.sources(), answer);
+            AtomicReference<Usage> usageRef = new AtomicReference<>();
+            Flux<ChatStreamEvent> answer = streamChatEvents(answerSpec, usageRef);
+            return new QueryResult(ctx.sources(), answer, usageRef);
         }).switchIfEmpty(Mono.fromCallable(() -> {
             // 向量检索无结果：仍调用 AI，让其判断是打招呼/闲聊还是知识问题
             // 打招呼类客气回复，知识类说明未找到相关内容
@@ -156,8 +158,9 @@ public class GraphRagService {
                     .system(noResultPrompt)
                     .user(ragQuery.getQuestion());
             applyModelOptions(noResultSpec, ragQuery.getModel());
-            Flux<ChatStreamEvent> answer = streamChatEvents(noResultSpec);
-            return new QueryResult(List.of(), answer);
+            AtomicReference<Usage> usageRef = new AtomicReference<>();
+            Flux<ChatStreamEvent> answer = streamChatEvents(noResultSpec, usageRef);
+            return new QueryResult(List.of(), answer, usageRef);
         })).doOnError(e -> log.error("GraphRAG查询出错: {}", e.getMessage(), e));
     }
 
@@ -178,11 +181,16 @@ public class GraphRagService {
      * 思考片段输出 type=reasoning，正文片段输出 type=content（仅当正文实际有文本时下发，
      * 思考阶段 getText() 为空，不发送空 content 事件，避免前端误判为"正文开始"而折叠思考框）。
      */
-    private Flux<ChatStreamEvent> streamChatEvents(ChatClient.ChatClientRequestSpec promptSpec) {
+    private Flux<ChatStreamEvent> streamChatEvents(ChatClient.ChatClientRequestSpec promptSpec, AtomicReference<Usage> usageRef) {
         // Spring AI 2.0.1 每个流式 chunk 的 metadata["reasoningContent"] 是累计值，
         // 这里只取新增片段下发，避免前端重复拼接。
         AtomicReference<String> lastReasoning = new AtomicReference<>("");
         return promptSpec.stream().chatResponse().concatMap(response -> {
+            // 累计 token 用量：每个 chunk 的 metadata 都带 Usage（总用量），流结束时保留最后一份
+            Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
+            if (usage != null && usageRef != null) {
+                usageRef.set(usage);
+            }
             if (response.getResult() == null) {
                 return Flux.empty();
             }
@@ -1030,7 +1038,8 @@ public class GraphRagService {
     /**
      * 查询结果封装：知识库来源 + SSE 事件流（思考/正文通过 type 字段区分）
      */
-    public record QueryResult(List<Map<String, Object>> sources, Flux<ChatStreamEvent> answer) {
+    public record QueryResult(List<Map<String, Object>> sources, Flux<ChatStreamEvent> answer,
+                              AtomicReference<Usage> usageRef) {
     }
 
     /**
