@@ -31,6 +31,10 @@ An enterprise-grade document knowledge base and multi-hop intelligent Q&A system
 - Multi-tenant + multi-system isolation; docs uploaded by the admin (tenant `0`) are open to all tenants; users can only delete their own uploads
 - Lightweight stats API (aggregated query, scales to millions of documents)
 - Failed uploads support retry with auto-filled form
+- **Tenant / system-type dropdowns**: upload modal and document management page select tenant and system type from dropdowns
+  - Tenant options come from the tenant config table (`tenant_config`, via `GET /documents/v1/tenants`); `0` is the admin's "all tenants" option
+  - System-type options come from the frontend config `js/config.js` (`window.MOTCS_CONFIG.systems`), editable at deployment without rebuilding
+- **Tenant management page**: left-nav "Tenant Management" with add / delete tenants and fuzzy search by tenant name; tenant `0` is system-reserved and not listed there
 
 ### Knowledge Graph
 
@@ -373,6 +377,9 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 | `GET` | `/documents/v1/list` | Admin | List documents (tenantCode + systemType; tenant 0 → all) |
 | `DELETE` | `/documents/v1/docCode/{docCode}` | Admin | Delete by docCode (cascade: chunks/vectors/entities/relations/files) |
 | `GET` | `/documents/v1/stats` | Admin | Document statistics (lightweight aggregation) |
+| `GET` | `/documents/v1/tenants` | Admin | Tenant dropdown list: fixed `0` (all tenants) + enabled tenants from config table |
+| `POST` | `/documents/v1/tenants` | Admin | Create tenant (Body: {"tenantCode":"410725","tenantName":"长安区人大"}; tenant 0 reserved, not addable) |
+| `DELETE` | `/documents/v1/tenants/{id}` | Admin | Delete tenant by config-table id (removed from dropdowns; uploaded docs unaffected) |
 | `GET` | `/documents/v1/health` | Public | Health check |
 
 ### Intelligent Q&A

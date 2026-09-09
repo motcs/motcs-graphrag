@@ -12,6 +12,7 @@ import com.motcs.core.request.SessionRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.multipart.FilePart;
@@ -25,6 +26,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +47,77 @@ public class DocumentController {
     private final DocumentService documentService;
     private final GraphRagService graphRagService;
     private final WebClient.Builder webClientBuilder;
+    private final TenantConfigRepository tenantConfigRepository;
+
+    /**
+     * 租户下拉列表：固定附加"0 - 全部租户（超管）"选项，其余取自租户配置表（启用中）
+     * GET /documents/v1/tenants
+     */
+    @GetMapping("/tenants")
+    public Mono<ResponseEntity<Flux<TenantConfig>>> listTenants() {
+        Flux<TenantConfig> configFlux = tenantConfigRepository.findByEnabledTrueOrderByIdAsc();
+        TenantConfig config = new TenantConfig();
+        config.setTenantCode("0");
+        config.setTenantName("全部租户");
+        config.setEnabled(true);
+        Flux<TenantConfig> tenants = Flux.concat(Flux.just(config), configFlux);
+        return Mono.just(ResponseEntity.ok(tenants));
+    }
+
+    /**
+     * 新增租户（租户配置表，租户 0 为系统保留项不可添加）
+     * POST /documents/v1/tenants  Body: {"tenantCode":"410725","tenantName":"长安区人大"}
+     */
+    @PostMapping("/tenants")
+    public Mono<ResponseEntity<Map<String, Object>>> createTenant(@RequestBody Map<String, String> body) {
+        String code = body == null ? null : body.get("tenantCode");
+        String name = body == null ? null : body.get("tenantName");
+        if (ObjectUtils.isEmpty(code) || ObjectUtils.isEmpty(name)) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户编码与租户名称必填")));
+        }
+        code = code.trim();
+        name = name.trim();
+        if ("0".equals(code)) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户 0 为系统保留项，不能添加")));
+        }
+        String finalCode = code;
+        Mono<ResponseEntity<Map<String, Object>>> responseEntityMono = tenantConfigRepository.findByTenantCode(code)
+                .flatMap(_ -> Mono.just(ResponseEntity.badRequest().body(Map
+                        .of("success", false, "message", "租户编码已存在: " + finalCode))));
+
+        String finalCode1 = code;
+        String finalName = name;
+        return responseEntityMono.switchIfEmpty(Mono.defer(() -> tenantConfigRepository.save(TenantConfig.builder()
+                        .tenantCode(finalCode1).tenantName(finalName).enabled(true).createdTime(LocalDateTime.now()).build())
+                .flatMap(saved -> {
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    result.put("id", saved.getId());
+                    result.put("message", "租户添加成功");
+                    return Mono.just(ResponseEntity.ok(result));
+                })));
+    }
+
+    /**
+     * 删除租户（租户 0 不落表，不会走到此接口）
+     * DELETE /documents/v1/tenants/{id}
+     */
+    @DeleteMapping("/tenants/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> deleteTenant(@PathVariable("id") Long id) {
+        return tenantConfigRepository.existsById(id).flatMap(exists -> {
+            if (!exists) {
+                return Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of("success", false, "message", "租户不存在或已被删除")));
+            }
+            return tenantConfigRepository.deleteById(id).then(Mono.fromCallable(() -> {
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("id", id);
+                result.put("message", "租户已删除");
+                return ResponseEntity.ok(result);
+            }));
+        });
+    }
 
     /**
      * 上传文档接口（WebFlux 响应式，使用 FilePart）

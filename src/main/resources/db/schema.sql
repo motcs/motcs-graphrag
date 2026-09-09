@@ -92,3 +92,17 @@ CREATE TABLE IF NOT EXISTS api_key_usage
     KEY idx_usage_created (created_time)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4;
+
+create table tenant_config
+(
+    id           bigint auto_increment
+        primary key,
+    tenant_code  varchar(50)                          not null comment '租户编码（唯一）',
+    tenant_name  varchar(100)                         not null comment '租户名称',
+    enabled      tinyint(1) default 1                 null comment '是否启用',
+    created_time datetime   default CURRENT_TIMESTAMP null,
+    constraint uk_tenant_code
+        unique (tenant_code)
+)
+    comment '租户配置（文档管理/对话租户下拉数据源）';
+

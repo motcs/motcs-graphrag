@@ -49,13 +49,17 @@
             </div>
             <div class="flex items-center gap-2">
                 <label class="text-xs text-gray-400">租户</label>
-                <input id="globalTenant" type="text" value="0"
-                    class="w-28 px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                <select id="globalTenant" title="租户下拉内容来自后端租户配置表（GET /documents/v1/tenants），0 为超管全部租户"
+                    class="w-32 px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                    <option value="0">全部租户</option>
+                </select>
             </div>
             <div class="flex items-center gap-2">
                 <label class="text-xs text-gray-400">系统</label>
-                <input id="globalSystem" type="text" value="other"
+                <select id="globalSystem" title="系统类型下拉内容来自 js/config.js（MOTCS_CONFIG.systems），部署可改"
                     class="w-28 px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                    <option value="other">其他</option>
+                </select>
             </div>
             <div id="healthBadge" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-dark-850 border border-white/10">
                 <span class="w-2 h-2 rounded-full bg-gray-500" id="healthDot"></span>
@@ -88,6 +92,10 @@
             <button data-tab="documents" class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 文档管理
+            </button>
+            <button data-tab="tenants" class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                租户管理
             </button>
             <button data-tab="apikey" class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
@@ -218,9 +226,13 @@
                                 <input type="text" id="uploadDesc" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="文档描述（可选）">
                                 <div class="grid grid-cols-2 gap-3">
                                     <input type="text" id="uploadDocCode" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="业务编码 docCode">
-                                    <input type="text" id="uploadTenant" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" value="default">
+                                    <select id="uploadTenant" title="租户下拉来自租户配置表" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                                        <option value="0">全部租户</option>
+                                    </select>
                                 </div>
-                                <input type="text" id="uploadSystem" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" value="default">
+                                <select id="uploadSystem" title="系统下拉来自 js/config.js" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                                    <option value="other">综合平台</option>
+                                </select>
                             </div>
                             <button id="uploadBtn" class="w-full mt-5 py-2.5 bg-primary-600 hover:bg-primary-500 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed">
                                 <span id="uploadBtnText">上传并入库</span>
@@ -240,8 +252,12 @@
                                 <input type="text" id="urlDesc" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="文档描述（可选）">
                                 <div class="grid grid-cols-3 gap-3">
                                     <input type="text" id="urlDocCode" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="docCode">
-                                    <input type="text" id="urlTenant" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" value="default">
-                                    <input type="text" id="urlSystem" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" value="default">
+                                    <select id="urlTenant" title="租户下拉来自租户配置表" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                                        <option value="0">全部租户</option>
+                                    </select>
+                                    <select id="urlSystem" title="系统下拉来自 js/config.js" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                                        <option value="other">综合平台</option>
+                                    </select>
                                 </div>
                             </div>
                             <button id="urlUploadBtn" class="w-full mt-5 py-2.5 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed">
@@ -272,8 +288,14 @@
                 </div>
             </div>
 
-            <div class="mb-4 flex items-center gap-3">
-                <input type="text" id="docSearch" class="flex-1 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="搜索文件名或标题...">
+            <div class="mb-4 flex flex-wrap items-center gap-3">
+                <select id="docFilterTenant" title="按租户筛选文档（0 为全部租户）" class="px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                    <option value="0">全部租户</option>
+                </select>
+                <select id="docFilterSystem" title="按系统类型筛选文档" class="px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                    <option value="">全部系统</option>
+                </select>
+                <input type="text" id="docSearch" class="flex-1 min-w-40 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="搜索文件名或标题...">
                 <select id="docStatusFilter" class="px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
                     <option value="all">全部状态</option>
                     <option value="SUCCESS">已完成</option>
@@ -295,6 +317,41 @@
             </div>
 
             <div id="docsList" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+        </section>
+
+        <!-- ===== 租户管理 ===== -->
+        <section id="tab-tenants" class="tab-panel hidden">
+            <div class="bg-dark-900/60 rounded-2xl border border-white/5 p-5">
+                <div class="mb-5">
+                    <h2 class="text-2xl font-bold">租户管理</h2>
+                    <p class="text-sm text-gray-400 mt-1">维护租户配置表（tenant_config）：文档管理/对话/上传页的租户下拉数据源。租户 0（全部租户）为系统保留项，不在此管理</p>
+                </div>
+                <div class="flex flex-wrap gap-3 mb-4">
+                    <input id="tenantNewCode" type="text" placeholder="租户编码，如 410725"
+                        class="w-40 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition placeholder-gray-500">
+                    <input id="tenantNewName" type="text" placeholder="租户名称，如 长安区人大"
+                        class="flex-1 min-w-40 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition placeholder-gray-500">
+                    <button id="tenantAddBtn" class="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition">添加租户</button>
+                </div>
+                <div class="mb-4">
+                    <input id="tenantSearch" type="text" placeholder="按租户名称模糊搜索..."
+                        class="w-72 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                </div>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-xs text-gray-400 border-b border-white/5">
+                            <th class="text-left py-2 font-medium">ID</th>
+                            <th class="text-left py-2 font-medium">租户编码</th>
+                            <th class="text-left py-2 font-medium">租户名称</th>
+                            <th class="text-left py-2 font-medium">状态</th>
+                            <th class="text-left py-2 font-medium">创建时间</th>
+                            <th class="text-right py-2 font-medium">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tenantList"></tbody>
+                </table>
+                <div id="tenantEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无租户，点击上方按钮添加</div>
+            </div>
         </section>
 
         <!-- ===== 知识图谱 ===== -->
@@ -551,6 +608,7 @@
     </div>
 </div>
 
-<script src="js/app.js?v=115"></script>
+<script src="js/config.js?v=1"></script>
+<script src="js/app.js?v=116"></script>
 </body>
 </html>

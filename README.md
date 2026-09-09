@@ -34,6 +34,10 @@
 - 多租户 + 多系统类型隔离；超管（租户 `0`）上传的文档对所有租户开放，用户仅可删除自己上传的文档
 - 文档统计接口（轻量聚合查询，百万级文档无压力）
 - 上传失败文档支持重新上传，表单自动反填
+- **租户/系统类型下拉框**：上传弹窗与文档管理页的租户、系统类型均为下拉选择
+  - 租户选项来自租户配置表（`tenant_config`，接口 `GET /documents/v1/tenants`），`0` 为超管全部租户
+  - 系统类型选项来自前端独立配置 `js/config.js`（`window.MOTCS_CONFIG.systems`，部署可改，无需重新打包）
+- **租户管理界面**：左侧导航「租户管理」，支持租户新增、删除、租户名称模糊搜索；租户 `0` 为系统保留项不在其中
 
 ### 知识图谱
 
@@ -376,6 +380,9 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 | `GET`    | `/documents/v1/list`              | 仅登录 | 查询文档列表（tenantCode + systemType；租户 0 查全部）                                              |
 | `DELETE` | `/documents/v1/docCode/{docCode}` | 仅登录 | 按 docCode 删除文档（级联删除分片/向量/实体/关系/文件）                                            |
 | `GET`    | `/documents/v1/stats`             | 仅登录 | 文档统计（文档数 + 分片数，轻量聚合）                                                              |
+| `GET`    | `/documents/v1/tenants`           | 仅登录 | 租户下拉列表：固定 `0`（全部租户）+ 租户配置表中启用租户                                          |
+| `POST`   | `/documents/v1/tenants`           | 仅登录 | 新增租户（Body: {"tenantCode":"410725","tenantName":"长安区人大"}；租户 0 保留不可添加）            |
+| `DELETE` | `/documents/v1/tenants/{id}`      | 仅登录 | 删除租户（按配置表 id；删除后不再出现在下拉框，已上传文档不受影响）                                |
 | `GET`    | `/documents/v1/health`            | 公开   | 健康检查                                                                                           |
 
 ### 智能问答

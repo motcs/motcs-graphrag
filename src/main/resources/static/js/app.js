@@ -166,6 +166,79 @@ function loadCfg() {
     } catch {}
 }
 
+/* ---------- 租户/系统下拉初始化 ----------
+ * 系统类型：选项来自外部配置 js（window.MOTCS_CONFIG.systems，见 js/config.js）
+ * 租户：选项来自后端租户配置表（GET /documents/v1/tenants，含固定 0-全部租户）
+ * 完成后恢复上次选择的租户/系统（localStorage）
+ */
+/* ---------- 下拉框通用填充 ---------- */
+// 系统类型选项填充（数据源：js/config.js 的 window.MOTCS_CONFIG.systems）
+function fillSystemOptions(sel) {
+    if (!sel || !window.MOTCS_CONFIG || !Array.isArray(window.MOTCS_CONFIG.systems)) return;
+    window.MOTCS_CONFIG.systems.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.code;
+        opt.textContent = s.label;
+        sel.appendChild(opt);
+    });
+}
+// 填充系统下拉（id 数组），withAll=true 时首项为"全部系统"（空值）
+function fillSystemSelects(ids, withAll) {
+    ids.forEach(id => {
+        const el = $(id);
+        if (!el) return;
+        el.innerHTML = withAll ? '<option value="">全部系统</option>' : '';
+        fillSystemOptions(el);
+    });
+}
+// 租户选项填充：首项固定"全部租户"（值 0，超管全局），其余来自租户配置表；
+// 下拉框仅显示租户名称，不显示编码（避免过长）
+function fillTenantSelects(ids, tenants) {
+    ids.forEach(id => {
+        const el = $(id);
+        if (!el) return;
+        el.innerHTML = '<option value="0">全部租户</option>';
+        (tenants || []).forEach(t => {
+            const tc = t ? (t.tenantCode ?? t.code) : null;
+            const tn = t ? (t.tenantName ?? t.name) : '';
+            if (tc === undefined || tc === null || String(tc) === '0') return;
+            const opt = document.createElement('option');
+            opt.value = tc;
+            opt.textContent = tn;
+            el.appendChild(opt);
+        });
+    });
+}
+
+/* ---------- 租户/系统下拉初始化 ----------
+ * 系统类型：选项来自外部配置 js（window.MOTCS_CONFIG.systems，见 js/config.js）
+ * 租户：选项来自后端租户配置表（GET /documents/v1/tenants，含固定 0-全部租户）
+ * 覆盖：顶部全局（globalTenant/globalSystem）、上传弹窗（uploadTenant/uploadSystem、
+ * urlTenant/urlSystem）、文档管理筛选（docFilterTenant/docFilterSystem）
+ * 完成后恢复上次选择的租户/系统（localStorage），上传弹窗默认跟随全局
+ */
+async function initTenantSystemSelects() {
+    // 系统类型下拉：从外部配置填充（文档筛选带"全部系统"空值项）
+    fillSystemSelects(['globalSystem', 'uploadSystem', 'urlSystem'], false);
+    fillSystemSelects(['docFilterSystem'], true);
+    // 租户下拉：拉一次租户配置表接口，填充所有租户下拉
+    let tenants = [];
+    try {
+        const res = await fetch(`${API_BASE}/tenants`);
+        if (res.ok) tenants = await res.json();
+    } catch (e) { /* 接口不可用时保留"0 - 全部租户"兜底 */ }
+    fillTenantSelects(['globalTenant', 'uploadTenant', 'urlTenant', 'docFilterTenant'], tenants);
+    // 恢复上次选择的租户/系统（仅全局）
+    try {
+        const c = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
+        if (c.tenant && $('globalTenant')) $('globalTenant').value = c.tenant;
+        if (c.system && $('globalSystem')) $('globalSystem').value = c.system;
+    } catch {}
+    // 上传弹窗/筛选默认跟随全局
+    ['uploadTenant', 'urlTenant'].forEach(id => { const el = $(id); if (el) el.value = getTenant(); });
+    ['uploadSystem', 'urlSystem'].forEach(id => { const el = $(id); if (el) el.value = getSystem(); });
+}
+
 /* ---------- 工具函数 ---------- */
 function $(id) { return document.getElementById(id); }
 
@@ -183,7 +256,8 @@ function formatSize(bytes) {
 function formatTime(dt) {
     if (!dt) return '-';
     try {
-        const d = new Date(dt);
+        // 兼容 "2026-09-09 18:14:46" 这类字符串（后端 DATETIME）
+        const d = new Date(String(dt).includes(' ') ? String(dt).replace(' ', 'T') : dt);
         return d.toLocaleString('zh-CN', { hour12: false });
     } catch { return dt; }
 }
@@ -319,6 +393,7 @@ function switchTab(tab) {
     $(`tab-${tab}`).classList.remove('hidden');
 
     if (tab === 'documents') loadDocuments();
+    if (tab === 'tenants') loadTenants();
     if (tab === 'apikey') {
         // 进入 API Key 管理面板：重置新 Key 展示区并加载列表
         const r = $('apiKeyNewResult'); if (r) r.classList.add('hidden');
@@ -326,6 +401,75 @@ function switchTab(tab) {
         loadApiKeys();
     }
     if (tab === 'monitor') loadUsageOverview();
+}
+
+/* ---------- 租户管理 ---------- */
+async function loadTenants() {
+    const list = $('tenantList');
+    const empty = $('tenantEmpty');
+    if (!list) return;
+    try {
+        const res = await fetch(`${API_BASE}/tenants`);
+        if (!res.ok) return;
+        let tenants = await res.json();
+        // 租户 0 为系统保留项，不进入管理列表（按 tenantCode 判断）
+        tenants = (tenants || []).filter(t => {
+            const tc = t ? (t.tenantCode ?? t.code) : null;
+            return tc !== undefined && tc !== null && String(tc) !== '0';
+        });
+        // 租户名称模糊搜索（前端过滤，数据量小）
+        const kw = ($('tenantSearch') ? $('tenantSearch').value : '').trim().toLowerCase();
+        if (kw) tenants = tenants.filter(t => ((t.tenantName ?? t.name) || '').toLowerCase().includes(kw));
+        if (empty) empty.classList.toggle('hidden', tenants.length > 0);
+        list.innerHTML = tenants.map(t => `
+            <tr class="border-b border-white/5 hover:bg-white/5">
+                <td class="py-2.5 text-gray-400">${t.id}</td>
+                <td class="py-2.5 font-mono text-primary-400">${escapeHtml(t.tenantCode ?? t.code)}</td>
+                <td class="py-2.5">${escapeHtml(t.tenantName ?? t.name)}</td>
+                <td class="py-2.5"><span class="tag ${t.enabled ? 'tag-green' : 'tag-gray'}">${t.enabled ? '启用' : '停用'}</span></td>
+                <td class="py-2.5 text-gray-400">${t.createdTime ? formatTime(t.createdTime) : '-'}</td>
+                <td class="py-2.5 text-right">
+                    <button class="tenant-del-btn text-red-400 hover:text-red-300 transition" data-id="${t.id}" data-name="${escapeHtml(String((t.tenantName ?? t.name) || '').replace(/'/g, "\\'"))}">删除</button>
+                </td>
+            </tr>`).join('');
+        list.querySelectorAll('.tenant-del-btn').forEach(btn => {
+            btn.addEventListener('click', () => deleteTenant(btn.dataset.id, btn.dataset.name));
+        });
+    } catch (e) { /* 静默失败 */ }
+}
+
+async function addTenant() {
+    const code = $('tenantNewCode').value.trim();
+    const name = $('tenantNewName').value.trim();
+    if (!code || !name) { showToast('租户编码与租户名称必填', 'error'); return; }
+    const res = await fetch(`${API_BASE}/tenants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantCode: code, tenantName: name })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+        showToast('租户添加成功', 'success');
+        $('tenantNewCode').value = '';
+        $('tenantNewName').value = '';
+        loadTenants();
+        initTenantSystemSelects(); // 刷新所有租户下拉
+    } else {
+        showToast(data.message || '添加失败', 'error');
+    }
+}
+
+async function deleteTenant(id, name) {
+    if (!confirm(`确认删除租户「${name}」？删除后该租户不再出现在下拉框，已上传的文档不受影响。`)) return;
+    const res = await fetch(`${API_BASE}/tenants/${id}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+        showToast('租户已删除', 'success');
+        loadTenants();
+        initTenantSystemSelects();
+    } else {
+        showToast(data.message || '删除失败', 'error');
+    }
 }
 
 /* ---------- 用量监控 ---------- */
@@ -1637,7 +1781,12 @@ async function loadDocuments() {
     list.innerHTML = '';
 
     try {
-        const res = await fetch(`${API_BASE}/list?tenantCode=${encodeURIComponent(getTenant())}&systemType=${encodeURIComponent(getSystem())}`);
+        // 文档管理页的筛选下拉（docFilterTenant/docFilterSystem）独立于顶部全局选择
+        const ft = $('docFilterTenant') ? $('docFilterTenant').value : getTenant();
+        const fs = $('docFilterSystem') ? $('docFilterSystem').value : getSystem();
+        let url = `${API_BASE}/list?tenantCode=${encodeURIComponent(ft || '0')}`;
+        if (fs) url += `&systemType=${encodeURIComponent(fs)}`;
+        const res = await fetch(url);
         let docs = await res.json();
         loading.classList.add('hidden');
 
@@ -2014,7 +2163,7 @@ $('globalUser').addEventListener('input', () => {
     clearChat();
     loadHistory();
 });
-$('globalTenant').addEventListener('input', () => {
+$('globalTenant').addEventListener('change', () => {
     syncLabels();
     $('uploadTenant').value = getTenant();
     $('urlTenant').value = getTenant();
@@ -2023,7 +2172,7 @@ $('globalTenant').addEventListener('input', () => {
     loadHistory();
     if (!$('tab-documents').classList.contains('hidden')) loadDocuments();
 });
-$('globalSystem').addEventListener('input', () => {
+$('globalSystem').addEventListener('change', () => {
     syncLabels();
     $('uploadSystem').value = getSystem();
     $('urlSystem').value = getSystem();
@@ -2032,10 +2181,13 @@ $('globalSystem').addEventListener('input', () => {
     loadHistory();
     if (!$('tab-documents').classList.contains('hidden')) loadDocuments();
 });
+// 文档管理页独立筛选下拉：变更即刷新文档列表
+$('docFilterTenant').addEventListener('change', () => loadDocuments());
+$('docFilterSystem').addEventListener('change', () => loadDocuments());
 
 /* ---------- 初始化 ---------- */
 function init() {
-    loadCfg();
+    initTenantSystemSelects();
     checkAuth();
     loadAiProvider();
     initMarkdown();
@@ -2265,5 +2417,7 @@ function initAuth() {
     $('apiKeyCreateBtn').addEventListener('click', createApiKey);
     $('apiKeyCopyBtn').addEventListener('click', copyNewKey);
     $('monitorRefreshBtn').addEventListener('click', loadUsageOverview);
+    $('tenantAddBtn').addEventListener('click', addTenant);
+    $('tenantSearch').addEventListener('input', loadTenants);
 }
 initAuth();
