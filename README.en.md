@@ -47,7 +47,7 @@ An enterprise-grade document knowledge base and multi-hop intelligent Q&A system
 > - **API Key**: cannot be bound to tenant `0`.
 
 - **Admin login**: single management account (env-configured). Issues an expiring `x-token` on success; subsequent requests carry the `x-token` header
-- **API Key auth**: admins generate keys for manual distribution; callers use the key to access AI chat endpoints. **Each key binds a tenant + system type**, and chat automatically searches that tenant's knowledge
+- **API Key auth**: admins generate keys for manual distribution; callers use the key to access the **API-Key-only chat endpoints** (`/keys/v1/**`). **Each key binds a tenant + system type**, and chat automatically searches that tenant's knowledge
 - **API Key chat endpoint**: `POST /keys/v1/chat` — callers only send question / userId / sessionId; tenant & system are resolved from the key binding
 - Four authorization tiers: public / admin-only / login-or-API-Key / API-Key-only (see [Authentication & Authorization](#authentication--authorization))
 - OpenAI-style key design: only SHA-256 hashes stored, plaintext shown once at creation, note/tenant/system required
@@ -57,7 +57,7 @@ An enterprise-grade document knowledge base and multi-hop intelligent Q&A system
 - Pure Spring WebFlux reactive, virtual threads + Reactor
 - Neo4j doubles as vector store and graph database; MySQL (R2DBC) stores API keys, chat messages, etc.
 - Spring Security (WebFlux): session login + stateless API Key dual channel
-- CSRF double-submit cookie protection (POST only; API Key requests exempt)
+- CSRF double-submit cookie protection (POST only; login & `/keys/v1/**` exempt)
 - Jib containerization, environment-variable-driven configuration, no rebuild needed
 - Jackson 3.x global date formatting, JVM timezone fixed to Asia/Shanghai
 
@@ -256,7 +256,7 @@ The system uses **Spring Security (WebFlux)** dual-channel authentication: **adm
 - **Storage**: only the SHA-256 hash and a prefix mask (e.g. `sk-Ab3Xy7...`) are stored; **the plaintext is returned once at creation** — regenerate if lost
 - **Note required**: `name` is mandatory, empty returns `400`
 - **Tenant/system required**: must bind `tenantCode` and `systemType` at creation (used for chat/doc ownership); **tenant `0` is forbidden** (admin global tenant), returns `400`
-- **Authorization**: API Key identity is `ROLE_API_KEY` — it can access the AI chat endpoints and `/keys/v1/**`; admin endpoints return `403`
+- **Authorization**: API Key identity is `ROLE_API_KEY` — it can **only** access `/keys/v1/**` (AI chat & history); `/documents/v1/**`, `/auth/v1/**` and other admin/business endpoints return `403`
 - **Management**: only the admin can generate / list / delete keys (deleting a key instantly invalidates requests carrying it)
 
 ### 3. Endpoint Authorization Matrix
@@ -269,7 +269,7 @@ The system uses **Spring Security (WebFlux)** dual-channel authentication: **adm
 | `GET /ai/v1/provider` (AI platform probe, drives model dropdown before login) | **Public** |
 | `POST /auth/v1/logout`, `GET /auth/v1/me` | **Admin only** |
 | `GET/POST /auth/v1/api-keys`, `DELETE /auth/v1/api-keys/{id}` (key management) | **Admin only** |
-| **`POST /documents/v1/query` (AI chat)** | **Login OR valid API Key** |
+| **`POST /documents/v1/query` (AI chat)** | **Admin login only** |
 | **`/keys/v1/**` (API-Key-only: `/chat` + `/conversations`)** | **API Key only** (admin login gets 403) |
 | All other business endpoints (upload/list/delete/stats/graph/sessions) | **Admin only** |
 
@@ -287,15 +287,19 @@ curl -X POST http://localhost:8080/auth/v1/login \
 Returns: `{"token":"xxx","expires":7200,"lastAccessTime":...}`. Carry `x-token` in subsequent requests.
 Tokens are registered in TokenStore with a TTL (default 2h, `AUTH_TOKEN_TTL`), sliding-expired on each valid use.
 
-**CSRF (double-submit cookie, POST only)**: the backend issues `Set-Cookie: XSRF-TOKEN=...` (httpOnly=false). The frontend reads the cookie and sends `X-CSRF-TOKEN` on authenticated **POST** requests; the backend compares header vs cookie. **GET and other methods are not checked.** Exempt: login, `/keys/v1/**`, and **API Key requests (`Authorization: Bearer` / `X-API-Key`)**.
+**CSRF (double-submit cookie, POST only)**: the backend issues `Set-Cookie: XSRF-TOKEN=...` (httpOnly=false). The frontend reads the cookie and sends `X-CSRF-TOKEN` on authenticated **POST** requests; the backend compares header vs cookie. **GET and other methods are not checked.** Exempt: login and `/keys/v1/**` (API-Key-only paths, no cookie session).
 
-**AI chat with an API Key (SSE)**
+**AI chat with admin login (SSE)**
 
 ```bash
-curl -N -X POST http://localhost:8080/documents/v1/query \
-  -H "Authorization: Bearer sk-Ab3Xy7..." \
+# 1) Login to get x-token (Basic Auth)
+curl -c cookies.txt -X POST http://localhost:8080/auth/v1/login \
+  -H "Authorization: Basic $(echo -n 'admin:your_password' | base64)"
+# 2) Send with x-token + CSRF header (value from Set-Cookie: XSRF-TOKEN)
+curl -N -b cookies.txt -X POST http://localhost:8080/documents/v1/query \
+  -H "x-token: tok-xxx..." -H "X-CSRF-TOKEN: <XSRF-TOKEN value>" \
   -H "Content-Type: application/json" \
-  -d '{"question":"What is multi-hop retrieval?","userId":"user0001","tenantCode":"test-tenant","systemType":"docs"}'
+  -d '{"question":"What is multi-hop retrieval?","userId":"xxhzj","tenantCode":"0","systemType":"other"}'
 ```
 
 **API-Key-only chat (tenant/system auto-resolved from the key; just send question / userId / sessionId)**
@@ -324,7 +328,7 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 ## API Reference
 
-> All endpoints require authentication (login or API Key) unless marked "Public" (see the [matrix](#3-endpoint-authorization-matrix)).
+> All endpoints require authentication (admin login or API Key) unless marked "Public" (see the [matrix](#3-endpoint-authorization-matrix)).
 
 ### Auth & API Key Management
 
@@ -358,7 +362,7 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 | Method | Path | Access | Description |
 |--------|------|--------|-------------|
-| `POST` | `/documents/v1/query` | **Login OR API Key** | GraphRAG Q&A (SSE; params: question/userId/sessionId/tenantCode/systemType/model optional) |
+| `POST` | `/documents/v1/query` | **Admin login only** | GraphRAG Q&A (SSE; params: question/userId/sessionId/tenantCode/systemType/model optional) |
 | `POST` | `/keys/v1/chat` | **API Key only** | API-Key-only Q&A (SSE; params: question/userId/sessionId optional/model optional; tenant/system from key binding; history isolated per key) |
 
 `model` values: `deepseek-v3.2` / `deepseek-v3.2-think` / `deepseek-v4-flash-0731` (defaults to the configured model).
@@ -388,10 +392,10 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 | Method | Path | Access | Description |
 |--------|------|--------|-------------|
-| `GET` | `/keys/v1/conversations` | API Key only | Session list (apikey + userId + tenantCode + systemType; last three optional) |
-| `GET` | `/keys/v1/conversations/session` | API Key only | Messages by sessionId (404 if not owned by this key) |
-| `DELETE` | `/keys/v1/conversations/session/{sessionId}` | API Key only | Delete a session (only if owned by this key, else 404) |
-| `DELETE` | `/keys/v1/conversations/batch` | API Key only | Batch delete (Body: sessionId array; only this key's sessions; returns actual count) |
+| `GET` | `/keys/v1` | API Key only | Session list (apikey + userId + tenantCode + systemType; last three optional) |
+| `GET` | `/keys/v1/session` | API Key only | Messages by sessionId (404 if not owned by this key) |
+| `DELETE` | `/keys/v1/session/{sessionId}` | API Key only | Delete a session (only if owned by this key, else 404) |
+| `DELETE` | `/keys/v1/batch` | API Key only | Batch delete (Body: sessionId array; only this key's sessions; returns actual count) |
 
 ### Knowledge Graph
 

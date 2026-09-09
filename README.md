@@ -50,9 +50,9 @@
 > - **API Key**：生成时不允许绑定租户 `0`。
 
 - **超管登录**：唯一管理账号（环境变量配置），登录成功后签发 x-token（带过期时间），后续请求携带 `x-token` 请求头完成鉴权
-- **API Key 鉴权**：超管生成 Key 后人工分发，调用方携带 Key 即可访问 AI 对话接口；**Key 绑定租户 + 系统类型**，对话时自动以此检索对应租户的知识库
+- **API Key 鉴权**：超管生成 Key 后人工分发，调用方携带 Key 即可访问 **API Key 专属对话接口**（`/keys/v1/**`）；**Key 绑定租户 + 系统类型**，对话时自动以此检索对应租户的知识库
 - **API Key 专属对话接口**：`POST /keys/v1/chat`，调用方只需传 问题 / 用户编码 / 会话ID，租户与系统类型由 Key 绑定值自动赋值
-- 接口权限分级：公开 / 仅超管登录 / 登录或 API Key / 仅 API Key 四类（详见 [认证与权限控制](#认证与权限控制)）
+- 接口权限分级：公开 / 仅超管登录 / 仅 API Key 三类（详见 [认证与权限控制](#认证与权限控制)）
 - API Key 参考 OpenAI 设计：数据库只存哈希、明文仅生成时展示一次、备注/租户/系统类型必填
 
 ### 系统架构
@@ -259,7 +259,7 @@ services:
 - **存储**：数据库只保存 SHA-256 哈希与前缀掩码（如 `sk-Ab3Xy7...`），**明文仅在生成时返回一次**，丢失需重新生成
 - **备注必填**：生成时 `name`（备注）必填，为空返回 `400`
 - **租户/系统必填**：生成时必须绑定 `tenantCode`（具体租户编码）与 `systemType`（系统类型），对话/上传时以此归属；**不允许绑定租户 `0`**（超管全局租户），传 `0` 返回 `400`
-- **权限**：API Key 认证身份为 `ROLE_API_KEY`，**可访问 AI 对话接口与 `/keys/v1/**` 专属接口**，无法访问管理类接口（403）
+- **权限**：API Key 认证身份为 `ROLE_API_KEY`，**仅可访问 `/keys/v1/**` 专属接口**（AI 对话与对话历史），无法访问 `/documents/v1/**`、`/auth/v1/**` 等管理/业务接口（403）
 - **管理**：仅超管可生成 / 查看列表 / 删除（删除后携带该 Key 的请求立即失效）
 
 ### 3. 接口权限矩阵
@@ -272,7 +272,7 @@ services:
 | `GET /ai/v1/provider`（AI 平台探测，登录前渲染模型下拉） | **公开** |
 | `POST /auth/v1/logout`、`GET /auth/v1/me` | **仅超管登录** |
 | `GET/POST /auth/v1/api-keys`、`DELETE /auth/v1/api-keys/{id}`（API Key 管理） | **仅超管登录** |
-| **`POST /documents/v1/query`（AI 对话接口）** | **登录 或 有效 API Key（二选一）** |
+| **`POST /documents/v1/query`（AI 对话接口）** | **仅超管登录** |
 | **`/keys/v1/**`（API Key 专属：`/chat` 对话 + `/conversations` 历史查询/删除）** | **仅 API Key**（登录用户 403） |
 | 其余所有业务接口（上传/列表/删除/统计/图谱/会话记录等） | **仅超管登录** |
 
@@ -290,15 +290,19 @@ curl -X POST http://localhost:8080/auth/v1/login \
 成功返回：`{"token":"xxx","expires":7200,"lastAccessTime":...}`，后续请求携带 `x-token` 请求头调用业务接口。
 token 登记到 TokenStore，**带过期时间（默认 2 小时，可配置 `AUTH_TOKEN_TTL`，每次有效使用自动续期/滑动过期）**，过期后自动失效需重新登录。
 
-**CSRF 防护（双提交 Cookie 模式，仅 POST 校验）**：CSRF token 由后端经响应头 **`Set-Cookie: XSRF-TOKEN=...`** 下发（httpOnly=false），前端读取 cookie 后，在登录态的 **POST** 请求头携带 `X-CSRF-TOKEN`，后端比对请求头与 cookie 值；**GET 及其它方法不校验 CSRF**。豁免：登录接口、`/keys/v1/**` 专属接口、以及 **API Key 请求（`Authorization: Bearer` / `X-API-Key`）**。
+**CSRF 防护（双提交 Cookie 模式，仅 POST 校验）**：CSRF token 由后端经响应头 **`Set-Cookie: XSRF-TOKEN=...`** 下发（httpOnly=false），前端读取 cookie 后，在登录态的 **POST** 请求头携带 `X-CSRF-TOKEN`，后端比对请求头与 cookie 值；**GET 及其它方法不校验 CSRF**。豁免：登录接口、`/keys/v1/**` 专属接口（API Key 专属路径，无 cookie 会话）。
 
-**用 API Key 调用 AI 对话接口（SSE 流式）**
+**超管登录调用 AI 对话接口（SSE 流式）**
 
 ```bash
-curl -N -X POST http://localhost:8080/documents/v1/query \
-  -H "Authorization: Bearer sk-Ab3Xy7..." \
+# 1) 登录获取 x-token（Basic Auth）
+curl -c cookies.txt -X POST http://localhost:8080/auth/v1/login \
+  -H "Authorization: Basic $(echo -n 'admin:your_password' | base64)"
+# 2) 携带 x-token + CSRF 头（值取自 Set-Cookie: XSRF-TOKEN）调用
+curl -N -b cookies.txt -X POST http://localhost:8080/documents/v1/query \
+  -H "x-token: tok-xxx..." -H "X-CSRF-TOKEN: <XSRF-TOKEN值>" \
   -H "Content-Type: application/json" \
-  -d '{"question":"什么是多跳检索？","userId":"user0001","tenantCode":"test-tenant","systemType":"文档守护"}'
+  -d '{"question":"什么是多跳检索？","userId":"xxhzj","tenantCode":"0","systemType":"other"}'
 ```
 
 **用 API Key 调用专属对话接口（租户/系统自动从 Key 读取，只需传 问题/用户编码/会话ID）**
@@ -327,7 +331,7 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 ## API 接口
 
-> 除标注"公开"外，所有接口均需认证（登录或 API Key，见[接口权限矩阵](#3-接口权限矩阵)）。
+> 除标注"公开"外，所有接口均需认证（超管登录或 API Key，见[接口权限矩阵](#3-接口权限矩阵)）。
 
 ### 认证与 API Key 管理
 
@@ -361,7 +365,7 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 | 方法   | 路径                   | 权限                    | 说明                                                                                             |
 |--------|------------------------|-------------------------|--------------------------------------------------------------------------------------------------|
-| `POST` | `/documents/v1/query` | **登录 或 API Key**     | GraphRAG 问答（SSE 流式，参数：question/userId/sessionId/tenantCode/systemType/model 可选）      |
+| `POST` | `/documents/v1/query` | **仅超管登录** | GraphRAG 问答（SSE 流式，参数：question/userId/sessionId/tenantCode/systemType/model 可选）      |
 | `POST` | `/keys/v1/chat`       | **仅 API Key**          | API Key 专属问答（SSE 流式，参数：question/userId/sessionId 可选/model 可选；租户/系统由 Key 绑定值自动赋值，历史按 Key 隔离） |
 
 `model` 可选值：`deepseek-v3.2` / `deepseek-v3.2-think` / `deepseek-v4-flash-0731`（不传则用配置默认模型）。
@@ -391,10 +395,10 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 | 方法     | 路径                                               | 权限      | 说明                                                            |
 |----------|----------------------------------------------------|-----------|-----------------------------------------------------------------|
-| `GET`    | `/keys/v1/conversations`                          | 仅 API Key | 会话列表（按 apikey + userId + tenantCode + systemType 搜索，后三者可选） |
-| `GET`    | `/keys/v1/conversations/session`                  | 仅 API Key | 按 sessionId 查询消息（仅本 Key 创建的，否则 404）              |
-| `DELETE` | `/keys/v1/conversations/session/{sessionId}`      | 仅 API Key | 删除单个会话（仅限本 Key 创建的，否则 404）                     |
-| `DELETE` | `/keys/v1/conversations/batch`                    | 仅 API Key | 批量删除（Body: sessionId 数组，仅删本 Key 的，返回实际删除数） |
+| `GET`    | `/keys/v1`                                       | 仅 API Key | 会话列表（按 apikey + userId + tenantCode + systemType 搜索，后三者可选） |
+| `GET`    | `/keys/v1/session`                               | 仅 API Key | 按 sessionId 查询消息（仅本 Key 创建的，否则 404）              |
+| `DELETE` | `/keys/v1/session/{sessionId}`                   | 仅 API Key | 删除单个会话（仅限本 Key 创建的，否则 404）                     |
+| `DELETE` | `/keys/v1/batch`                                 | 仅 API Key | 批量删除（Body: sessionId 数组，仅删本 Key 的，返回实际删除数） |
 
 ### 知识图谱
 

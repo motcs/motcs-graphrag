@@ -1,11 +1,9 @@
 package com.motcs.core.document;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.utils.ByteArrayMultipartFile;
 import com.motcs.commons.utils.Utils;
-import com.motcs.config.SecurityConfiguration;
-import com.motcs.core.auth.keys.ApiKey;
-import com.motcs.core.auth.keys.ApiKeyService;
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
 import com.motcs.core.knowledge.record.ChatMessage;
@@ -22,7 +20,6 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -44,7 +41,6 @@ public class DocumentController {
     private final DocumentService documentService;
     private final WebClient.Builder webClientBuilder;
     private final GraphRagService graphRagService;
-    private final ApiKeyService apiKeyService;
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -61,12 +57,20 @@ public class DocumentController {
             @RequestPart(value = "tenantCode", required = false) String tenantCode,
             @RequestPart(value = "systemType", required = false) String systemType,
             @RequestPart(value = "userId", required = false) String userId) {
-
-        String finalTenant = (tenantCode == null || tenantCode.isBlank()) ? "default" : tenantCode;
-        String finalSystem = (systemType == null || systemType.isBlank()) ? "default" : systemType;
-
+        if (ObjectUtils.isEmpty(docCode)) {
+            return Mono.error(RestServerException.withMsg("文档编码（docCode）不能为空"));
+        }
+        if (ObjectUtils.isEmpty(tenantCode)) {
+            return Mono.error(RestServerException.withMsg("租户编码（tenantCode）不能为空"));
+        }
+        if (ObjectUtils.isEmpty(systemType)) {
+            return Mono.error(RestServerException.withMsg("系统类型（systemType）不能为空"));
+        }
+        if (ObjectUtils.isEmpty(userId)) {
+            return Mono.error(RestServerException.withMsg("用户编码（userId）不能为空"));
+        }
         log.info("收到文档上传请求: fileName={}, docCode={}, tenantCode={}, systemType={}, userId={}",
-                file.filename(), docCode, finalTenant, finalSystem, userId);
+                file.filename(), docCode, tenantCode, systemType, userId);
 
         return file.content().collectList().map(buffers -> {
             byte[] fileBytes = Utils.concatenateBuffers(buffers);
@@ -74,7 +78,7 @@ public class DocumentController {
             String contentType = contentType1 != null ? contentType1.toString() : "application/octet-stream";
             return new ByteArrayMultipartFile("file", file.filename(), contentType, fileBytes);
         }).flatMap(multipartFile -> buildAndUpload(multipartFile,
-                title, description, docCode, finalTenant, finalSystem, userId));
+                title, description, docCode, tenantCode, systemType, userId));
     }
 
     /**
@@ -115,7 +119,7 @@ public class DocumentController {
      * 回答完成后自动保存对话记录（含 userId、sessionId、sources、reasoning）
      */
     @PostMapping(value = "/query", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> graphRagQuery(@RequestBody GraphRagRequest request, ServerWebExchange exchange) {
+    public Flux<String> graphRagQuery(@RequestBody GraphRagRequest request) {
         if (ObjectUtils.isEmpty(request) || ObjectUtils.isEmpty(request.getQuestion())) {
             return Flux.just(jsonEvent("error", Map.of("message", "问题（question）不能为空")));
         }
@@ -124,71 +128,39 @@ public class DocumentController {
         }
         final String sessionId = ObjectUtils.isEmpty(request.getSessionId())
                 ? UUID.randomUUID().toString() : request.getSessionId();
+        StringBuilder answerBuilder = new StringBuilder(); // AI回答完整内容累积
+        StringBuilder reasoningBuilder = new StringBuilder(); // AI思考过程累积（入库）
+        final String[] sourcesJson = {"[]"};
 
-        // API Key 请求自动带出租户/系统类型（调用方只需传 问题/用户编码/会话ID；
-        // 显式传入的 tenantCode/systemType 优先，未传则用 Key 绑定值）
-        return resolveApiKey(exchange).map(apiKey -> {
-            if (ObjectUtils.isEmpty(request.getTenantCode())) {
-                request.setTenantCode(apiKey.getTenantCode());
+        return this.graphRagService.graphRagQueryStream(request).flatMapMany(result -> {
+            // 序列化来源
+            try {
+                sourcesJson[0] = objectMapper.writeValueAsString(result.sources());
+            } catch (Exception e) {
+                sourcesJson[0] = "[]";
             }
-            if (ObjectUtils.isEmpty(request.getSystemType())) {
-                request.setSystemType(apiKey.getSystemType());
+            // 发送顺序：1.session 2.sources 3.思考/正文事件（JSON type 字段区分思考/正文，不依赖内容判空）
+            Mono<String> sessionMono = Mono.just(jsonEvent("session", Map.of("sessionId", sessionId)));
+            Mono<String> sourcesMono = Mono.just(jsonEvent("sources", Map.of("sources", result.sources())));
+            Flux<String> answerMono = result.answer().doOnNext(ev -> {
+                if ("reasoning".equals(ev.type())) {
+                    reasoningBuilder.append(ev.text());
+                } else if ("content".equals(ev.type())) {
+                    answerBuilder.append(ev.text());
+                }
+            }).map(ev -> jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
+            return Flux.concat(sessionMono, sourcesMono, answerMono);
+        }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
+            // 取消时由前端手动保存（避免重复），正常完成/出错时保存（answer 可为空，确保提问不丢失）
+            if (signal == reactor.core.publisher.SignalType.CANCEL) return;
+            if (request.getQuestion() != null && !request.getQuestion().isBlank()) {
+                request.setAnswer(answerBuilder.toString());
+                request.setSessionId(sessionId);
+                request.setSources(sourcesJson[0]);
+                request.setReasoning(reasoningBuilder.toString());
+                this.graphRagService.saveConversation(request, 0L).subscribe();
             }
-            return request;
-        }).defaultIfEmpty(request).flatMapMany(ignored -> {
-            StringBuilder answerBuilder = new StringBuilder(); // AI回答完整内容累积
-            StringBuilder reasoningBuilder = new StringBuilder(); // AI思考过程累积（入库）
-            final String[] sourcesJson = {"[]"};
-
-            return this.graphRagService.graphRagQueryStream(request).flatMapMany(result -> {
-                // 序列化来源
-                try {
-                    sourcesJson[0] = objectMapper.writeValueAsString(result.sources());
-                } catch (Exception e) {
-                    sourcesJson[0] = "[]";
-                }
-                // 发送顺序：1.session 2.sources 3.思考/正文事件（JSON type 字段区分思考/正文，不依赖内容判空）
-                Mono<String> sessionMono = Mono.just(jsonEvent("session", Map.of("sessionId", sessionId)));
-                Mono<String> sourcesMono = Mono.just(jsonEvent("sources", Map.of("sources", result.sources())));
-                Flux<String> answerMono = result.answer().doOnNext(ev -> {
-                    if ("reasoning".equals(ev.type())) {
-                        reasoningBuilder.append(ev.text());
-                    } else if ("content".equals(ev.type())) {
-                        answerBuilder.append(ev.text());
-                    }
-                }).map(ev -> jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
-                return Flux.concat(sessionMono, sourcesMono, answerMono);
-            }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
-                // 取消时由前端手动保存（避免重复），正常完成/出错时保存（answer 可为空，确保提问不丢失）
-                if (signal == reactor.core.publisher.SignalType.CANCEL) return;
-                if (request.getQuestion() != null && !request.getQuestion().isBlank()) {
-                    resolveApiKeyId(exchange).defaultIfEmpty(0L).flatMap(apiKeyId -> {
-                        request.setAnswer(answerBuilder.toString());
-                        request.setSessionId(sessionId);
-                        request.setSources(sourcesJson[0]);
-                        request.setReasoning(reasoningBuilder.toString());
-                        return this.graphRagService.saveConversation(request, apiKeyId);
-                    }).subscribe();
-                }
-            });
         }).doOnError(e -> log.error("问答SSE流出错: {}", e.getMessage(), e));
-    }
-
-    /**
-     * 将事件对象序列化为 SSE data 行（JSON，前端按 type 字段区分思考/正文/来源/会话）
-     * 从请求头解析 API Key 并返回其归属 ID（无 Key / 无效 Key 返回 empty，即按登录用户创建记录）
-     * 解析规则与 SecurityConfiguration.extractApiKey 一致：Authorization: Bearer 或 X-API-Key
-     */
-    private Mono<ApiKey> resolveApiKey(ServerWebExchange exchange) {
-        String key = SecurityConfiguration.extractApiKey(exchange);
-        if (key == null || key.isBlank()) {
-            return Mono.empty();
-        }
-        return apiKeyService.findEnabled(key);
-    }
-
-    private Mono<Long> resolveApiKeyId(ServerWebExchange exchange) {
-        return resolveApiKey(exchange).map(ApiKey::getId);
     }
 
     private String jsonEvent(String type, Map<String, ?> payload) {
@@ -207,11 +179,8 @@ public class DocumentController {
      * POST /documents/v1/conversations
      */
     @PostMapping("/conversations")
-    public Mono<ResponseEntity<Map<String, Object>>> saveConversation(@RequestBody GraphRagRequest request,
-                                                                      ServerWebExchange exchange) {
-        return resolveApiKeyId(exchange).defaultIfEmpty(0L)
-                .flatMap(apiKeyId -> graphRagService.saveConversation(request,
-                        apiKeyId))
+    public Mono<ResponseEntity<Map<String, Object>>> saveConversation(@RequestBody GraphRagRequest request) {
+        return graphRagService.saveConversation(request, 0L)
                 .then(Mono.fromCallable(() -> ResponseEntity.ok(Map.of("success", true))));
     }
 

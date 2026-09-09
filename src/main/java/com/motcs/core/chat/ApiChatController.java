@@ -60,7 +60,8 @@ public class ApiChatController {
         if (ObjectUtils.isEmpty(request.getUserId())) {
             return Flux.just(jsonEvent("error", Map.of("message", "用户编码（userId）不能为空")));
         }
-        String sessionId = ObjectUtils.isEmpty(request.getSessionId()) ? UUID.randomUUID().toString() : request.getSessionId();
+        String sessionId = ObjectUtils.isEmpty(request.getSessionId()) ?
+                UUID.randomUUID().toString() : request.getSessionId();
 
         return resolveApiKey(exchange).flatMapMany(apiKey -> {
             // 租户/系统类型由 API Key 绑定值赋值（生成时已禁止租户 0）

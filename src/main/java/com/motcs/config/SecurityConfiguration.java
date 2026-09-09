@@ -142,14 +142,6 @@ public class SecurityConfiguration {
                             if (exchange.getRequest().getPath().value().startsWith("/keys/v1/")) {
                                 return ServerWebExchangeMatcher.MatchResult.notMatch();
                             }
-                            // API Key 请求免 CSRF：Authorization: Bearer 或 X-API-Key 请求头
-                            String auth = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
-                            if (auth != null && auth.startsWith("Bearer ")) {
-                                return ServerWebExchangeMatcher.MatchResult.notMatch();
-                            }
-                            if (exchange.getRequest().getHeaders().getFirst(X_API_KEY) != null) {
-                                return ServerWebExchangeMatcher.MatchResult.notMatch();
-                            }
                             // 其余 POST（x-token 登录态）：需要 CSRF 校验
                             return ServerWebExchangeMatcher.MatchResult.match();
                         }))
@@ -187,8 +179,8 @@ public class SecurityConfiguration {
                         // AI 平台探测（前端登录前即需调用，用于渲染模型下拉框）
                         .pathMatchers("/ai/v1/provider").permitAll()
                         .pathMatchers("/auth/v1/**").hasRole("ADMIN")
-                        // AI 对话接口（GraphRAG 问答）：登录 或 有效 API Key 均可访问
-                        .pathMatchers("/documents/v1/query").authenticated()
+                        // AI 对话接口（GraphRAG 问答）：仅超管登录可访问（API Key 走 /keys/v1/chat）
+                        .pathMatchers("/documents/v1/query").hasRole("ADMIN")
                         // API Key 专属接口（对话历史查询/删除）：仅 API Key 认证可访问，登录用户不可用
                         .pathMatchers("/keys/v1/**").hasRole("API_KEY")
                         // 其余所有业务接口：仅超管登录可访问（API Key 无 ADMIN 角色将被拒绝）
