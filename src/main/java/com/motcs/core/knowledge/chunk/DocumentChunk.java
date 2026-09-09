@@ -15,6 +15,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
+ */
 @Schema(description = "文档分片节点（Neo4j）")
 @Node("DocumentChunk")
 @Data

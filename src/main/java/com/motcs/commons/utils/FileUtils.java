@@ -14,6 +14,9 @@ import java.util.UUID;
 
 /**
  * 文件操作工具
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Log4j2
 public class FileUtils {

@@ -10,6 +10,10 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 
+/**
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
+ */
 public interface DocumentChunkRepository extends Neo4jRepository<DocumentChunk, String> {
 
     /**
@@ -174,4 +178,5 @@ public interface DocumentChunkRepository extends Neo4jRepository<DocumentChunk, 
             """)
     List<DocumentSummary> findDocumentSummaries(@Param("tenantCode") String tenantCode,
                                                 @Param("systemType") String systemType);
+
 }

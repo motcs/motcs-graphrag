@@ -10,6 +10,9 @@ import java.util.List;
 
 /**
  * 批量删除会话请求 DTO（DELETE /documents/v1/conversations/batch）
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Data
 @Builder

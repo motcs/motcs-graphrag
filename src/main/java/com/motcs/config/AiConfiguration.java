@@ -8,6 +8,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+/**
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
+ */
 @Configuration
 public class AiConfiguration {
 

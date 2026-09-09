@@ -19,6 +19,9 @@ import java.util.Set;
  * Spring Data Neo4j 显式配置。
  * Spring Boot 4.x 的 spring-boot-starter-neo4j 仅自动配置 Driver，
  * 不再自动配置 Neo4jTemplate / MappingContext，需要手动声明。
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Configuration
 @EnableNeo4jRepositories(basePackages = "com.motcs")

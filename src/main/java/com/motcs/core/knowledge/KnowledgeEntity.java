@@ -12,6 +12,10 @@ import org.springframework.data.neo4j.core.schema.Relationship;
 
 import java.util.List;
 
+/**
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
+ */
 @Schema(description = "知识实体节点（Neo4j）")
 @Node("KnowledgeEntity")
 @Data

@@ -39,11 +39,6 @@ public final class ContextUtil implements InitializingBean {
         ContextUtil.VALIDATOR = validator;
     }
 
-    @Override
-    public void afterPropertiesSet() {
-        log.debug("ContextUtil 初始化完成!");
-    }
-
     public static ParameterSql applyBindSql(Object object, Collection<String> skipKeys) {
         return applyBindSql(object, null, skipKeys);
     }
@@ -182,5 +177,10 @@ public final class ContextUtil implements InitializingBean {
             }
         }
         return criteria;
+    }
+
+    @Override
+    public void afterPropertiesSet() {
+        log.debug("ContextUtil 初始化完成!");
     }
 }

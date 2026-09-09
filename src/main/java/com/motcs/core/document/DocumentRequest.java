@@ -8,6 +8,9 @@ import lombok.NoArgsConstructor;
 
 /**
  * 文档查询请求 DTO（统计、列表等 GET 接口统一接参）
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Schema(description = "文档查询请求参数")
 @Data

@@ -35,6 +35,9 @@ import java.util.List;
  * "No primary or single unique constructor found for interface Pageable"。
  * 这里手动注册 {@link ReactivePageableHandlerMethodArgumentResolver}，
  * 使 {@code Pageable}/{@code Sort} 能按 Spring Data 标准方式解析。
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Configuration
 public class WebFluxConfiguration implements WebFluxConfigurer {

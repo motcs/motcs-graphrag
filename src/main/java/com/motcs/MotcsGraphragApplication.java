@@ -5,6 +5,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 import java.util.TimeZone;
 
+/**
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
+ */
 @SpringBootApplication(exclude = {
         org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration.class,
         org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration.class,

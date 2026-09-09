@@ -16,6 +16,9 @@ import reactor.core.publisher.Mono;
  * （不会因页面刷新、任意 GET/POST 请求而改变）。
  *
  * <p>校验头显式设为 X-CSRF-TOKEN（与前端一致，Spring 默认是 X-XSRF-TOKEN）。
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 public class LoginIssuedCsrfTokenRepository implements ServerCsrfTokenRepository {
 

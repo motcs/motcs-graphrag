@@ -1,6 +1,8 @@
 package com.motcs.config;
 
+import com.motcs.commons.utils.Utils;
 import com.motcs.core.auth.csrf.LoginIssuedCsrfTokenRepository;
+import com.motcs.core.auth.keys.ApiKey;
 import com.motcs.core.auth.keys.ApiKeyService;
 import com.motcs.core.auth.token.TokenStore;
 import lombok.Getter;
@@ -27,6 +29,7 @@ import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.context.ServerSecurityContextRepository;
 import org.springframework.security.web.server.csrf.ServerCsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatcher;
+import org.springframework.util.ObjectUtils;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import reactor.core.publisher.Mono;
@@ -51,6 +54,9 @@ import java.util.Optional;
  * - /auth/v1/**（API Key 管理）：仅超管登录（ROLE_ADMIN）
  * - /documents/v1/query（AI 对话）：登录态 或 有效 API Key 均可访问
  * - 其余所有业务接口：仅超管登录（ROLE_ADMIN）可访问
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Getter
 @Configuration
@@ -61,13 +67,6 @@ public class SecurityConfiguration {
 
     @Value("${app.auth.password:admin123}")
     private String adminPassword;
-
-    private static final String X_API_KEY = "x-api-Key";
-    public static final String X_TOKEN = "x-token";
-    /**
-     * tokenAuthWebFilter 认证成功标记（exchange attribute），apiKeyWebFilter 据此不覆盖登录
-     */
-    private static final String AUTH_BY_TOKEN_ATTR = "motcs.auth.byToken";
 
     /**
      * SecurityContext 存储：No-Op。
@@ -95,9 +94,7 @@ public class SecurityConfiguration {
     @Bean
     public ReactiveUserDetailsService reactiveUserDetailsService() {
         UserDetails admin = User.withUsername(adminUsername)
-                .password("{noop}" + adminPassword)
-                .roles("ADMIN")
-                .build();
+                .password("{noop}" + adminPassword).roles("ADMIN").build();
         return new MapReactiveUserDetailsService(admin);
     }
 
@@ -172,15 +169,15 @@ public class SecurityConfiguration {
                 .addFilterAfter(csrfCookieRefreshFilter(), SecurityWebFiltersOrder.CSRF)
                 .authorizeExchange(exchanges -> exchanges
                         .pathMatchers("/", "/index.html", "/favicon.ico", "/favicon.png",
-                                "/css/**", "/js/**", "/img/**",
-                                "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/webjars/**").permitAll()
+                                "/css/**", "/js/**", "/img/**", "/v3/api-docs/**", "/swagger-ui/**",
+                                "/swagger-ui.html", "/webjars/**").permitAll()
+
                         .pathMatchers("/auth/v1/login").permitAll()
-                        .pathMatchers("/documents/v1/health").permitAll()
                         // AI 平台探测（前端登录前即需调用，用于渲染模型下拉框）
-                        .pathMatchers("/ai/v1/provider").permitAll()
+                        .pathMatchers("/ai/v1/provider").hasAnyRole("ADMIN", "API_KEY")
                         .pathMatchers("/auth/v1/**").hasRole("ADMIN")
                         // AI 对话接口（GraphRAG 问答）：仅超管登录可访问（API Key 走 /keys/v1/chat）
-                        .pathMatchers("/documents/v1/query").hasRole("ADMIN")
+                        .pathMatchers("/documents/v1/**").hasRole("ADMIN")
                         // API Key 专属接口（对话历史查询/删除）：仅 API Key 认证可访问，登录用户不可用
                         .pathMatchers("/keys/v1/**").hasRole("API_KEY")
                         // 其余所有业务接口：仅超管登录可访问（API Key 无 ADMIN 角色将被拒绝）
@@ -188,9 +185,9 @@ public class SecurityConfiguration {
                 // 自定义认证入口/拒绝处理器：返回 JSON，避免浏览器原生 Basic Auth 弹窗
                 .exceptionHandling(spec -> spec
                         .authenticationEntryPoint((exchange, _) -> writeJson(exchange,
-                                HttpStatus.UNAUTHORIZED, "未登录或登录已过期"))
+                                HttpStatus.UNAUTHORIZED, "当前未登录或登录已过期，请检查后重试！"))
                         .accessDeniedHandler((exchange, _) -> writeJson(exchange,
-                                HttpStatus.FORBIDDEN, "无权限访问")))
+                                HttpStatus.FORBIDDEN, "很抱歉，您无权限访问当前资源！")))
                 .build();
     }
 
@@ -247,7 +244,7 @@ public class SecurityConfiguration {
      */
     private WebFilter tokenAuthWebFilter(TokenStore tokenStore) {
         return (exchange, chain) -> {
-            String token = exchange.getRequest().getHeaders().getFirst(X_TOKEN);
+            String token = exchange.getRequest().getHeaders().getFirst(Utils.X_TOKEN);
             if (token == null || token.isBlank()) {
                 return chain.filter(exchange);
             }
@@ -262,21 +259,20 @@ public class SecurityConfiguration {
             // Optional + defaultIfEmpty：使上游恒有值（非 empty），flatMap 必定执行且只执行一次；
             // 避免 switchIfEmpty 因 chain.filter 的 Mono<Void> empty 误触发导致下游链被
             // "无认证地"二次执行（403 覆盖正常响应）。
-            return tokenStore.getUsername(token)
-                    .map(Optional::of)
-                    .defaultIfEmpty(Optional.empty())
-                    .flatMap(opt -> {
-                        if (opt.isEmpty()) {
-                            // token 无效：无认证放行（由 authorizeExchange 决定 401/403）
-                            return chain.filter(exchange);
-                        }
-                        var authentication = new UsernamePasswordAuthenticationToken(
-                                opt.get(), null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
-                        exchange.getAttributes().put(AUTH_BY_TOKEN_ATTR, Boolean.TRUE);
-                        return chain.filter(exchange)
-                                .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(
-                                        Mono.just(new SecurityContextImpl(authentication))));
-                    });
+            Mono<Optional<String>> optionalMono = tokenStore.getUsername(token)
+                    .map(Optional::of).defaultIfEmpty(Optional.empty());
+            return optionalMono.flatMap(opt -> {
+                if (opt.isEmpty()) {
+                    // token 无效：无认证放行（由 authorizeExchange 决定 401/403）
+                    return chain.filter(exchange);
+                }
+                var authentication = new UsernamePasswordAuthenticationToken(
+                        opt.get(), null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
+                exchange.getAttributes().put(Utils.AUTH_BY_TOKEN_ATTR, Boolean.TRUE);
+                return chain.filter(exchange)
+                        .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(
+                                Mono.just(new SecurityContextImpl(authentication))));
+            });
         };
     }
 
@@ -293,52 +289,32 @@ public class SecurityConfiguration {
             if ("/auth/v1/login".equals(exchange.getRequest().getPath().value())) {
                 return chain.filter(exchange);
             }
-            String key = extractApiKey(exchange);
-            if (key == null) {
+            if (ObjectUtils.isEmpty(Utils.extractApiKey(exchange))) {
                 return chain.filter(exchange);
             }
             // 同 tokenAuthWebFilter：认证分支末尾 .then(Mono.just(true)) 避免 switchIfEmpty
             // 误触发双执行；context 值放 Mono<SecurityContext>（withSecurityContext 契约）。
             // 同 tokenAuthWebFilter：Optional + defaultIfEmpty，保证单次执行、类型 Mono<Void>
-            return apiKeyService.findEnabled(key)
-                    .map(Optional::of)
-                    .defaultIfEmpty(Optional.empty())
-                    .flatMap(opt -> {
-                        if (opt.isEmpty()) {
-                            // Key 无效：无认证放行
-                            return chain.filter(exchange);
-                        }
-                        // 已由 x-token 认证（tokenAuthWebFilter 先执行并标记）时，
-                        // API Key 不覆盖，保持登录身份（会话优先）
-                        if (Boolean.TRUE.equals(exchange.getAttribute(AUTH_BY_TOKEN_ATTR))) {
-                            return chain.filter(exchange);
-                        }
-                        var authentication = new UsernamePasswordAuthenticationToken(
-                                "api-key", null, List.of(new SimpleGrantedAuthority("ROLE_API_KEY")));
-                        // details 携带 ApiKey 实体：下游接口据此识别对话归属（apiKeyId / keyPrefix）
-                        authentication.setDetails(opt.get());
-                        return chain.filter(exchange)
-                                .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(
-                                        Mono.just(new SecurityContextImpl(authentication))));
-                    });
+            Mono<Optional<ApiKey>> optionalMono = apiKeyService.resolveApiKey(exchange)
+                    .map(Optional::of).defaultIfEmpty(Optional.empty());
+            return optionalMono.flatMap(opt -> {
+                if (opt.isEmpty()) {
+                    // Key 无效：无认证放行
+                    return chain.filter(exchange);
+                }
+                // 已由 x-token 认证（tokenAuthWebFilter 先执行并标记）时，
+                // API Key 不覆盖，保持登录身份（会话优先）
+                if (Boolean.TRUE.equals(exchange.getAttribute(Utils.AUTH_BY_TOKEN_ATTR))) {
+                    return chain.filter(exchange);
+                }
+                var authentication = new UsernamePasswordAuthenticationToken(
+                        "api-key", null, List.of(new SimpleGrantedAuthority("ROLE_API_KEY")));
+                // details 携带 ApiKey 实体：下游接口据此识别对话归属（apiKeyId / keyPrefix）
+                authentication.setDetails(opt.get());
+                return chain.filter(exchange).contextWrite(ReactiveSecurityContextHolder
+                        .withSecurityContext(Mono.just(new SecurityContextImpl(authentication))));
+            });
         };
-    }
-
-    public static String extractApiKey(ServerWebExchange exchange) {
-        String auth = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
-        if (auth != null && auth.startsWith("Bearer ")) {
-            return auth.substring(7).trim();
-        }
-        String xKey = exchange.getRequest().getHeaders().getFirst(X_API_KEY);
-        if (xKey != null && !xKey.isBlank()) {
-            // 兼容 X-API-Key 值误带 "Bearer " 前缀的情况
-            String trimmed = xKey.trim();
-            if (trimmed.startsWith("Bearer ")) {
-                return trimmed.substring(7).trim();
-            }
-            return trimmed;
-        }
-        return null;
     }
 
 }

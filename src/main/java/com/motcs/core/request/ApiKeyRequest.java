@@ -9,6 +9,9 @@ import lombok.NoArgsConstructor;
 /**
  * 创建 API Key 请求 DTO（POST /auth/v1/api-keys）
  * 备注/租户编码/系统类型均必填
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Data
 @Builder

@@ -1,6 +1,6 @@
 package com.motcs.core.document;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.motcs.commons.ContextUtil;
 import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.utils.ByteArrayMultipartFile;
 import com.motcs.commons.utils.Utils;
@@ -31,6 +31,9 @@ import java.util.UUID;
 
 /**
  * 文档管理控制器（上传、查询、删除、智能问答、对话历史、知识图谱）
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Log4j2
 @RestController
@@ -39,9 +42,8 @@ import java.util.UUID;
 public class DocumentController {
 
     private final DocumentService documentService;
-    private final WebClient.Builder webClientBuilder;
     private final GraphRagService graphRagService;
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private final WebClient.Builder webClientBuilder;
 
     /**
      * 上传文档接口（WebFlux 响应式，使用 FilePart）
@@ -87,6 +89,18 @@ public class DocumentController {
      */
     @PostMapping("/upload/url")
     public Mono<ResponseEntity<DocumentResponse>> uploadByUrl(@RequestBody FileUploadRequest uploadRequest) {
+        if (ObjectUtils.isEmpty(uploadRequest.getDocCode())) {
+            return Mono.error(RestServerException.withMsg("文档编码（docCode）不能为空"));
+        }
+        if (ObjectUtils.isEmpty(uploadRequest.getTenantCode())) {
+            return Mono.error(RestServerException.withMsg("租户编码（tenantCode）不能为空"));
+        }
+        if (ObjectUtils.isEmpty(uploadRequest.getSystemType())) {
+            return Mono.error(RestServerException.withMsg("系统类型（systemType）不能为空"));
+        }
+        if (ObjectUtils.isEmpty(uploadRequest.getUserId())) {
+            return Mono.error(RestServerException.withMsg("用户编码（userId）不能为空"));
+        }
         log.info("收到URL上传请求参数:{}", uploadRequest);
         String fileName = Utils.extractFileNameFromUrl(uploadRequest.getUrl());
         String contentType = Utils.filesProbeContentType(fileName);
@@ -121,10 +135,10 @@ public class DocumentController {
     @PostMapping(value = "/query", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> graphRagQuery(@RequestBody GraphRagRequest request) {
         if (ObjectUtils.isEmpty(request) || ObjectUtils.isEmpty(request.getQuestion())) {
-            return Flux.just(jsonEvent("error", Map.of("message", "问题（question）不能为空")));
+            return Flux.just(Utils.jsonEvent("error", Map.of("message", "问题（question）不能为空")));
         }
         if (ObjectUtils.isEmpty(request.getUserId())) {
-            return Flux.just(jsonEvent("error", Map.of("message", "用户编码（userId）不能为空")));
+            return Flux.just(Utils.jsonEvent("error", Map.of("message", "用户编码（userId）不能为空")));
         }
         final String sessionId = ObjectUtils.isEmpty(request.getSessionId())
                 ? UUID.randomUUID().toString() : request.getSessionId();
@@ -135,20 +149,20 @@ public class DocumentController {
         return this.graphRagService.graphRagQueryStream(request).flatMapMany(result -> {
             // 序列化来源
             try {
-                sourcesJson[0] = objectMapper.writeValueAsString(result.sources());
+                sourcesJson[0] = ContextUtil.OBJECT_MAPPER.writeValueAsString(result.sources());
             } catch (Exception e) {
                 sourcesJson[0] = "[]";
             }
             // 发送顺序：1.session 2.sources 3.思考/正文事件（JSON type 字段区分思考/正文，不依赖内容判空）
-            Mono<String> sessionMono = Mono.just(jsonEvent("session", Map.of("sessionId", sessionId)));
-            Mono<String> sourcesMono = Mono.just(jsonEvent("sources", Map.of("sources", result.sources())));
+            Mono<String> sessionMono = Mono.just(Utils.jsonEvent("session", Map.of("sessionId", sessionId)));
+            Mono<String> sourcesMono = Mono.just(Utils.jsonEvent("sources", Map.of("sources", result.sources())));
             Flux<String> answerMono = result.answer().doOnNext(ev -> {
                 if ("reasoning".equals(ev.type())) {
                     reasoningBuilder.append(ev.text());
                 } else if ("content".equals(ev.type())) {
                     answerBuilder.append(ev.text());
                 }
-            }).map(ev -> jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
+            }).map(ev -> Utils.jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
             return Flux.concat(sessionMono, sourcesMono, answerMono);
         }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
             // 取消时由前端手动保存（避免重复），正常完成/出错时保存（answer 可为空，确保提问不丢失）
@@ -161,17 +175,6 @@ public class DocumentController {
                 this.graphRagService.saveConversation(request, 0L).subscribe();
             }
         }).doOnError(e -> log.error("问答SSE流出错: {}", e.getMessage(), e));
-    }
-
-    private String jsonEvent(String type, Map<String, ?> payload) {
-        try {
-            Map<String, Object> ev = new HashMap<>();
-            if (payload != null) ev.putAll(payload);
-            ev.put("type", type);
-            return objectMapper.writeValueAsString(ev);
-        } catch (Exception e) {
-            return "{\"type\":\"" + type + "\"}";
-        }
     }
 
     /**

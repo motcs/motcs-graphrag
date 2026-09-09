@@ -13,6 +13,9 @@ import java.nio.file.Path;
 /**
  * 基于字节数组的 MultipartFile 实现，用于远程 URL 下载文件后复用上传流程。
  * 不依赖 spring-test 的 MockMultipartFile，可在生产环境使用。
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 public class ByteArrayMultipartFile implements MultipartFile {
 

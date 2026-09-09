@@ -26,6 +26,9 @@ import java.util.Map;
  * </pre>
  * 平台标识由配置决定：application.yaml（默认 zhipu）/ application-baidu.yaml（baidu），
  * 均可用环境变量 AI_PROVIDER 覆盖。
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @RestController
 @RequestMapping("/ai/v1")

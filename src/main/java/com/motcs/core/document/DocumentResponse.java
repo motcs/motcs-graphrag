@@ -10,6 +10,9 @@ import java.time.LocalDateTime;
 
 /**
  * 文档响应DTO
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Schema(description = "文档信息")
 @Data

@@ -392,7 +392,8 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 | Method | Path | Access | Description |
 |--------|------|--------|-------------|
-| `GET` | `/keys/v1` | API Key only | Session list (apikey + userId + tenantCode + systemType; last three optional) |
+| `GET` | `/keys/v1/conversations` | API Key only | Session list (apikey + userId + tenantCode + systemType; last three optional; standard Pageable paging) |
+| `GET` | `/keys/v1` | API Key only | Session list (shortcut, same as /keys/v1/conversations) |
 | `GET` | `/keys/v1/session` | API Key only | Messages by sessionId (404 if not owned by this key) |
 | `DELETE` | `/keys/v1/session/{sessionId}` | API Key only | Delete a session (only if owned by this key, else 404) |
 | `DELETE` | `/keys/v1/batch` | API Key only | Batch delete (Body: sessionId array; only this key's sessions; returns actual count) |

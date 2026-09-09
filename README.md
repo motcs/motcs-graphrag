@@ -395,7 +395,8 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 | 方法     | 路径                                               | 权限      | 说明                                                            |
 |----------|----------------------------------------------------|-----------|-----------------------------------------------------------------|
-| `GET`    | `/keys/v1`                                       | 仅 API Key | 会话列表（按 apikey + userId + tenantCode + systemType 搜索，后三者可选） |
+| `GET`    | `/keys/v1/conversations`                         | 仅 API Key | 会话列表（按 apikey + userId + tenantCode + systemType 搜索，后三者可选；标准 Pageable 分页） |
+| `GET`    | `/keys/v1`                                       | 仅 API Key | 会话列表（简版，与 /keys/v1/conversations 等价）               |
 | `GET`    | `/keys/v1/session`                               | 仅 API Key | 按 sessionId 查询消息（仅本 Key 创建的，否则 404）              |
 | `DELETE` | `/keys/v1/session/{sessionId}`                   | 仅 API Key | 删除单个会话（仅限本 Key 创建的，否则 404）                     |
 | `DELETE` | `/keys/v1/batch`                                 | 仅 API Key | 批量删除（Body: sessionId 数组，仅删本 Key 的，返回实际删除数） |

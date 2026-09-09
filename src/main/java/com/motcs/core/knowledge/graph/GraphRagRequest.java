@@ -8,6 +8,9 @@ import lombok.NoArgsConstructor;
 
 /**
  * 多跳ai智能查询参数封装
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Schema(description = "GraphRAG 智能问答请求参数")
 @Data

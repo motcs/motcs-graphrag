@@ -8,6 +8,9 @@ import lombok.NoArgsConstructor;
 
 /**
  * url文件上传请求DTO
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Data
 @Builder

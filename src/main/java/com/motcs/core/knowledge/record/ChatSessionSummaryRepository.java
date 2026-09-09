@@ -5,7 +5,8 @@ import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import reactor.core.publisher.Mono;
 
 /**
- * 会话摘要 R2DBC Repository
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 public interface ChatSessionSummaryRepository extends ReactiveCrudRepository<ChatSessionSummary, Long> {
 

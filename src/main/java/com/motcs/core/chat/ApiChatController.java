@@ -1,11 +1,11 @@
 package com.motcs.core.chat;
 
 import com.motcs.commons.ContextUtil;
-import com.motcs.config.SecurityConfiguration;
-import com.motcs.core.auth.keys.ApiKey;
+import com.motcs.commons.utils.Utils;
 import com.motcs.core.auth.keys.ApiKeyService;
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -20,7 +20,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -39,6 +38,9 @@ import java.util.UUID;
  * - SSE 事件格式与 /documents/v1/query 一致：
  * {"type":"session","sessionId":...} → {"type":"sources","sources":[...]}
  * → {"type":"reasoning"|"content","text":...}
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Slf4j
 @RestController
@@ -49,21 +51,19 @@ public class ApiChatController {
     private final ApiKeyService apiKeyService;
     private final GraphRagService graphRagService;
 
-    /**
-     * API Key 对话（SSE）：问题与用户编码必填，租户/系统来自 Key 绑定值
-     */
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "API Key 对话（SSE）：问题与用户编码必填，租户/系统来自 Key 绑定值")
     public Flux<String> chat(@RequestBody GraphRagRequest request, ServerWebExchange exchange) {
         if (ObjectUtils.isEmpty(request) || ObjectUtils.isEmpty(request.getQuestion())) {
-            return Flux.just(jsonEvent("error", Map.of("message", "问题（question）不能为空")));
+            return Flux.just(Utils.jsonEvent("error", Map.of("message", "问题（question）不能为空")));
         }
         if (ObjectUtils.isEmpty(request.getUserId())) {
-            return Flux.just(jsonEvent("error", Map.of("message", "用户编码（userId）不能为空")));
+            return Flux.just(Utils.jsonEvent("error", Map.of("message", "用户编码（userId）不能为空")));
         }
         String sessionId = ObjectUtils.isEmpty(request.getSessionId()) ?
                 UUID.randomUUID().toString() : request.getSessionId();
 
-        return resolveApiKey(exchange).flatMapMany(apiKey -> {
+        return this.apiKeyService.resolveApiKey(exchange).flatMapMany(apiKey -> {
             // 租户/系统类型由 API Key 绑定值赋值（生成时已禁止租户 0）
             request.setSessionId(sessionId);
             request.setTenantCode(apiKey.getTenantCode());
@@ -77,15 +77,15 @@ public class ApiChatController {
                 } catch (Exception e) {
                     sourcesJson[0] = "[]";
                 }
-                Mono<String> sessionMono = Mono.just(jsonEvent("session", Map.of("sessionId", sessionId)));
-                Mono<String> sourcesMono = Mono.just(jsonEvent("sources", Map.of("sources", result.sources())));
+                Mono<String> sessionMono = Mono.just(Utils.jsonEvent("session", Map.of("sessionId", sessionId)));
+                Mono<String> sourcesMono = Mono.just(Utils.jsonEvent("sources", Map.of("sources", result.sources())));
                 Flux<String> answerMono = result.answer().doOnNext(ev -> {
                     if ("reasoning".equals(ev.type())) {
                         reasoningBuilder.append(ev.text());
                     } else if ("content".equals(ev.type())) {
                         answerBuilder.append(ev.text());
                     }
-                }).map(ev -> jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
+                }).map(ev -> Utils.jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
                 return Flux.concat(sessionMono, sourcesMono, answerMono);
             }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
                 if (signal == reactor.core.publisher.SignalType.CANCEL) return;
@@ -97,29 +97,7 @@ public class ApiChatController {
                     graphRagService.saveConversation(request, apiKey.getId()).subscribe();
                 }
             });
-        }).switchIfEmpty(Flux.just(jsonEvent("error", Map.of("message", "无效的 API Key"))));
+        }).switchIfEmpty(Flux.just(Utils.jsonEvent("error", Map.of("message", "无效的 API Key"))));
     }
 
-    /**
-     * 从请求头解析并校验 API Key（与 SecurityConfiguration.extractApiKey 同一规则）：
-     * Authorization: Bearer sk-... 或 X-API-Key: sk-...；无效/缺失返回 empty
-     */
-    private Mono<ApiKey> resolveApiKey(ServerWebExchange exchange) {
-        String key = SecurityConfiguration.extractApiKey(exchange);
-        if (key == null || key.isBlank()) {
-            return Mono.empty();
-        }
-        return apiKeyService.findEnabled(key);
-    }
-
-    private String jsonEvent(String type, Map<String, ?> payload) {
-        try {
-            Map<String, Object> ev = new HashMap<>();
-            if (payload != null) ev.putAll(payload);
-            ev.put("type", type);
-            return ContextUtil.OBJECT_MAPPER.writeValueAsString(ev);
-        } catch (Exception e) {
-            return "{\"type\":\"" + type + "\"}";
-        }
-    }
 }

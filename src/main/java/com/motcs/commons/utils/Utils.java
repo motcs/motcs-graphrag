@@ -1,17 +1,32 @@
 package com.motcs.commons.utils;
 
+import com.motcs.commons.ContextUtil;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.http.HttpHeaders;
+import org.springframework.web.server.ServerWebExchange;
 
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 通用工具类
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 public class Utils {
+
+    public static final String X_API_KEY = "x-api-Key";
+    public static final String X_TOKEN = "x-token";
+    /**
+     * tokenAuthWebFilter 认证成功标记（exchange attribute），apiKeyWebFilter 据此不覆盖登录
+     */
+    public static final String AUTH_BY_TOKEN_ATTR = "motcs.auth.byToken";
 
     /**
      * 支持的文件格式列表
@@ -127,4 +142,34 @@ public class Utils {
         }
         return bytes;
     }
+
+    public static String jsonEvent(String type, Map<String, ?> payload) {
+        try {
+            Map<String, Object> ev = new HashMap<>();
+            if (payload != null) ev.putAll(payload);
+            ev.put("type", type);
+            return ContextUtil.OBJECT_MAPPER.writeValueAsString(ev);
+        } catch (Exception e) {
+            return "{\"type\":\"" + type + "\"}";
+        }
+    }
+
+
+    public static String extractApiKey(ServerWebExchange exchange) {
+        String auth = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+        if (auth != null && auth.startsWith("Bearer ")) {
+            return auth.substring(7).trim();
+        }
+        String xKey = exchange.getRequest().getHeaders().getFirst(X_API_KEY);
+        if (xKey != null && !xKey.isBlank()) {
+            // 兼容 X-API-Key 值误带 "Bearer " 前缀的情况
+            String trimmed = xKey.trim();
+            if (trimmed.startsWith("Bearer ")) {
+                return trimmed.substring(7).trim();
+            }
+            return trimmed;
+        }
+        return null;
+    }
+
 }

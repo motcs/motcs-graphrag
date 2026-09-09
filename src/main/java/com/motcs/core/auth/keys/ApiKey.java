@@ -16,6 +16,9 @@ import java.time.LocalDateTime;
  * API Key 实体（MySQL R2DBC 存储）
  * 参考 OpenAI API Key 设计：数据库只存 SHA-256 哈希，明文仅在创建时返回一次，
  * 列表/详情只展示前缀掩码，不可再次查看完整 Key。
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Schema(description = "API Key（仅存哈希，明文创建时返回一次）")
 @Table("api_key")

@@ -1,8 +1,11 @@
 package com.motcs.core.auth.keys;
 
+import com.motcs.commons.utils.Utils;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -19,29 +22,51 @@ import java.util.HexFormat;
  * - Key 形如 sk-...（前缀 + 40 位随机，去掉易混淆字符 0O1lI）
  * - 数据库只存 SHA-256 哈希与前缀掩码，明文只在生成时返回一次
  * - 鉴权时对请求携带的 Key 做同样哈希后比对
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Service
+@RequiredArgsConstructor
 public class ApiKeyService {
-
-    @Value("${app.auth.api.key.length:40}")
-    private Integer apiKeyLen;
 
     private static final String PREFIX = "sk-";
     private static final char[] ALPHABET =
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".toCharArray();
     private static final SecureRandom RANDOM = new SecureRandom();
-
     private final ApiKeyRepository apiKeyRepository;
+    @Value("${app.auth.api.key.length:40}")
+    private Integer apiKeyLen;
 
-    public ApiKeyService(ApiKeyRepository apiKeyRepository) {
-        this.apiKeyRepository = apiKeyRepository;
+    static String sha256(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(s.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
+    }
+
+    /**
+     * 从请求头解析并校验 API Key（与 SecurityConfiguration.extractApiKey 同一规则）：
+     * Authorization: Bearer sk-... 或 X-API-Key: sk-...；无效/缺失返回 empty
+     * 查询启用状态的 Key 实体（认证过滤用：把实体放入认证信息，供对话归属记录/校验）
+     */
+    public Mono<ApiKey> resolveApiKey(ServerWebExchange exchange) {
+        String key = Utils.extractApiKey(exchange);
+        if (key == null || key.isBlank()) {
+            return Mono.empty();
+        }
+        return this.apiKeyRepository.findEnabledByKeyHash(sha256(key.trim()))
+                .filter(k -> Boolean.TRUE.equals(k.getEnabled()));
     }
 
     /**
      * 生成一个新 Key，返回明文（仅此一次）
      * 租户编码与系统类型必填：对话/上传文档时以此为归属，区分租户自定义内容
      */
-    public Mono<ApiKeyInfo> generate(String name, String tenantCode, String systemType, String createdBy) {
+    public Mono<ApiKeyRecord> generate(String name, String tenantCode, String systemType, String createdBy) {
         if (ObjectUtils.isEmpty(name)) {
             return Mono.error(new IllegalArgumentException("备注（name）必填"));
         }
@@ -61,18 +86,7 @@ public class ApiKeyService {
                 .createdBy(ObjectUtils.isEmpty(createdBy) ? "xxhzj" : createdBy)
                 .createdTime(LocalDateTime.now()).build();
         return apiKeyRepository.save(entity)
-                .map(saved -> ApiKeyInfo.of(saved, plainKey));
-    }
-
-    /**
-     * 查询启用状态的 Key 实体（认证过滤用：把实体放入认证信息，供对话归属记录/校验）
-     */
-    public Mono<ApiKey> findEnabled(String key) {
-        if (ObjectUtils.isEmpty(key)) {
-            return Mono.empty();
-        }
-        return apiKeyRepository.findEnabledByKeyHash(sha256(key.trim()))
-                .filter(k -> Boolean.TRUE.equals(k.getEnabled()));
+                .map(saved -> ApiKeyRecord.of(saved, plainKey));
     }
 
     /**
@@ -102,13 +116,4 @@ public class ApiKeyService {
         return key.substring(0, len) + "...";
     }
 
-    static String sha256(String s) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(s.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 not available", e);
-        }
-    }
 }

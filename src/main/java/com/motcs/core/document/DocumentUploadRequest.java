@@ -9,6 +9,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 文档上传请求DTO
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Schema(description = "文档上传请求参数")
 @Data

@@ -1,12 +1,14 @@
 package com.motcs.core.auth;
 
 import com.motcs.commons.annotation.RestServerException;
-import com.motcs.config.SecurityConfiguration;
+import com.motcs.commons.utils.Utils;
 import com.motcs.core.auth.keys.ApiKey;
 import com.motcs.core.auth.keys.ApiKeyService;
 import com.motcs.core.auth.token.AuthenticationToken;
 import com.motcs.core.auth.token.TokenStore;
 import com.motcs.core.request.ApiKeyRequest;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -24,14 +26,10 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 认证与 API Key 管理接口
- * - POST /auth/v1/login    超管登录（账号密码来自配置 app.auth.*）
- * - POST /auth/v1/logout   退出登录
- * - GET  /auth/v1/me       当前登录状态
- * - GET  /auth/v1/api-keys 已生成的 Key 列表（仅掩码）
- * - POST /auth/v1/api-keys 生成新 Key（返回明文一次）
- * - DELETE /auth/v1/api-keys/{id} 删除 Key
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
+@Tag(name = "认证与Key管理接口", description = "认证与 API Key 管理接口")
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/auth/v1")
@@ -49,6 +47,7 @@ public class AuthController {
      * 密码错误由 SecurityConfiguration 的失败处理器返回 JSON 401。
      */
     @PostMapping("/login")
+    @Operation(summary = "超管登录（HTTP Basic Auth）")
     public Mono<AuthenticationToken> login(ServerWebExchange exchange, Authentication authentication) {
         // 仅当请求未携带 Basic 凭据仍打到本方法时兜底（如空凭据请求），明确返回 401
         if (authentication == null || !authentication.isAuthenticated()) {
@@ -72,20 +71,16 @@ public class AuthController {
         });
     }
 
-    /**
-     * 退出登录：注销 x-token（从请求头读取）
-     */
     @PostMapping("/logout")
+    @Operation(summary = "退出登录：注销 x-token（从请求头读取）")
     public Mono<ResponseEntity<Void>> logout(ServerWebExchange exchange) {
-        String token = exchange.getRequest().getHeaders().getFirst(SecurityConfiguration.X_TOKEN);
+        String token = exchange.getRequest().getHeaders().getFirst(Utils.X_TOKEN);
         tokenStore.remove(token);
         return Mono.just(ResponseEntity.ok().build());
     }
 
-    /**
-     * 当前登录状态（前端页面加载时探测）
-     */
     @GetMapping("/me")
+    @Operation(summary = "当前登录状态（前端页面加载时探测）")
     public Mono<ResponseEntity<Map<String, Object>>> me(@AuthenticationPrincipal Object principal) {
         if (ObjectUtils.isEmpty(principal)) {
             return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -95,18 +90,14 @@ public class AuthController {
                 true, "username", String.valueOf(principal))));
     }
 
-    /**
-     * Key 列表（仅掩码，不含哈希与明文）
-     */
     @GetMapping("/api-keys")
+    @Operation(summary = "Key 列表（仅掩码，不含哈希与明文）")
     public Flux<ApiKey> listApiKeys() {
         return apiKeyService.list();
     }
 
-    /**
-     * 生成新 Key（明文仅此一次返回；备注/租户编码/系统类型必填，为空返回 400）
-     */
     @PostMapping("/api-keys")
+    @Operation(summary = " 生成新 Key（明文仅此一次返回；备注/租户编码/系统类型必填，为空返回 400）")
     public Mono<ResponseEntity<?>> createApiKey(@RequestBody ApiKeyRequest request,
                                                 @AuthenticationPrincipal Object principal) {
         String name = ObjectUtils.isEmpty(request.getName()) ? "" : request.getName().trim();
@@ -125,10 +116,8 @@ public class AuthController {
                 .map(ResponseEntity::ok);
     }
 
-    /**
-     * 删除 Key（撤销后携带该 Key 的请求立即失效）
-     */
     @DeleteMapping("/api-keys/{id}")
+    @Operation(summary = "删除 Key（撤销后携带该 Key 的请求立即失效）")
     public Mono<ResponseEntity<Void>> deleteApiKey(@PathVariable Long id) {
         return apiKeyService.delete(id).thenReturn(ResponseEntity.ok().build());
     }

@@ -31,6 +31,9 @@ import java.util.stream.Collectors;
 /**
  * 文档管理服务
  * 负责文档的上传、转换、切分、保存到向量库等核心功能
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Slf4j
 @Service
@@ -48,18 +51,6 @@ public class DocumentService {
 
     @Value("${app.file.max-size:10485760}") // 默认10MB
     private long maxFileSize;
-
-    /**
-     * 上传上下文：异步处理过程中传递的状态信息
-     */
-    @lombok.Data
-    public static class UploadContext {
-        private String documentId;
-        private String placeholderId;
-        private String filePath;
-        private List<String> chunkIds = new ArrayList<>();
-        private DocumentResponse response;
-    }
 
     /**
      * 上传文档初始化（同步部分）：校验 → 清理旧数据 → 保存文件 → 创建占位分片(PROCESSING)
@@ -450,6 +441,18 @@ public class DocumentService {
             log.error("统计查询失败: {}", e.getMessage());
             return Mono.just(DocumentStatsResponse.builder().docCount(0L).chunkCount(0L).build());
         });
+    }
+
+    /**
+     * 上传上下文：异步处理过程中传递的状态信息
+     */
+    @lombok.Data
+    public static class UploadContext {
+        private String documentId;
+        private String placeholderId;
+        private String filePath;
+        private List<String> chunkIds = new ArrayList<>();
+        private DocumentResponse response;
     }
 
 }

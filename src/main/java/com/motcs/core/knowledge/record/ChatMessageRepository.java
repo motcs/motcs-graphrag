@@ -6,7 +6,8 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
- * 对话记录 R2DBC Repository
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 public interface ChatMessageRepository extends ReactiveCrudRepository<ChatMessage, Long> {
 

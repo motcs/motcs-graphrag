@@ -15,6 +15,9 @@ import java.time.LocalDateTime;
 /**
  * 对话记录（MySQL R2DBC 存储）
  * 记录用户提问与 AI 回答，用于历史查询和多轮上下文
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Schema(description = "对话记录")
 @Table("chat_message")

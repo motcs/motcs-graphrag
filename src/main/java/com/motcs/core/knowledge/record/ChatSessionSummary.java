@@ -10,6 +10,9 @@ import java.time.LocalDateTime;
 
 /**
  * 会话摘要实体（每个会话只存一份，用于长对话压缩上下文，减少token消耗）
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Data
 @Table("chat_session_summary")

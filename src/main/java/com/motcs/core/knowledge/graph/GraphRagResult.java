@@ -8,6 +8,9 @@ import lombok.NoArgsConstructor;
 /**
  * GraphRAG 多跳查询结果 DTO
  * 只返回字符串字段，避免 OPTIONAL MATCH 的 null 实体导致映射错误
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Data
 @NoArgsConstructor

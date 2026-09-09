@@ -14,11 +14,7 @@ import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xslf.usermodel.XSLFSlide;
 import org.apache.poi.xslf.usermodel.XSLFTextRun;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.apache.poi.xwpf.usermodel.XWPFDocument;
-import org.apache.poi.xwpf.usermodel.XWPFParagraph;
-import org.apache.poi.xwpf.usermodel.XWPFTable;
-import org.apache.poi.xwpf.usermodel.XWPFTableCell;
-import org.apache.poi.xwpf.usermodel.XWPFTableRow;
+import org.apache.poi.xwpf.usermodel.*;
 import org.springframework.stereotype.Component;
 
 import java.io.FileInputStream;
@@ -33,6 +29,9 @@ import java.util.List;
  * 将各种格式文件统一转换为Markdown格式
  * 支持：PDF、Word、Excel、PowerPoint、TXT、MD等格式
  * 新增：直接输出 spring‑ai Document 对象
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Log4j2
 @Component

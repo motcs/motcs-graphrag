@@ -27,6 +27,9 @@ import java.util.regex.Pattern;
  * 5. 标题全绑定：每个切片前置完整层级标题链路
  * 6. 页码追踪：识别 [[PAGE:n]] 标记
  * 7. 关联组网：parentChunkId / prevChunkId / nextChunkId
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Log4j2
 @Component
@@ -47,28 +50,6 @@ public class EnterpriseChunker {
 
     public EnterpriseChunker() {
         this.encoding = Encodings.newLazyEncodingRegistry().getEncoding(EncodingType.CL100K_BASE);
-    }
-
-    /**
-     * 切分结果
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class Chunk {
-        private String chunkId;
-        private String parentChunkId;   // 粗粒度父切片ID（细粒度有值）
-        private String prevChunkId;     // 上一相邻切片ID
-        private String nextChunkId;     // 下一相邻切片ID
-        private String content;         // 切片正文（含标题前缀）
-        private String rawContent;      // 切片原始正文（不含标题前缀）
-        private List<String> titleHierarchy; // 层级标题链路
-        private String chunkType;       // FINE / COARSE
-        private int tokenSize;
-        private String pageNumber;      // 页码，跨页用范围如 "1-2"
-        private int offsetStart;
-        private int offsetEnd;
     }
 
     /**
@@ -112,14 +93,6 @@ public class EnterpriseChunker {
         List<Chunk> result = new ArrayList<>(allFineChunks);
         result.addAll(allCoarseChunks);
         return result;
-    }
-
-    // ==================== 内部实现 ====================
-
-    /**
-     * 文档章节
-     */
-    private record Section(List<String> titleHierarchy, String content, int startOffset, String pageNumber) {
     }
 
     /**
@@ -188,6 +161,8 @@ public class EnterpriseChunker {
         }
         return sections;
     }
+
+    // ==================== 内部实现 ====================
 
     /**
      * 粗粒度切分：按语义边界，1024~1536 token，20% 重叠
@@ -357,5 +332,33 @@ public class EnterpriseChunker {
     private int countTokens(String text) {
         if (text == null || text.isEmpty()) return 0;
         return encoding.countTokens(text);
+    }
+
+    /**
+     * 切分结果
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Chunk {
+        private String chunkId;
+        private String parentChunkId;   // 粗粒度父切片ID（细粒度有值）
+        private String prevChunkId;     // 上一相邻切片ID
+        private String nextChunkId;     // 下一相邻切片ID
+        private String content;         // 切片正文（含标题前缀）
+        private String rawContent;      // 切片原始正文（不含标题前缀）
+        private List<String> titleHierarchy; // 层级标题链路
+        private String chunkType;       // FINE / COARSE
+        private int tokenSize;
+        private String pageNumber;      // 页码，跨页用范围如 "1-2"
+        private int offsetStart;
+        private int offsetEnd;
+    }
+
+    /**
+     * 文档章节
+     */
+    private record Section(List<String> titleHierarchy, String content, int startOffset, String pageNumber) {
     }
 }

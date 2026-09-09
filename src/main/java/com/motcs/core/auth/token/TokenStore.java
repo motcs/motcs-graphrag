@@ -13,6 +13,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * 后续请求携带 x-token 头由 Token 过滤器经本存储校验并恢复登录态。
  * 令牌带过期时间（默认 2 小时，可配置 app.auth.token.ttl-seconds），
  * **滑动过期**：每次有效使用都会刷新过期时间，持续活跃则不会掉线。
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Service
 public class TokenStore {
@@ -21,19 +24,7 @@ public class TokenStore {
      * 默认过期时间（秒）：2 小时
      */
     private static final long DEFAULT_TTL_SECONDS = 7200;
-
-    private record TokenEntry(String username, long ttlSeconds, long expireAtMillis) {
-        boolean expired() {
-            return System.currentTimeMillis() >= expireAtMillis;
-        }
-
-        TokenEntry refreshed() {
-            return new TokenEntry(username, ttlSeconds, System.currentTimeMillis() + ttlSeconds * 1000);
-        }
-    }
-
     private final Map<String, TokenEntry> tokens = new ConcurrentHashMap<>();
-
     private final long ttlSeconds;
 
     public TokenStore(@Value("${app.auth.token.ttl-seconds:7200}") long ttlSeconds) {
@@ -89,6 +80,16 @@ public class TokenStore {
     public void remove(String token) {
         if (!ObjectUtils.isEmpty(token)) {
             tokens.remove(token);
+        }
+    }
+
+    private record TokenEntry(String username, long ttlSeconds, long expireAtMillis) {
+        boolean expired() {
+            return System.currentTimeMillis() >= expireAtMillis;
+        }
+
+        TokenEntry refreshed() {
+            return new TokenEntry(username, ttlSeconds, System.currentTimeMillis() + ttlSeconds * 1000);
         }
     }
 }

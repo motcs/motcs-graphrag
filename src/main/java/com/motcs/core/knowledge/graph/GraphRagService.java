@@ -22,6 +22,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
@@ -44,26 +45,19 @@ import java.util.stream.Stream;
 /**
  * GraphRAG知识库服务
  * 结合向量检索和图谱检索实现高质量知识问答
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class GraphRagService {
 
-    private final ChatClient chatClient;
-    private final Neo4jClient neo4jClient;
-    private final VectorStore vectorStore;
-    private final DocumentService documentService;
-    private final DocumentChunkRepository chunkRepository;
-    private final KnowledgeEntityRepository entityRepository;
-    private final ChatMessageRepository chatMessageRepository;
-    private final ChatSessionSummaryRepository summaryRepository;
-
     /**
      * 摘要时保留最近N轮原始对话
      */
     private static final int HISTORY_KEEP_RECENT = 10;
-
     /**
      * AI 实体+关系抽取 Prompt（用 __TEXT__ 占位，避免 StringTemplate 与 JSON 大括号冲突）
      */
@@ -76,22 +70,6 @@ public class GraphRagService {
             文本：
             __TEXT__
             """;
-
-    /**
-     * AI 返回的实体+关系抽取结果结构
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record EntityExtractionResult(List<ExtractedEntity> entities, List<ExtractedRelation> relations) {
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record ExtractedEntity(String name, String type) {
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record ExtractedRelation(String source, String target, String type) {
-    }
-
     /**
      * 系统提示词（含多轮历史和知识库上下文）
      */
@@ -122,25 +100,14 @@ public class GraphRagService {
             【知识库上下文】
             {context}
             """;
-
-    /**
-     * SSE 流式事件：type=reasoning 表示思考片段，type=content 表示正文片段。
-     * 通过 type 字段区分思考/正文，前端不依赖内容是否为空判断。
-     */
-    public record ChatStreamEvent(String type, String text) {
-    }
-
-    /**
-     * 查询结果封装：知识库来源 + SSE 事件流（思考/正文通过 type 字段区分）
-     */
-    public record QueryResult(List<Map<String, Object>> sources, Flux<ChatStreamEvent> answer) {
-    }
-
-    /**
-     * 内部上下文封装
-     */
-    private record ContextResult(String fullContext, List<Map<String, Object>> sources, String historyContext) {
-    }
+    private final ChatClient chatClient;
+    private final Neo4jClient neo4jClient;
+    private final VectorStore vectorStore;
+    private final DocumentService documentService;
+    private final DocumentChunkRepository chunkRepository;
+    private final KnowledgeEntityRepository entityRepository;
+    private final ChatMessageRepository chatMessageRepository;
+    private final ChatSessionSummaryRepository summaryRepository;
 
     /**
      * GraphRAG 问答（含多轮上下文 + 来源返回）
@@ -686,8 +653,6 @@ public class GraphRagService {
         return null;
     }
 
-    // ==================== 对话历史摘要压缩 ====================
-
     /**
      * 构建多轮对话上下文：长对话自动摘要压缩，永远只取最新5条原始对话+摘要
      * 用户看到的聊天记录不变，仅减少发给AI的token
@@ -806,8 +771,6 @@ public class GraphRagService {
         }
     }
 
-    // ==================== 对话记录 ====================
-
     /**
      * 保存一条对话记录（异步，不阻塞查询响应）
      *
@@ -898,6 +861,8 @@ public class GraphRagService {
                 .collectList();
     }
 
+    // ==================== 对话历史摘要压缩 ====================
+
     /**
      * 按会话ID分页查询对话
      * order=desc（默认，倒序）；order=asc（正序，导出用）
@@ -922,11 +887,13 @@ public class GraphRagService {
      * 按 API Key 查询会话列表（该 Key 创建的对话，可按用户/租户/系统过滤，条件为空不过滤）
      */
     public Mono<List<Map<String, Object>>> getSessionsByApiKey(Long apiKeyId, String userId,
-                                                               String tenantCode, String systemType, int limit) {
+                                                               String tenantCode, String systemType, Pageable pageable) {
         return this.chatMessageRepository.findByApiKey(apiKeyId,
                         blankToNull(userId), blankToNull(tenantCode), blankToNull(systemType))
-                .collectList().map(records -> aggregateSessions(records, limit));
+                .collectList().map(records -> aggregateSessions(records, pageable.getPageSize()));
     }
+
+    // ==================== 对话记录 ====================
 
     /**
      * 按会话ID + API Key 查询对话消息（校验归属：仅该 Key 创建的消息）
@@ -1036,6 +1003,40 @@ public class GraphRagService {
                 .flatMap(id -> chatMessageRepository.deleteBySessionId(id)
                         .then(summaryRepository.deleteBySessionId(id)))
                 .then().doOnSuccess(_ -> log.info("已批量删除 {} 个会话及摘要", sessionIds.size()));
+    }
+
+    /**
+     * AI 返回的实体+关系抽取结果结构
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record EntityExtractionResult(List<ExtractedEntity> entities, List<ExtractedRelation> relations) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record ExtractedEntity(String name, String type) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record ExtractedRelation(String source, String target, String type) {
+    }
+
+    /**
+     * SSE 流式事件：type=reasoning 表示思考片段，type=content 表示正文片段。
+     * 通过 type 字段区分思考/正文，前端不依赖内容是否为空判断。
+     */
+    public record ChatStreamEvent(String type, String text) {
+    }
+
+    /**
+     * 查询结果封装：知识库来源 + SSE 事件流（思考/正文通过 type 字段区分）
+     */
+    public record QueryResult(List<Map<String, Object>> sources, Flux<ChatStreamEvent> answer) {
+    }
+
+    /**
+     * 内部上下文封装
+     */
+    private record ContextResult(String fullContext, List<Map<String, Object>> sources, String historyContext) {
     }
 
 }

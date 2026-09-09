@@ -6,8 +6,11 @@ import java.time.LocalDateTime;
 
 /**
  * 生成 API Key 的返回信息（明文 Key 仅此一次，展示后即丢弃）
+ *
+ * @author <a href="https://github.com/motcs">motcs</a>
+ * @since 2026-09-09 星期三
  */
-public record ApiKeyInfo(
+public record ApiKeyRecord(
         @Schema(description = "主键ID") Long id,
         @Schema(description = "用途备注") String name,
         @Schema(description = "完整 Key（明文，仅创建时返回一次）") String key,
@@ -17,8 +20,8 @@ public record ApiKeyInfo(
         @Schema(description = "是否启用") Boolean enabled,
         @Schema(description = "创建时间") LocalDateTime createdTime) {
 
-    public static ApiKeyInfo of(ApiKey e, String plainKey) {
-        return new ApiKeyInfo(e.getId(), e.getName(), plainKey, e.getKeyPrefix(),
+    public static ApiKeyRecord of(ApiKey e, String plainKey) {
+        return new ApiKeyRecord(e.getId(), e.getName(), plainKey, e.getKeyPrefix(),
                 e.getTenantCode(), e.getSystemType(), e.getEnabled(), e.getCreatedTime());
     }
 
