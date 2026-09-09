@@ -57,6 +57,9 @@ public class ApiChatController {
      */
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> chat(@RequestBody GraphRagRequest request, ServerWebExchange exchange) {
+        // SSE 流式输出：告知反向代理（nginx）不缓冲该响应，逐帧透传
+        exchange.getResponse().getHeaders().set("X-Accel-Buffering", "no");
+        exchange.getResponse().getHeaders().set("Cache-Control", "no-cache, no-transform");
         if (ObjectUtils.isEmpty(request) || ObjectUtils.isEmpty(request.getQuestion())) {
             return Flux.just(Utils.jsonEvent("error", Map.of("message", "问题（question）不能为空")));
         }

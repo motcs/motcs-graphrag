@@ -20,6 +20,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -133,7 +134,10 @@ public class DocumentController {
      * 回答完成后自动保存对话记录（含 userId、sessionId、sources、reasoning）
      */
     @PostMapping(value = "/query", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> graphRagQuery(@RequestBody GraphRagRequest request) {
+    public Flux<String> graphRagQuery(@RequestBody GraphRagRequest request, ServerWebExchange exchange) {
+        // SSE 流式透传：告知 nginx 关闭对该响应的缓冲（proxy_buffering），否则流会被攒成一次性返回
+        exchange.getResponse().getHeaders().set("X-Accel-Buffering", "no");
+        exchange.getResponse().getHeaders().set("Cache-Control", "no-cache, no-transform");
         if (ObjectUtils.isEmpty(request) || ObjectUtils.isEmpty(request.getQuestion())) {
             return Flux.just(Utils.jsonEvent("error", Map.of("message", "问题（question）不能为空")));
         }
