@@ -1,10 +1,10 @@
-# Motcs Graphrag — GraphRAG 多跳智能搜索系统
+# Motcs Graph Rag 多跳智能搜索系统
 
 > **中文** | [English](./README.en.md)
 
 基于 **Spring Boot 4.1.1 + Neo4j + MySQL + Spring AI 2.0.1** 的企业级文档知识库与多跳智能问答系统。采用纯 WebFlux
 响应式架构，支持文档异步入库、企业级双层切分、向量检索 + 知识图谱多跳推理、流式对话、引用溯源等核心能力，
-内置**超管登录 + API Key 鉴权**，接口权限分级管控。
+内置 **超管登录 + API Key 鉴权**，接口权限分级管控。
 
 ---
 
@@ -35,26 +35,28 @@
 - 文档统计接口（轻量聚合查询，百万级文档无压力）
 - 上传失败文档支持重新上传，表单自动反填
 - **租户/系统类型下拉框**：上传弹窗与文档管理页的租户、系统类型均为下拉选择
-  - 租户选项来自租户配置表（`tenant_config`，接口 `GET /documents/v1/tenants`），`0` 为超管全部租户
-  - 系统类型选项来自前端独立配置 `js/config.js`（`window.MOTCS_CONFIG.systems`，部署可改，无需重新打包）
+    - 租户选项来自租户配置表（`tenant_config`，接口 `GET /documents/v1/tenants`），`0` 为超管全部租户
+    - 系统类型选项来自前端独立配置 `js/config.js`（`window.MOTCS_CONFIG.systems`，部署可改，无需重新打包）
 - **租户管理界面**：左侧导航「租户管理」，支持租户新增、删除、租户名称模糊搜索；租户 `0` 为系统保留项不在其中
 
 ### 知识图谱
 
 - 实体抽取与关系构建，可视化力导向图
 - 图谱稳定后自动停止物理模拟，支持重新布局
-- 按租户/系统过滤：租户 `0` 查全部关系，指定租户只查「本租户 + 全局租户(0)」文档涉及的关系
+- 按租户/系统过滤：租户 `0` 查全部关系，指定租户只查「本租户 + 全局租户 (0)」文档涉及的关系
 - 限制节点数量避免性能问题
 
 ### 认证与权限控制
 
 > **租户语义**：租户 `0` 为超管全局租户。
-> - **文档/对话上下文**：租户 `0` 查询时**不过滤租户，检索所有租户的全部文档**；指定租户查询时同时检索「本租户文档 + 租户 0 全局文档」，本租户内容优先。
+> - **文档/对话上下文**：租户 `0` 查询时 **不过滤租户，检索所有租户的全部文档**；指定租户查询时同时检索「本租户文档 + 租户 0
+    全局文档」，本租户内容优先。
 > - **对话记录**：始终按租户隔离——超管（租户 `0`）只能查看自己（租户 `0`）的对话记录，API Key 对话按 Key 归属隔离。
 > - **API Key**：生成时不允许绑定租户 `0`。
 
 - **超管登录**：唯一管理账号（环境变量配置），登录成功后签发 x-token（带过期时间），后续请求携带 `x-token` 请求头完成鉴权
-- **API Key 鉴权**：超管生成 Key 后人工分发，调用方携带 Key 即可访问 **API Key 专属对话接口**（`/keys/v1/**`）；**Key 绑定租户 + 系统类型**，对话时自动以此检索对应租户的知识库
+- **API Key 鉴权**：超管生成 Key 后人工分发，调用方携带 Key 即可访问 **API Key 专属对话接口**（`/keys/v1/**`）； **Key
+  绑定租户 + 系统类型**，对话时自动以此检索对应租户的知识库
 - **API Key 专属对话接口**：`POST /keys/v1/chat`，调用方只需传 问题 / 用户编码 / 会话ID，租户与系统类型由 Key 绑定值自动赋值
 - 接口权限分级：公开 / 仅超管登录 / 仅 API Key 三类（详见 [认证与权限控制](#认证与权限控制)）
 - API Key 参考 OpenAI 设计：数据库只存哈希、明文仅生成时展示一次、备注/租户/系统类型必填
@@ -74,15 +76,15 @@
 
 ## 技术栈
 
-| 类别     | 技术                                                               |
-|----------|--------------------------------------------------------------------|
-| 框架     | Spring Boot 4.1.1、Spring WebFlux、Spring Security 7.1             |
-| AI       | Spring AI 2.0.1、OpenAI 兼容接口（百度千帆，可选智谱）             |
-| 数据库   | Neo4j（向量 + 图谱一体化）、MySQL 8.x（R2DBC）                     |
-| 文档处理 | Apache PDFBox 2.0.29、Apache POI 5.4.0、commons-io 2.18.0          |
-| 构建     | Gradle 9.7.0、Jib 3.5.4                                            |
-| 语言     | Java 26                                                            |
-| 前端     | 原生 HTML + Tailwind CSS + marked.js + vis-network                 |
+| 类别     | 技术                                                      |
+|----------|-----------------------------------------------------------|
+| 框架     | Spring Boot 4.1.1、Spring WebFlux、Spring Security 7.1    |
+| AI       | Spring AI 2.0.1、OpenAI 兼容接口（百度千帆，可选智谱）    |
+| 数据库   | Neo4j（向量 + 图谱一体化）、MySQL 8.x（R2DBC）            |
+| 文档处理 | Apache PDFBox 2.0.29、Apache POI 5.4.0、commons-io 2.18.0 |
+| 构建     | Gradle 9.7.0、Jib 3.5.4                                   |
+| 语言     | Java 26                                                   |
+| 前端     | 原生 HTML + Tailwind CSS + marked.js + vis-network        |
 
 ---
 
@@ -93,7 +95,7 @@
 - JDK 26+
 - Neo4j 5.x / 2026.x（需启用向量索引）
 - MySQL 8.x（R2DBC，用于 `api_key` 等业务表，启动时自动建表）
-- 百度千帆 API Key（`bce-v3/...` 开头，控制台申请后需**手动开通**所需模型）
+- 百度千帆 API Key（`bce-v3/...` 开头，控制台申请后需 **手动开通**所需模型）
 
 ### 本地运行
 
@@ -186,44 +188,44 @@ services:
 
 ### 核心配置
 
-| 变量名                | 默认值                  | 说明           |
-|-----------------------|-------------------------|----------------|
-| `SERVER_PORT`         | `8080`                  | 服务端口       |
-| `SPRING_PROFILES_ACTIVE` | `prod`               | 激活 profile（百度千帆用 `baidu`） |
-| `NEO4J_URI`           | `bolt://127.0.0.1:7687` | Neo4j 连接地址 |
-| `NEO4J_AUTH_USERNAME` | `neo4j`                 | Neo4j 用户名   |
-| `NEO4J_AUTH_PASSWORD` | -                       | Neo4j 密码     |
-| `MYSQL_HOST`          | `127.0.0.1`             | MySQL 地址     |
-| `MYSQL_PORT`          | `3306`                  | MySQL 端口     |
-| `MYSQL_DATABASE`      | `motcs`                 | MySQL 库名     |
-| `MYSQL_USERNAME`      | `root`                  | MySQL 用户名   |
-| `MYSQL_PASSWORD`      | -                       | MySQL 密码     |
+| 变量名                   | 默认值                  | 说明                               |
+|--------------------------|-------------------------|------------------------------------|
+| `SERVER_PORT`            | `8080`                  | 服务端口                           |
+| `SPRING_PROFILES_ACTIVE` | `prod`                  | 激活 profile（百度千帆用 `baidu`） |
+| `NEO4J_URI`              | `bolt://127.0.0.1:7687` | Neo4j 连接地址                     |
+| `NEO4J_AUTH_USERNAME`    | `neo4j`                 | Neo4j 用户名                       |
+| `NEO4J_AUTH_PASSWORD`    | -                       | Neo4j 密码                         |
+| `MYSQL_HOST`             | `127.0.0.1`             | MySQL 地址                         |
+| `MYSQL_PORT`             | `3306`                  | MySQL 端口                         |
+| `MYSQL_DATABASE`         | `motcs`                 | MySQL 库名                         |
+| `MYSQL_USERNAME`         | `root`                  | MySQL 用户名                       |
+| `MYSQL_PASSWORD`         | -                       | MySQL 密码                         |
 
 ### AI 配置（百度千帆）
 
-| 变量名                   | 默认值                                 | 说明                                  |
-|--------------------------|----------------------------------------|---------------------------------------|
-| `AI_BASE_URL`            | `https://qianfan.baidubce.com/v2`      | 千帆 OpenAI 兼容接口地址              |
-| `AI_API_KEY`             | -                                      | 千帆 API Key（`bce-v3/...`）          |
-| `AI_CHAT_MODEL`          | `deepseek-v3.2-think`                  | 对话模型（三个可选，见[模型选择](#模型选择)） |
-| `AI_CHAT_TEMPERATURE`    | `0.1`                                  | 对话温度                              |
-| `AI_TIMEOUT`             | `300s`                                 | AI 接口超时（思考模型建议保持 5 分钟） |
-| `AI_EMBEDDING_MODEL`     | `bge-large-zh`                         | 向量模型（1024 维，中文）             |
-| `AI_EMBEDDING_DIMENSION` | `1024`                                 | 向量维度（必须与向量模型一致）        |
-| `AI_PROVIDER`            | `baidu`                                | 当前 AI 平台标识（前端据此渲染模型下拉）|
-| `AI_CHAT_MODELS`         | `deepseek-v3.2,deepseek-v3.2-think,deepseek-v4-flash-0731` | 可选模型列表（逗号分隔）|
+| 变量名                   | 默认值                                                     | 说明                                          |
+|--------------------------|------------------------------------------------------------|-----------------------------------------------|
+| `AI_BASE_URL`            | `https://qianfan.baidubce.com/v2`                          | 千帆 OpenAI 兼容接口地址                      |
+| `AI_API_KEY`             | -                                                          | 千帆 API Key（`bce-v3/...`）                  |
+| `AI_CHAT_MODEL`          | `deepseek-v3.2-think`                                      | 对话模型（三个可选，见[模型选择](#模型选择)） |
+| `AI_CHAT_TEMPERATURE`    | `0.1`                                                      | 对话温度                                      |
+| `AI_TIMEOUT`             | `300s`                                                     | AI 接口超时（思考模型建议保持 5 分钟）        |
+| `AI_EMBEDDING_MODEL`     | `bge-large-zh`                                             | 向量模型（1024 维，中文）                     |
+| `AI_EMBEDDING_DIMENSION` | `1024`                                                     | 向量维度（必须与向量模型一致）                |
+| `AI_PROVIDER`            | `baidu`                                                    | 当前 AI 平台标识（前端据此渲染模型下拉）      |
+| `AI_CHAT_MODELS`         | `deepseek-v3.2,deepseek-v3.2-think,deepseek-v4-flash-0731` | 可选模型列表（逗号分隔）                      |
 
 > 千帆向量模型 `bge-large-zh` 为 **1024 维**，单次提交约 **16 条**文本上限。若从智谱
 > `embedding-3`（2048 维）迁移，需重建向量索引（见[向量库配置](#向量库配置)）。
 
 ### 认证配置
 
-| 变量名         | 默认值 | 说明                                     |
-|----------------|--------|------------------------------------------|
-| `AUTH_USERNAME`| `xxhzj`（见 application-baidu.yaml） | 超管登录用户名，生产环境必须覆盖 |
-| `AUTH_PASSWORD`| -      | 超管登录密码，生产环境必须覆盖           |
-| `AUTH_TOKEN_TTL`| `7200` | x-token 过期时间（秒），每次有效使用自动续期 |
-| `API_KEY_LEN`  | `40`   | API Key 随机部分长度（前缀 `sk-` 之外）  |
+| 变量名           | 默认值                               | 说明                                         |
+|------------------|--------------------------------------|----------------------------------------------|
+| `AUTH_USERNAME`  | `xxhzj`（见 application-baidu.yaml） | 超管登录用户名，生产环境必须覆盖             |
+| `AUTH_PASSWORD`  | -                                    | 超管登录密码，生产环境必须覆盖               |
+| `AUTH_TOKEN_TTL` | `7200`                               | x-token 过期时间（秒），每次有效使用自动续期 |
+| `API_KEY_LEN`    | `40`                                 | API Key 随机部分长度（前缀 `sk-` 之外）      |
 
 ### 文件配置
 
@@ -257,41 +259,44 @@ API Key 使用监控依赖一张 MySQL 表 `api_key_usage`（首次部署时自�
 ## 认证与权限控制
 
 > **租户语义**：租户 `0` 为超管全局租户。
-> - **文档/对话上下文**：租户 `0` 查询时**不过滤租户，检索所有租户的全部文档**；指定租户查询时同时检索「本租户文档 + 租户 0 全局文档」，本租户内容优先。
+> - **文档/对话上下文**：租户 `0` 查询时 **不过滤租户，检索所有租户的全部文档**；指定租户查询时同时检索「本租户文档 + 租户 0
+    全局文档」，本租户内容优先。
 > - **对话记录**：始终按租户隔离——超管（租户 `0`）只能查看自己（租户 `0`）的对话记录，API Key 对话按 Key 归属隔离。
 > - **API Key**：生成时不允许绑定租户 `0`。
 
-系统采用 **Spring Security（WebFlux）** 双通道认证：**超管会话登录** 与 **API Key 无状态鉴权**。
+系统采用 **Spring Security（WebFlux）** 双通道认证： **超管会话登录** 与 **API Key 无状态鉴权**。
 
 ### 1. 登录方式
 
-| 方式     | 说明                                                                                                  |
-|----------|-------------------------------------------------------------------------------------------------------|
+| 方式     | 说明                                                                                                                                                                                                                                                |
+|----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 超管登录 | `POST /auth/v1/login` **HTTP Basic Auth**（`Authorization: Basic base64(username:password)`），由 Spring Security Basic 认证过滤链校验（`AUTH_USERNAME` / `AUTH_PASSWORD`），成功后**签发 x-token 返回**，后续请求携带请求头 `x-token` 即视为已登录 |
-| API Key  | 请求头携带 `Authorization: Bearer sk-...` 或 `X-API-Key: sk-...`，无状态校验（每次请求比对 SHA-256 哈希），适合机器/第三方调用 |
+| API Key  | 请求头携带 `Authorization: Bearer sk-...` 或 `X-API-Key: sk-...`，无状态校验（每次请求比对 SHA-256 哈希），适合机器/第三方调用                                                                                                                      |
 
 ### 2. API Key 设计（参考 OpenAI）
 
 - **格式**：`sk-` + 40 位随机字符（默认长度可配 `API_KEY_LEN`，去除易混淆字符 `0O1lI`）
-- **存储**：数据库只保存 SHA-256 哈希与前缀掩码（如 `sk-Ab3Xy7...`），**明文仅在生成时返回一次**，丢失需重新生成
+- **存储**：数据库只保存 SHA-256 哈希与前缀掩码（如 `sk-Ab3Xy7...`）， **明文仅在生成时返回一次**，丢失需重新生成
 - **备注必填**：生成时 `name`（备注）必填，为空返回 `400`
-- **租户/系统必填**：生成时必须绑定 `tenantCode`（具体租户编码）与 `systemType`（系统类型），对话/上传时以此归属；**不允许绑定租户 `0`**（超管全局租户），传 `0` 返回 `400`
-- **权限**：API Key 认证身份为 `ROLE_API_KEY`，**仅可访问 `/keys/v1/**` 专属接口**（AI 对话与对话历史），无法访问 `/documents/v1/**`、`/auth/v1/**` 等管理/业务接口（403）
+- **租户/系统必填**：生成时必须绑定 `tenantCode`（具体租户编码）与 `systemType`（系统类型），对话/上传时以此归属； **不允许绑定租户
+  `0`**（超管全局租户），传 `0` 返回 `400`
+- **权限**：API Key 认证身份为 `ROLE_API_KEY`， **仅可访问 `/keys/v1/**` 专属接口**（AI 对话与对话历史），无法访问
+  `/documents/v1/**`、`/auth/v1/**` 等管理/业务接口（403）
 - **管理**：仅超管可生成 / 查看列表 / 删除（删除后携带该 Key 的请求立即失效）
 
 ### 3. 接口权限矩阵
 
-| 路径 | 权限 |
-|------|------|
-| `/`、`/index.html`、`/css/**`、`/js/**`、`/img/**`、favicon、Swagger 文档（`/v3/api-docs/**`、`/swagger-ui/**`、`/webjars/**`） | **公开** |
-| `POST /auth/v1/login` | **公开** |
-| `GET /documents/v1/health`（健康检查） | **公开** |
-| `GET /ai/v1/provider`（AI 平台探测，登录前渲染模型下拉） | **公开** |
-| `POST /auth/v1/logout`、`GET /auth/v1/me` | **仅超管登录** |
-| `GET/POST /auth/v1/api-keys`、`DELETE /auth/v1/api-keys/{id}`（API Key 管理） | **仅超管登录** |
-| **`POST /documents/v1/query`（AI 对话接口）** | **仅超管登录** |
-| **`/keys/v1/**`（API Key 专属：`/chat` 对话 + `/conversations` 历史查询/删除）** | **仅 API Key**（登录用户 403） |
-| 其余所有业务接口（上传/列表/删除/统计/图谱/会话记录等） | **仅超管登录** |
+| 路径                                                                                                                            | 权限                           |
+|---------------------------------------------------------------------------------------------------------------------------------|--------------------------------|
+| `/`、`/index.html`、`/css/**`、`/js/**`、`/img/**`、favicon、Swagger 文档（`/v3/api-docs/**`、`/swagger-ui/**`、`/webjars/**`） | **公开**                       |
+| `POST /auth/v1/login`                                                                                                           | **公开**                       |
+| `GET /documents/v1/health`（健康检查）                                                                                          | **公开**                       |
+| `GET /ai/v1/provider`（AI 平台探测，登录前渲染模型下拉）                                                                        | **公开**                       |
+| `POST /auth/v1/logout`、`GET /auth/v1/me`                                                                                       | **仅超管登录**                 |
+| `GET/POST /auth/v1/api-keys`、`DELETE /auth/v1/api-keys/{id}`（API Key 管理）                                                   | **仅超管登录**                 |
+| **`POST /documents/v1/query`（AI 对话接口）**                                                                                   | **仅超管登录**                 |
+| **`/keys/v1/**`（API Key 专属：`/chat` 对话 + `/conversations` 历史查询/删除）**                                                | **仅 API Key**（登录用户 403） |
+| 其余所有业务接口（上传/列表/删除/统计/图谱/会话记录等）                                                                         | **仅超管登录**                 |
 
 ### 4. 调用示例
 
@@ -305,9 +310,11 @@ curl -X POST http://localhost:8080/auth/v1/login \
 > Windows PowerShell 生成 Basic 头：`[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('admin:your_password'))`
 
 成功返回：`{"token":"xxx","expires":7200,"lastAccessTime":...}`，后续请求携带 `x-token` 请求头调用业务接口。
-token 登记到 TokenStore，**带过期时间（默认 2 小时，可配置 `AUTH_TOKEN_TTL`，每次有效使用自动续期/滑动过期）**，过期后自动失效需重新登录。
+token 登记到 TokenStore， **带过期时间（默认 2 小时，可配置 `AUTH_TOKEN_TTL`，每次有效使用自动续期/滑动过期）**，过期后自动失效需重新登录。
 
-**CSRF 防护（双提交 Cookie 模式，仅 POST 校验）**：CSRF token 由后端经响应头 **`Set-Cookie: XSRF-TOKEN=...`** 下发（httpOnly=false），前端读取 cookie 后，在登录态的 **POST** 请求头携带 `X-CSRF-TOKEN`，后端比对请求头与 cookie 值；**GET 及其它方法不校验 CSRF**。豁免：登录接口、`/keys/v1/**` 专属接口（API Key 专属路径，无 cookie 会话）。
+**CSRF 防护（双提交 Cookie 模式，仅 POST 校验）**：CSRF token 由后端经响应头 **`Set-Cookie: XSRF-TOKEN=...`**
+下发（httpOnly=false），前端读取 cookie 后，在登录态的 **POST** 请求头携带 `X-CSRF-TOKEN`，后端比对请求头与 cookie 值； **GET
+及其它方法不校验 CSRF**。豁免：登录接口、`/keys/v1/**` 专属接口（API Key 专属路径，无 cookie 会话）。
 
 **超管登录调用 AI 对话接口（SSE 流式）**
 
@@ -352,83 +359,99 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 ### 认证与 API Key 管理
 
-| 方法     | 路径                         | 权限           | 说明                                                        |
-|----------|------------------------------|----------------|-------------------------------------------------------------|
-| `POST`   | `/auth/v1/login`            | 公开           | 超管登录（Basic Auth：Authorization: Basic base64(username:password)） |
-| `POST`   | `/auth/v1/logout`           | 仅登录         | 退出登录（注销 x-token，从请求头读取）                      |
-| `GET`    | `/auth/v1/me`               | 仅登录         | 当前登录状态                                                |
-| `GET`    | `/auth/v1/api-keys`         | 仅登录         | Key 列表（仅掩码，不含哈希与明文）                          |
-| `POST`   | `/auth/v1/api-keys`         | 仅登录         | 生成新 Key（Body：name 备注/**tenantCode 租户**/**systemType 系统**均必填；返回明文一次） |
-| `PUT`    | `/auth/v1/api-keys/{id}/enabled` | 仅登录     | 启用/停用 Key（Body：{"enabled":true/false}；停用后临时失效 401，可随时重新开启） |
-| `GET`    | `/auth/v1/api-keys/{id}/usage-summary` | 仅登录 | Key 使用汇总：调用次数 + 总 token（prompt/completion/total） |
-| `GET`    | `/auth/v1/api-keys/{id}/usage` | 仅登录       | Key 使用明细（每次对话的 token 消耗，标准 Pageable 分页）   |
-| `GET`    | `/auth/v1/usage-overview`    | 仅登录         | 用量监控总览：全部 Key 的用量汇总 + 全局合计（监控界面）   |
-| `DELETE` | `/auth/v1/api-keys/{id}`    | 仅登录         | 删除 Key（立即失效）                                        |
+| 方法     | 路径                                   | 权限   | 说明                                                                                      |
+|----------|----------------------------------------|--------|-------------------------------------------------------------------------------------------|
+| `POST`   | `/auth/v1/login`                       | 公开   | 超管登录（Basic Auth：Authorization: Basic base64(username:password)）                    |
+| `POST`   | `/auth/v1/logout`                      | 仅登录 | 退出登录（注销 x-token，从请求头读取）                                                    |
+| `GET`    | `/auth/v1/me`                          | 仅登录 | 当前登录状态                                                                              |
+| `GET`    | `/auth/v1/api-keys`                    | 仅登录 | Key 列表（仅掩码，不含哈希与明文）                                                        |
+| `POST`   | `/auth/v1/api-keys`                    | 仅登录 | 生成新 Key（Body：name 备注/**tenantCode 租户**/**systemType 系统**均必填；返回明文一次） |
+| `PUT`    | `/auth/v1/api-keys/{id}/enabled`       | 仅登录 | 启用/停用 Key（Body：{"enabled":true/false}；停用后临时失效 401，可随时重新开启）         |
+| `GET`    | `/auth/v1/api-keys/{id}/usage-summary` | 仅登录 | Key 使用汇总：调用次数 + 总 token（prompt/completion/total）                              |
+| `GET`    | `/auth/v1/api-keys/{id}/usage`         | 仅登录 | Key 使用明细（每次对话的 token 消耗，标准 Pageable 分页）                                 |
+| `GET`    | `/auth/v1/usage-overview`              | 仅登录 | 用量监控总览：全部 Key 的用量汇总 + 全局合计（监控界面）                                  |
+| `DELETE` | `/auth/v1/api-keys/{id}`               | 仅登录 | 删除 Key（立即失效）                                                                      |
 
 ### AI 平台探测
 
-| 方法  | 路径                | 权限   | 说明                                                                   |
-|-------|---------------------|--------|------------------------------------------------------------------------|
-| `GET` | `/ai/v1/provider`  | 公开   | 当前启用 AI 平台（provider/providerName）+ 可选模型列表（chatModels），前端据此渲染模型下拉框 |
+| 方法  | 路径              | 权限 | 说明                                                                                          |
+|-------|-------------------|------|-----------------------------------------------------------------------------------------------|
+| `GET` | `/ai/v1/provider` | 公开 | 当前启用 AI 平台（provider/providerName）+ 可选模型列表（chatModels），前端据此渲染模型下拉框 |
 
 ### 文档管理
 
-| 方法     | 路径                               | 权限   | 说明                                                                                               |
-|----------|------------------------------------|--------|----------------------------------------------------------------------------------------------------|
+| 方法     | 路径                              | 权限   | 说明                                                                                               |
+|----------|-----------------------------------|--------|----------------------------------------------------------------------------------------------------|
 | `POST`   | `/documents/v1/upload`            | 仅登录 | 上传文档（multipart/form-data，字段：file/title/description/docCode/tenantCode/systemType/userId） |
-| `POST`   | `/documents/v1/upload/url`        | 仅登录 | 通过 URL 上传文档（Body：FileUploadRequest）                                                        |
-| `GET`    | `/documents/v1/list`              | 仅登录 | 查询文档列表（tenantCode + systemType；租户 0 查全部）                                              |
+| `POST`   | `/documents/v1/upload/url`        | 仅登录 | 通过 URL 上传文档（Body：FileUploadRequest）                                                       |
+| `GET`    | `/documents/v1/list`              | 仅登录 | 查询文档列表（tenantCode + systemType；租户 0 查全部）                                             |
 | `DELETE` | `/documents/v1/docCode/{docCode}` | 仅登录 | 按 docCode 删除文档（级联删除分片/向量/实体/关系/文件）                                            |
 | `GET`    | `/documents/v1/stats`             | 仅登录 | 文档统计（文档数 + 分片数，轻量聚合）                                                              |
-| `GET`    | `/documents/v1/tenants`           | 仅登录 | 租户下拉列表：固定 `0`（全部租户）+ 租户配置表中启用租户                                          |
-| `POST`   | `/documents/v1/tenants`           | 仅登录 | 新增租户（Body: {"tenantCode":"410725","tenantName":"长安区人大"}；租户 0 保留不可添加）            |
+| `GET`    | `/documents/v1/tenants`           | 仅登录 | 租户下拉列表：固定 `0`（全部租户）+ 租户配置表中启用租户                                           |
+| `POST`   | `/documents/v1/tenants`           | 仅登录 | 新增租户（Body: {"tenantCode":"410725","tenantName":"长安区人大"}；租户 0 保留不可添加）           |
 | `DELETE` | `/documents/v1/tenants/{id}`      | 仅登录 | 删除租户（按配置表 id；删除后不再出现在下拉框，已上传文档不受影响）                                |
 | `GET`    | `/documents/v1/health`            | 公开   | 健康检查                                                                                           |
 
 ### 智能问答
 
-| 方法   | 路径                   | 权限                    | 说明                                                                                             |
-|--------|------------------------|-------------------------|--------------------------------------------------------------------------------------------------|
-| `POST` | `/documents/v1/query` | **仅超管登录** | GraphRAG 问答（SSE 流式，参数：question/userId/sessionId/tenantCode/systemType/model 可选）      |
-| `POST` | `/keys/v1/chat`       | **仅 API Key**          | API Key 专属问答（SSE 流式，参数：question/userId/sessionId 可选/model 可选；租户/系统由 Key 绑定值自动赋值，历史按 Key 隔离） |
+| 方法   | 路径                  | 权限           | 说明                                                                                                                           |
+|--------|-----------------------|----------------|--------------------------------------------------------------------------------------------------------------------------------|
+| `POST` | `/documents/v1/query` | **仅超管登录** | GraphRAG 问答（SSE 流式，参数：question/userId/sessionId/tenantCode/systemType/model 可选）                                    |
+| `POST` | `/keys/v1/chat`       | **仅 API Key** | API Key 专属问答（SSE 流式，参数：question/userId/sessionId 可选/model 可选；租户/系统由 Key 绑定值自动赋值，历史按 Key 隔离） |
 
 `model` 可选值：`deepseek-v3.2` / `deepseek-v3.2-think` / `deepseek-v4-flash-0731`（不传则用配置默认模型）。
 
 **SSE 响应顺序（JSON 事件，`type` 字段区分）：**
 
 ```json
-{"type":"session","sessionId":"xxx"}
-{"type":"sources","sources":[{...}]}
-{"type":"reasoning","text":"思考片段"}
-{"type":"content","text":"回答正文（Markdown）"}
+{
+  "type": "session",
+  "sessionId": "xxx"
+}
+{
+  "type": "sources",
+  "sources": [
+    {
+      ...
+    }
+  ]
+}
+{
+  "type": "reasoning",
+  "text": "思考片段"
+}
+{
+  "type": "content",
+  "text": "回答正文（Markdown）"
+}
 ```
 
 ### 对话记录（登录态）
 
-| 方法     | 路径                                               | 权限   | 说明                                                            |
-|----------|----------------------------------------------------|--------|-----------------------------------------------------------------|
-| `POST`   | `/documents/v1/conversations`                     | 仅登录 | 手动保存对话记录（前端中断回答时调用）                          |
-| `GET`    | `/documents/v1/sessions`                          | 仅登录 | 会话列表（按 userId + tenantCode + systemType，去重 sessionId） |
-| `GET`    | `/documents/v1/conversations/session`             | 仅登录 | 按 sessionId 查询完整多轮对话                                   |
-| `GET`    | `/documents/v1/conversations`                     | 仅登录 | 按用户查询对话记录                                              |
-| `PUT`    | `/documents/v1/conversations/session/{sessionId}/title` | 仅登录 | 更新会话标题（Body: {"title":"新标题"}）                  |
-| `DELETE` | `/documents/v1/conversations/session/{sessionId}` | 仅登录 | 删除单个会话（含所有对话记录）                                  |
-| `DELETE` | `/documents/v1/conversations/batch`               | 仅登录 | 批量删除会话（Body: sessionId 数组）                            |
+| 方法     | 路径                                                    | 权限   | 说明                                                            |
+|----------|---------------------------------------------------------|--------|-----------------------------------------------------------------|
+| `POST`   | `/documents/v1/conversations`                           | 仅登录 | 手动保存对话记录（前端中断回答时调用）                          |
+| `GET`    | `/documents/v1/sessions`                                | 仅登录 | 会话列表（按 userId + tenantCode + systemType，去重 sessionId） |
+| `GET`    | `/documents/v1/conversations/session`                   | 仅登录 | 按 sessionId 查询完整多轮对话                                   |
+| `GET`    | `/documents/v1/conversations`                           | 仅登录 | 按用户查询对话记录                                              |
+| `PUT`    | `/documents/v1/conversations/session/{sessionId}/title` | 仅登录 | 更新会话标题（Body: {"title":"新标题"}）                        |
+| `DELETE` | `/documents/v1/conversations/session/{sessionId}`       | 仅登录 | 删除单个会话（含所有对话记录）                                  |
+| `DELETE` | `/documents/v1/conversations/batch`                     | 仅登录 | 批量删除会话（Body: sessionId 数组）                            |
 
 ### 对话记录（API Key 专属，请求头必须携带 Key，仅操作本 Key 创建的记录）
 
-| 方法     | 路径                                               | 权限      | 说明                                                            |
-|----------|----------------------------------------------------|-----------|-----------------------------------------------------------------|
-| `GET`    | `/keys/v1/conversations`                         | 仅 API Key | 会话列表（按 apikey + userId + tenantCode + systemType 搜索，后三者可选；标准 Pageable 分页） |
-| `GET`    | `/keys/v1`                                       | 仅 API Key | 会话列表（简版，与 /keys/v1/conversations 等价）               |
-| `GET`    | `/keys/v1/session`                               | 仅 API Key | 按 sessionId 查询消息（仅本 Key 创建的，否则 404）              |
-| `DELETE` | `/keys/v1/session/{sessionId}`                   | 仅 API Key | 删除单个会话（仅限本 Key 创建的，否则 404）                     |
-| `DELETE` | `/keys/v1/batch`                                 | 仅 API Key | 批量删除（Body: sessionId 数组，仅删本 Key 的，返回实际删除数） |
+| 方法     | 路径                           | 权限       | 说明                                                                                          |
+|----------|--------------------------------|------------|-----------------------------------------------------------------------------------------------|
+| `GET`    | `/keys/v1/conversations`       | 仅 API Key | 会话列表（按 apikey + userId + tenantCode + systemType 搜索，后三者可选；标准 Pageable 分页） |
+| `GET`    | `/keys/v1`                     | 仅 API Key | 会话列表（简版，与 /keys/v1/conversations 等价）                                              |
+| `GET`    | `/keys/v1/session`             | 仅 API Key | 按 sessionId 查询消息（仅本 Key 创建的，否则 404）                                            |
+| `DELETE` | `/keys/v1/session/{sessionId}` | 仅 API Key | 删除单个会话（仅限本 Key 创建的，否则 404）                                                   |
+| `DELETE` | `/keys/v1/batch`               | 仅 API Key | 批量删除（Body: sessionId 数组，仅删本 Key 的，返回实际删除数）                               |
 
 ### 知识图谱
 
-| 方法  | 路径                   | 权限   | 说明                                                         |
-|-------|------------------------|--------|--------------------------------------------------------------|
+| 方法  | 路径                  | 权限   | 说明                                                                            |
+|-------|-----------------------|--------|---------------------------------------------------------------------------------|
 | `GET` | `/documents/v1/graph` | 仅登录 | 获取图谱数据（tenantCode + systemType + limit，默认200节点；租户 0 查所有关系） |
 
 ---
@@ -437,15 +460,17 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 AI 对话接口支持在 `deepseek-v3.2`、`deepseek-v3.2-think`、`deepseek-v4-flash-0731` 三个模型间切换：
 
-| 模型 | 特点 | 默认 |
-|------|------|------|
-| `deepseek-v3.2` | 通用对话，响应快，性价比高 | 前端下拉默认 |
-| `deepseek-v3.2-think` | 深度思考模式，适合复杂推理问题 | 配置默认（`AI_CHAT_MODEL`） |
-| `deepseek-v4-flash-0731` | 轻量快速版 | - |
+| 模型                     | 特点                           | 默认                        |
+|--------------------------|--------------------------------|-----------------------------|
+| `deepseek-v3.2`          | 通用对话，响应快，性价比高     | 前端下拉默认                |
+| `deepseek-v3.2-think`    | 深度思考模式，适合复杂推理问题 | 配置默认（`AI_CHAT_MODEL`） |
+| `deepseek-v4-flash-0731` | 轻量快速版                     | -                           |
 
-- **前端**：对话输入框下方下拉框直接切换，下拉选项来自 `GET /ai/v1/provider`（按当前启用的 AI 平台下发，避免选到不存在的模型），随请求提交 `model` 参数
+- **前端**：对话输入框下方下拉框直接切换，下拉选项来自 `GET /ai/v1/provider`（按当前启用的 AI 平台下发，避免选到不存在的模型），随请求提交
+  `model` 参数
 - **后端**：`POST /documents/v1/query` 与 `POST /keys/v1/chat` 的 `model` 字段覆盖默认配置；不传则用 `AI_CHAT_MODEL`
-- **注意**：三个模型均需在千帆控制台**手动开通**后才可使用，未开通报 `401 The model does not exist or you do not have access to it.`
+- **注意**：三个模型均需在千帆控制台 **手动开通**后才可使用，未开通报
+  `401 The model does not exist or you do not have access to it.`
 
 ---
 
@@ -479,7 +504,7 @@ Neo4jVectorStore 使用 label=`DocumentChunk`，index-name=`knowledge_vector_ind
 > ```cypher
 > DROP INDEX knowledge_vector_index IF EXISTS
 > ```
-> 重启应用后（`initialize-schema=true`）自动按 1024 维重建；**存量文档需重新上传/向量化**，否则检索失效。
+> 重启应用后（`initialize-schema=true`）自动按 1024 维重建； **存量文档需重新上传/向量化**，否则检索失效。
 
 ### Neo4j 配置
 
@@ -490,16 +515,16 @@ Spring Boot 4.x 的 `spring-boot-starter-neo4j` 仅自动配置 Driver，需手�
 
 启动时通过 `schema.sql`（`spring.sql.init.mode=always`）自动创建 `api_key` 等业务表，无需手动建表：
 
-| 字段          | 说明                         |
-|---------------|------------------------------|
-| `name`        | 备注（必填）                 |
-| `key_prefix`  | 前缀掩码（如 `sk-Ab3Xy7...`）|
-| `key_hash`    | SHA-256 哈希（CHAR(64) 唯一）|
-| `tenant_code` | 绑定租户编码（必填）         |
-| `system_type` | 绑定系统类型（必填）         |
-| `enabled`     | 是否启用                     |
-| `created_by`  | 创建人（超管用户名）         |
-| `created_time`| 创建时间                     |
+| 字段           | 说明                          |
+|----------------|-------------------------------|
+| `name`         | 备注（必填）                  |
+| `key_prefix`   | 前缀掩码（如 `sk-Ab3Xy7...`） |
+| `key_hash`     | SHA-256 哈希（CHAR(64) 唯一） |
+| `tenant_code`  | 绑定租户编码（必填）          |
+| `system_type`  | 绑定系统类型（必填）          |
+| `enabled`      | 是否启用                      |
+| `created_by`   | 创建人（超管用户名）          |
+| `created_time` | 创建时间                      |
 
 ### Jackson 3.x 配置
 
@@ -521,7 +546,8 @@ A: Neo4j 账号密码不正确，检查 `NEO4J_AUTH_USERNAME` / `NEO4J_AUTH_PASS
 A: POI 5.4.0 需要 commons-io 2.16+，项目已升级到 2.18.0。
 
 **Q: 上传 docx 报"文档未提取到文字内容"**
-A: 多为表格型文档。已修复：Word 转换按文档顺序遍历段落 + 表格（含嵌套表格），内容在表格中的工作类 docx 可正常提取。若仍报错，检查文件是否为扫描件/加密文档。
+A: 多为表格型文档。已修复：Word 转换按文档顺序遍历段落 + 表格（含嵌套表格），内容在表格中的工作类 docx
+可正常提取。若仍报错，检查文件是否为扫描件/加密文档。
 
 **Q: AI 回答报 429 限流**
 A: 大文档实体抽取已做批量合并 + 并发限制（最多200片、并发2、批次间隔1.5s），多跳召回限制30条。如仍触发，请降低
@@ -630,24 +656,24 @@ motcs-graphrag/
 
 ### 后端框架与运行时
 
-| 项目                                                                                 | 版本    | 用途                                    | 许可证     |
-|--------------------------------------------------------------------------------------|---------|-----------------------------------------|------------|
-| [Spring Boot](https://spring.io/projects/spring-boot)                                | 4.1.1   | 应用框架                                | Apache 2.0 |
-| [Spring WebFlux](https://docs.spring.io/spring-framework/reference/web/webflux.html) | 4.1.1   | 响应式 Web 框架                         | Apache 2.0 |
-| [Spring Security](https://spring.io/projects/spring-security)                        | 7.1     | 认证与鉴权（登录 + API Key + CSRF）     | Apache 2.0 |
-| [Spring AI](https://spring.io/projects/spring-ai)                                    | 2.0.1   | AI 抽象层（向量存储/对话模型）          | Apache 2.0 |
-| [Project Reactor](https://projectreactor.io/)                                        | -       | 响应式编程库                            | Apache 2.0 |
-| [Lombok](https://projectlombok.org/)                                                 | 1.18.46 | 编译时代码生成                          | MIT        |
-| [Jackson 3.x](https://github.com/FasterXML/jackson)                                  | 2.21.+  | JSON 序列化/反序列化                    | Apache 2.0 |
+| 项目                                                                                 | 版本    | 用途                                | 许可证     |
+|--------------------------------------------------------------------------------------|---------|-------------------------------------|------------|
+| [Spring Boot](https://spring.io/projects/spring-boot)                                | 4.1.1   | 应用框架                            | Apache 2.0 |
+| [Spring WebFlux](https://docs.spring.io/spring-framework/reference/web/webflux.html) | 4.1.1   | 响应式 Web 框架                     | Apache 2.0 |
+| [Spring Security](https://spring.io/projects/spring-security)                        | 7.1     | 认证与鉴权（登录 + API Key + CSRF） | Apache 2.0 |
+| [Spring AI](https://spring.io/projects/spring-ai)                                    | 2.0.1   | AI 抽象层（向量存储/对话模型）      | Apache 2.0 |
+| [Project Reactor](https://projectreactor.io/)                                        | -       | 响应式编程库                        | Apache 2.0 |
+| [Lombok](https://projectlombok.org/)                                                 | 1.18.46 | 编译时代码生成                      | MIT        |
+| [Jackson 3.x](https://github.com/FasterXML/jackson)                                  | 2.21.+  | JSON 序列化/反序列化                | Apache 2.0 |
 
 ### 数据库与驱动
 
-| 项目                                                              | 版本         | 用途                          | 许可证       |
-|-------------------------------------------------------------------|--------------|-------------------------------|--------------|
-| [Neo4j](https://neo4j.com/)                                       | 5.x / 2026.x | 图数据库 + 向量数据库         | GPLv3 / 商业 |
-| [Neo4j Java Driver](https://github.com/neo4j/neo4j-java-driver)   | 6.1.0        | Neo4j 官方驱动                | Apache 2.0   |
-| [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j) | 8.1.1        | Neo4j ORM / Repository        | Apache 2.0   |
-| [MySQL](https://www.mysql.com/) + R2DBC                           | 8.x          | 认证/业务数据存储（api_key、chat_message） | GPLv2       |
+| 项目                                                              | 版本         | 用途                                       | 许可证       |
+|-------------------------------------------------------------------|--------------|--------------------------------------------|--------------|
+| [Neo4j](https://neo4j.com/)                                       | 5.x / 2026.x | 图数据库 + 向量数据库                      | GPLv3 / 商业 |
+| [Neo4j Java Driver](https://github.com/neo4j/neo4j-java-driver)   | 6.1.0        | Neo4j 官方驱动                             | Apache 2.0   |
+| [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j) | 8.1.1        | Neo4j ORM / Repository                     | Apache 2.0   |
+| [MySQL](https://www.mysql.com/) + R2DBC                           | 8.x          | 认证/业务数据存储（api_key、chat_message） | GPLv2        |
 
 ### 文档处理
 
@@ -660,10 +686,10 @@ motcs-graphrag/
 
 ### AI 服务
 
-| 项目                                               | 用途                                                             |
-|----------------------------------------------------|------------------------------------------------------------------|
+| 项目                                                      | 用途                                                                  |
+|-----------------------------------------------------------|-----------------------------------------------------------------------|
 | [百度千帆 (Baidu Qianfan)](https://qianfan.baidubce.com/) | deepseek-v3.2 系列对话模型 + bge-large-zh 向量模型（OpenAI 兼容接口） |
-| [智谱 AI (Zhipu AI)](https://open.bigmodel.cn/)    | 兼容备选（GLM 系列 + embedding，OpenAI 兼容接口）                |
+| [智谱 AI (Zhipu AI)](https://open.bigmodel.cn/)           | 兼容备选（GLM 系列 + embedding，OpenAI 兼容接口）                     |
 
 ### 前端
 
