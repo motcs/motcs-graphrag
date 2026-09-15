@@ -1,0 +1,32 @@
+server:
+  shutdown: graceful
+  http2.enabled: true
+  compression.enabled: true
+
+spring:
+  profiles.active: ${SPRING_PROFILES_ACTIVE:prod}
+  threads.virtual.enabled: true
+  application.name: motcs-commons
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+  sql.init:
+    mode: always
+    continue-on-error: true
+    schema-locations: classpath:/db/schema.sql
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui
+    operationsSorter: method
+
+# 超管账号（唯一管理员，用于登录管理界面和生成 API Key）
+app:
+  auth:
+    username: ${AUTH_USERNAME:xxhzj}
+    password: ${AUTH_PASSWORD:sx2011++}
+    api.key.length: ${API_KEY_LEN:40}
+    # 登录 x-token 过期时间（秒），默认 2 小时；每次有效请求自动续期（滑动过期）
+    token.ttl-seconds: ${AUTH_TOKEN_TTL:7200}

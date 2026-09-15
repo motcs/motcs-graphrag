@@ -1,0 +1,618 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Motcs 知识图谱 · 多跳搜索</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <script src="./js/tailwindcss.js"></script>
+    <script src="./js/vis-network.min.js"></script>
+    <script src="./js/marked.min.js"></script>
+    <link rel="stylesheet" href="css/style.css?v=28">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: { 50: '#eef2ff', 100: '#e0e7ff', 400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' },
+                        dark: { 800: '#1e1b4b', 850: '#1a1744', 900: '#13103a', 950: '#0c0a2a' }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-dark-950 text-gray-100 min-h-screen">
+
+<!-- 顶部导航栏 -->
+<header id="appHeader" class="bg-dark-900/80 backdrop-blur border-b border-white/5 sticky top-0 z-50">
+    <div class="max-w-[1600px] mx-auto px-6 h-16 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center">
+                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle cx="12" cy="5" r="2.5" stroke-width="2"/>
+                    <circle cx="5" cy="19" r="2.5" stroke-width="2"/>
+                    <circle cx="19" cy="19" r="2.5" stroke-width="2"/>
+                    <path d="M12 7.5v4M10.5 13L6.5 17M13.5 13l4 4" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold tracking-wide">Motcs 知识图谱</h1>
+                <p class="text-xs text-gray-400 -mt-0.5">GraphRAG 多跳智能搜索</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2">
+                <label class="text-xs text-gray-400">用户</label>
+                <input id="globalUser" type="text" value="xxhzj" readonly title="登录账号，不可修改"
+                    class="w-24 px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg cursor-not-allowed opacity-60">
+            </div>
+            <div class="flex items-center gap-2">
+                <label class="text-xs text-gray-400">租户</label>
+                <!-- 租户可搜索下拉：原生 select 作为数据源与提交值载体（隐藏），搜索 UI 由 initSearchableSelect 动态渲染 -->
+                <select id="globalTenant" title="租户下拉内容来自后端租户配置表（GET /documents/v1/tenants），0 为超管全部租户，支持关键字搜索" class="hidden">
+                    <option value="0">全部租户</option>
+                </select>
+            </div>
+            <div class="flex items-center gap-2">
+                <label class="text-xs text-gray-400">系统</label>
+                <select id="globalSystem" title="系统类型下拉内容来自 js/config.js（MOTCS_CONFIG.systems），部署可改"
+                    class="w-28 px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                    <option value="other">其他</option>
+                </select>
+            </div>
+            <div id="healthBadge" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-dark-850 border border-white/10">
+                <span class="w-2 h-2 rounded-full bg-gray-500" id="healthDot"></span>
+                <span class="text-xs text-gray-400" id="healthText">检测中</span>
+            </div>
+            <button id="logoutBtn" title="退出登录" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-850 hover:bg-white/5 border border-white/10 text-xs text-gray-300 transition">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                退出
+            </button>
+        </div>
+    </div>
+</header>
+
+<div id="appMain" class="max-w-[1400px] mx-auto px-4 py-6 flex gap-5">
+
+    <!-- 左侧导航 -->
+    <nav class="w-[336px] shrink-0">
+        <div class="bg-dark-900/60 rounded-2xl border border-white/5 p-3 sticky top-24 flex flex-col max-h-[calc(100vh-120px)]">
+            <!-- 新对话按钮 -->
+            <button id="newChatBtn" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition mb-3">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                新对话
+            </button>
+
+            <!-- 导航标签 -->
+            <button data-tab="search" class="nav-btn active w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+                智能问答
+            </button>
+            <button data-tab="documents" class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                文档管理
+            </button>
+            <button data-tab="tenants" class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                租户管理
+            </button>
+            <button data-tab="apikey" class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                API Key 管理
+            </button>
+            <button data-tab="monitor" class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                用量监控
+            </button>
+            <button data-tab="graph" class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5" stroke-width="2"/><circle cx="5" cy="19" r="2.5" stroke-width="2"/><circle cx="19" cy="19" r="2.5" stroke-width="2"/><path d="M12 7.5v4M10.5 13L6.5 17M13.5 13l4 4" stroke-width="2" stroke-linecap="round"/></svg>
+                知识图谱
+            </button>
+
+            <!-- 历史对话 -->
+            <div class="mt-4 pt-3 border-t border-white/5 flex-1 overflow-y-auto min-h-0">
+                <div class="text-xs text-gray-500 mb-2 px-2 flex items-center justify-between">
+                    <span>历史对话</span>
+                    <div class="flex items-center gap-2">
+                        <span class="text-gray-600" id="historyCount">0</span>
+                        <button id="historyManageBtn" class="text-gray-500 hover:text-primary-400 transition" title="管理">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div id="historyBatchBar" class="hidden px-2 mb-2 flex items-center justify-between">
+                    <label class="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+                        <input type="checkbox" id="historySelectAll" class="accent-primary-500"> 全选
+                    </label>
+                    <button id="historyBatchDelete" class="text-xs text-red-400 hover:text-red-300 disabled:text-gray-600 disabled:cursor-not-allowed" disabled>删除选中</button>
+                </div>
+                <div id="historyList" class="space-y-1"></div>
+            </div>
+
+            <!-- 快捷统计 -->
+            <div class="mt-3 pt-3 border-t border-white/5 px-2">
+                <div class="flex justify-between text-xs">
+                    <span class="text-gray-400">文档</span>
+                    <span class="text-primary-400 font-semibold" id="statDocs">-</span>
+                    <span class="text-gray-400 ml-3">分片</span>
+                    <span class="text-purple-400 font-semibold" id="statChunks">-</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容区 -->
+    <main class="flex-1 min-w-0">
+
+        <!-- ===== 智能问答（豆包风格聊天布局） ===== -->
+        <section id="tab-search" class="tab-panel chat-layout">
+            <!-- 聊天消息区 -->
+            <div id="chatMessages" class="chat-messages flex-1 overflow-y-auto px-4 py-6">
+                <!-- 空状态 -->
+                <div id="emptyState" class="h-full flex flex-col items-center justify-center text-center">
+                    <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center mb-4">
+                        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+                    </div>
+                    <h2 class="text-xl font-bold text-gray-200 mb-2">有什么可以帮你的？</h2>
+                    <p class="text-sm text-gray-500">基于向量检索 + Neo4j 多跳图谱的 GraphRAG 智能问答</p>
+                </div>
+            </div>
+
+            <!-- 输入区（固定底部） -->
+            <div class="chat-input-area shrink-0 px-4 pb-4 pt-2">
+                <div class="max-w-[64rem] mx-auto">
+                    <div class="bg-dark-900/80 rounded-2xl border border-white/10 focus-within:border-primary-500/50 transition shadow-lg">
+                        <textarea id="questionInput" rows="1" placeholder="输入你的问题，Ctrl+Enter 发送"
+                            class="w-full px-4 py-3 text-sm bg-transparent border-none resize-none focus:outline-none placeholder-gray-500 text-gray-200 max-h-32"></textarea>
+                        <div class="flex items-center justify-between px-3 pb-2">
+                            <div class="flex items-center gap-3 text-xs text-gray-500">
+                                <label class="flex items-center gap-1.5 text-gray-400">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                                    模型
+                                </label>
+                                <select id="modelSelect" title="选择AI模型"
+                                    class="px-2 py-1 text-xs bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition text-gray-300">
+                                    <option value="deepseek-v3.2" selected>deepseek-v3.2</option>
+                                    <option value="deepseek-v3.2-think">deepseek-v3.2-think</option>
+                                    <option value="deepseek-v4-flash-0731">deepseek-v4-flash-0731</option>
+                                </select>
+                                <span id="aiProviderLabel" class="px-2 py-1 rounded-md bg-primary-600/10 text-primary-300 border border-primary-500/20" title="当前启用的 AI 平台">检测中…</span>
+                                <span>会话: <span id="currentSessionId" class="text-primary-400 font-mono">未开始</span></span>
+                            </div>
+                            <button id="askBtn" class="w-8 h-8 rounded-lg bg-primary-600 hover:bg-primary-500 flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed">
+                                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== 上传弹窗 ===== -->
+        <div id="uploadModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div class="bg-dark-900 rounded-2xl border border-white/10 w-full max-w-5xl max-h-[85vh] overflow-y-auto m-4">
+                <div class="flex items-center justify-between p-5 border-b border-white/5">
+                    <h2 class="text-lg font-bold">上传文档</h2>
+                    <div class="flex items-center gap-2">
+                        <button id="uploadModalClose" class="text-gray-500 hover:text-gray-300 transition w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/5">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-2 gap-8">
+                        <!-- 文件上传 -->
+                        <div>
+                            <h3 class="text-base font-semibold mb-4 flex items-center gap-2 text-primary-400">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                                本地文件
+                            </h3>
+                            <div id="dropZone" class="border-2 border-dashed border-white/10 rounded-xl p-10 text-center cursor-pointer hover:border-primary-500/50 hover:bg-primary-500/5 transition">
+                                <svg class="w-12 h-12 mx-auto text-gray-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                <p class="text-sm text-gray-300">点击或拖拽文件到此处</p>
+                                <p class="text-xs text-gray-500 mt-1">最大 50MB，支持 pdf/doc/docx/xls/xlsx/ppt/pptx/txt/csv/md</p>
+                                <input type="file" id="fileInput" class="hidden" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md">
+                            </div>
+                            <div id="selectedFile" class="hidden mt-3 p-3 bg-dark-850 rounded-lg flex items-center gap-3">
+                                <svg class="w-5 h-5 text-primary-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                <span class="text-sm text-gray-200 truncate flex-1" id="selectedFileName"></span>
+                                <button id="clearFile" class="text-gray-500 hover:text-red-400 transition shrink-0">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </button>
+                            </div>
+                            <div class="mt-4 space-y-3">
+                                <input type="text" id="uploadTitle" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="文档标题（可选）">
+                                <input type="text" id="uploadDesc" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="文档描述（可选）">
+                                <div class="grid grid-cols-2 gap-3">
+                                    <input type="text" id="uploadDocCode" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="业务编码 docCode">
+                                    <select id="uploadTenant" title="租户下拉来自租户配置表，支持关键字搜索" class="hidden">
+                                        <option value="0">全部租户</option>
+                                    </select>
+                                </div>
+                                <select id="uploadSystem" title="系统下拉来自 js/config.js" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                                    <option value="other">综合平台</option>
+                                </select>
+                            </div>
+                            <button id="uploadBtn" class="w-full mt-5 py-2.5 bg-primary-600 hover:bg-primary-500 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed">
+                                <span id="uploadBtnText">上传并入库</span>
+                            </button>
+                        </div>
+
+                        <!-- URL 上传 -->
+                        <div>
+                            <h3 class="text-base font-semibold mb-4 flex items-center gap-2 text-purple-400">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                                远程 URL
+                            </h3>
+                            <p class="text-xs text-gray-500 mb-4">输入文件直链，服务端自动下载后走相同入库流程</p>
+                            <div class="space-y-3">
+                                <input type="url" id="urlInput" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="https://example.com/document.pdf">
+                                <input type="text" id="urlTitle" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="文档标题（可选）">
+                                <input type="text" id="urlDesc" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="文档描述（可选）">
+                                <div class="grid grid-cols-3 gap-3">
+                                    <input type="text" id="urlDocCode" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="docCode">
+                                    <select id="urlTenant" title="租户下拉来自租户配置表，支持关键字搜索" class="hidden">
+                                        <option value="0">全部租户</option>
+                                    </select>
+                                    <select id="urlSystem" title="系统下拉来自 js/config.js" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                                        <option value="other">综合平台</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button id="urlUploadBtn" class="w-full mt-5 py-2.5 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed">
+                                <span id="urlUploadBtnText">下载并入库</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 文档管理 ===== -->
+        <section id="tab-documents" class="tab-panel hidden">
+            <div class="mb-5 flex items-center justify-between">
+                <div>
+                    <h2 class="text-2xl font-bold">文档管理</h2>
+                    <p class="text-sm text-gray-400 mt-1">查看已入库的文档列表及分片信息</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="fabUpload" class="px-4 py-2 text-sm bg-gradient-to-r from-primary-500 to-purple-600 hover:from-primary-400 hover:to-purple-500 rounded-lg text-white font-medium transition flex items-center gap-2 shadow-lg shadow-primary-500/20" title="上传文档">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                        上传文档
+                    </button>
+                    <button id="refreshDocs" class="px-4 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg hover:border-primary-500 transition flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    刷新
+                </button>
+                </div>
+            </div>
+
+            <div class="mb-4 flex flex-wrap items-center gap-3">
+                <select id="docFilterTenant" title="按租户筛选文档（0 为全部租户），支持关键字搜索" class="hidden">
+                    <option value="0">全部租户</option>
+                </select>
+                <select id="docFilterSystem" title="按系统类型筛选文档" class="px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                    <option value="">全部系统</option>
+                </select>
+                <input type="text" id="docSearch" class="flex-1 min-w-40 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="搜索文件名或标题...">
+                <select id="docStatusFilter" class="px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                    <option value="all">全部状态</option>
+                    <option value="SUCCESS">已完成</option>
+                    <option value="PROCESSING">处理中</option>
+                    <option value="FAILED">处理失败</option>
+                </select>
+            </div>
+
+            <div id="docsLoading" class="hidden text-center py-12">
+                <div class="inline-flex items-center gap-3">
+                    <div class="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span class="text-sm text-gray-400">加载中...</span>
+                </div>
+            </div>
+
+            <div id="docsEmpty" class="hidden text-center py-16">
+                <svg class="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                <p class="text-gray-400">暂无文档，请先上传</p>
+            </div>
+
+            <div id="docsList" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+        </section>
+
+        <!-- ===== 租户管理 ===== -->
+        <section id="tab-tenants" class="tab-panel hidden">
+            <div class="bg-dark-900/60 rounded-2xl border border-white/5 p-5">
+                <div class="mb-5">
+                    <h2 class="text-2xl font-bold">租户管理</h2>
+                    <p class="text-sm text-gray-400 mt-1">维护租户配置表（tenant_config）：文档管理/对话/上传页的租户下拉数据源。租户 0（全部租户）为系统保留项，不在此管理</p>
+                </div>
+                <div class="flex flex-wrap gap-3 mb-4">
+                    <input id="tenantNewCode" type="text" placeholder="租户编码，如 410725"
+                        class="w-40 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition placeholder-gray-500">
+                    <input id="tenantNewName" type="text" placeholder="租户名称，如 长安区人大"
+                        class="flex-1 min-w-40 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition placeholder-gray-500">
+                    <button id="tenantAddBtn" class="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition">添加租户</button>
+                </div>
+                <div class="mb-4">
+                    <input id="tenantSearch" type="text" placeholder="按租户名称模糊搜索..."
+                        class="w-72 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                </div>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-xs text-gray-400 border-b border-white/5">
+                            <th class="text-left py-2 font-medium">ID</th>
+                            <th class="text-left py-2 font-medium">租户编码</th>
+                            <th class="text-left py-2 font-medium">租户名称</th>
+                            <th class="text-left py-2 font-medium">状态</th>
+                            <th class="text-left py-2 font-medium">创建时间</th>
+                            <th class="text-right py-2 font-medium">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tenantList"></tbody>
+                </table>
+                <div id="tenantEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无租户，点击上方按钮添加</div>
+            </div>
+        </section>
+
+        <!-- ===== 知识图谱 ===== -->
+        <section id="tab-graph" class="tab-panel hidden">
+            <div class="mb-5 flex items-center justify-between">
+                <div>
+                    <h2 class="text-2xl font-bold">知识图谱</h2>
+                    <p class="text-sm text-gray-400 mt-1">可视化展示 DocumentChunk 分片、KnowledgeEntity 实体及 MENTIONS / RELATE_TO 关系</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs text-gray-400">限制</label>
+                        <select id="graphLimit" class="px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                            <option value="100">100</option>
+                            <option value="200" selected>200</option>
+                            <option value="500">500</option>
+                            <option value="1000">1000</option>
+                        </select>
+                    </div>
+                    <button id="refreshGraph" class="px-4 py-2 text-sm bg-primary-600 hover:bg-primary-500 rounded-lg transition flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        加载图谱
+                    </button>
+                    <button id="relayoutGraph" class="px-4 py-2 text-sm bg-dark-850 border border-white/10 hover:border-primary-500 rounded-lg transition flex items-center gap-2" title="重新运行力导向布局">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                        重新布局
+                    </button>
+                </div>
+            </div>
+
+            <!-- 图例 -->
+            <div class="flex items-center gap-6 mb-4 text-xs">
+                <div class="flex items-center gap-2">
+                    <span class="w-3 h-3 rounded bg-blue-400"></span>
+                    <span class="text-gray-400">文档分片 (DocumentChunk)</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="w-3 h-3 rounded-full bg-purple-400"></span>
+                    <span class="text-gray-400">知识实体 (KnowledgeEntity)</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="w-6 h-0.5 bg-gray-500"></span>
+                    <span class="text-gray-400">MENTIONS 提及</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="w-6 h-0.5 bg-primary-500"></span>
+                    <span class="text-gray-400">RELATE_TO 关联</span>
+                </div>
+                <span class="ml-auto text-gray-500" id="graphStats"></span>
+            </div>
+
+            <div class="bg-dark-900/60 rounded-2xl border border-white/5 overflow-hidden">
+                <div id="graphContainer" class="w-full h-[600px]"></div>
+                <div id="graphEmpty" class="hidden h-[600px] flex items-center justify-center text-gray-500 text-sm">
+                    点击「加载图谱」按钮开始可视化
+                </div>
+                <div id="graphLoading" class="hidden h-[600px] flex items-center justify-center">
+                    <div class="inline-flex items-center gap-3">
+                        <div class="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+                        <span class="text-sm text-gray-400">正在加载图谱数据...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 节点详情 -->
+            <div id="nodeDetail" class="hidden mt-4 bg-dark-900/60 rounded-2xl border border-white/5 p-5">
+                <h3 class="text-sm font-semibold mb-3 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    节点详情
+                </h3>
+                <div id="nodeDetailContent" class="text-sm text-gray-300"></div>
+            </div>
+        </section>
+
+        <!-- ===== API Key 管理 ===== -->
+        <section id="tab-apikey" class="tab-panel hidden">
+            <div class="bg-dark-900/60 rounded-2xl border border-white/5 p-5">
+                <div class="mb-5">
+                    <h2 class="text-2xl font-bold">API Key 管理</h2>
+                    <p class="text-sm text-gray-400 mt-1">对外调用接口的访问凭证：调用方携带该 Key 即可访问 AI 对话接口（登录态或 Key 二选一），明文仅生成时展示一次，超管生成后人工分发</p>
+                </div>
+                <div class="flex flex-wrap gap-3 mb-4">
+                    <input id="apiKeyName" type="text" placeholder="用途备注，如：第三方系统对接"
+                        class="flex-1 min-w-40 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition placeholder-gray-500">
+                    <!-- 租户可搜索下拉：原生 select 作为数据源与提交值载体（隐藏），搜索 UI 由 initSearchableSelect 动态渲染 -->
+                    <select id="apiKeyTenant" class="hidden" title="该 Key 绑定的租户（对话/上传文档归属），不允许为 0（超管全局租户），选项来自后端租户配置表，支持关键字搜索">
+                        <option value="">请选择租户</option>
+                    </select>
+                    <select id="apiKeySystem" title="该 Key 绑定的系统类型（对话/上传文档归属），选项来自 js/config.js（MOTCS_CONFIG.systems）"
+                        class="w-28 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+                        <option value="other">其他</option>
+                    </select>
+                    <button id="apiKeyCreateBtn" class="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition">生成新 Key</button>
+                </div>
+                <div id="apiKeyNewResult" class="hidden p-4 mb-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                    <div class="text-xs text-emerald-400 mb-2 flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        新 Key 已生成，请立即复制保存（仅此一次可见）
+                    </div>
+                    <div class="flex gap-2">
+                        <code id="apiKeyNewValue" class="flex-1 text-xs bg-dark-950 rounded-lg px-3 py-2 break-all text-emerald-300 select-all"></code>
+                        <button id="apiKeyCopyBtn" class="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 transition shrink-0">复制</button>
+                    </div>
+                </div>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-xs text-gray-400 border-b border-white/5">
+                            <th class="text-left py-2 font-medium">备注</th>
+                            <th class="text-left py-2 font-medium">Key</th>
+                            <th class="text-left py-2 font-medium">租户/系统</th>
+                            <th class="text-left py-2 font-medium">状态</th>
+                            <th class="text-left py-2 font-medium">用量（次数/总token）</th>
+                            <th class="text-left py-2 font-medium">创建时间</th>
+                            <th class="text-right py-2 font-medium">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="apiKeyList"></tbody>
+                </table>
+                <div id="apiKeyEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无 API Key，点击上方按钮生成</div>
+            </div>
+        </section>
+
+        <!-- ===== 用量监控 ===== -->
+        <section id="tab-monitor" class="tab-panel hidden">
+            <div class="bg-dark-900/60 rounded-2xl border border-white/5 p-5">
+                <div class="mb-5 flex items-start justify-between gap-4">
+                    <div>
+                        <h2 class="text-2xl font-bold">用量监控</h2>
+                        <p class="text-sm text-gray-400 mt-1">各 API Key 的调用次数与 token 消耗汇总（每次 /keys/v1/chat 对话自动记录，停用不产生记录）</p>
+                    </div>
+                    <button id="monitorRefreshBtn" class="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition shrink-0">刷新</button>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">Key 总数</div>
+                        <div class="text-2xl font-bold" id="monTotalKeys">-</div>
+                    </div>
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">总调用次数</div>
+                        <div class="text-2xl font-bold" id="monTotalCalls">-</div>
+                    </div>
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">总输入 token</div>
+                        <div class="text-2xl font-bold" id="monPrompt">-</div>
+                    </div>
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">总输出 token</div>
+                        <div class="text-2xl font-bold" id="monCompletion">-</div>
+                    </div>
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">总 token 消耗</div>
+                        <div class="text-2xl font-bold text-primary-400" id="monTotal">-</div>
+                    </div>
+                </div>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-xs text-gray-400 border-b border-white/5">
+                            <th class="text-left py-2 font-medium">Key</th>
+                            <th class="text-left py-2 font-medium">备注</th>
+                            <th class="text-left py-2 font-medium">租户/系统</th>
+                            <th class="text-left py-2 font-medium">状态</th>
+                            <th class="text-right py-2 font-medium">调用次数</th>
+                            <th class="text-right py-2 font-medium">输入 token</th>
+                            <th class="text-right py-2 font-medium">输出 token</th>
+                            <th class="text-right py-2 font-medium">总 token</th>
+                            <th class="text-left py-2 font-medium">最近使用</th>
+                            <th class="text-right py-2 font-medium">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="monitorUsageList"></tbody>
+                </table>
+                <div id="monitorUsageEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无 API Key 或调用记录</div>
+            </div>
+        </section>
+
+        <!-- API Key 用量明细弹窗 -->
+        <div id="apiKeyUsageModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div class="bg-dark-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[80vh] flex flex-col">
+                <div class="flex items-center justify-between px-5 py-4 border-b border-white/5">
+                    <div>
+                        <h3 class="text-lg font-bold" id="apiKeyUsageTitle">用量明细</h3>
+                        <p class="text-xs text-gray-400 mt-0.5" id="apiKeyUsageSub"></p>
+                    </div>
+                    <button onclick="closeApiKeyUsage()" class="text-gray-400 hover:text-gray-200 text-2xl leading-none px-2">&times;</button>
+                </div>
+                <div class="overflow-auto flex-1 px-5 py-4">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-xs text-gray-400 border-b border-white/5">
+                                <th class="text-left py-2 font-medium">时间</th>
+                                <th class="text-left py-2 font-medium">用户</th>
+                                <th class="text-left py-2 font-medium">会话</th>
+                                <th class="text-left py-2 font-medium">模型</th>
+                                <th class="text-right py-2 font-medium">输入 token</th>
+                                <th class="text-right py-2 font-medium">输出 token</th>
+                                <th class="text-right py-2 font-medium">总 token</th>
+                            </tr>
+                        </thead>
+                        <tbody id="apiKeyUsageList"></tbody>
+                    </table>
+                    <div id="apiKeyUsageEmpty" class="text-center text-gray-500 text-sm py-6 hidden">暂无调用记录</div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<!-- 来源详情弹窗 -->
+<div id="sourceModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-dark-900 rounded-2xl border border-white/10 w-full max-w-3xl max-h-[85vh] flex flex-col m-4 shadow-2xl">
+        <div class="flex items-start justify-between px-6 py-4 border-b border-white/5">
+            <div class="flex-1 min-w-0 pr-4">
+                <h3 class="text-base font-semibold text-gray-100 truncate" id="sourceModalTitle">来源详情</h3>
+                <div id="sourceModalMeta" class="mt-2 text-xs text-gray-500"></div>
+            </div>
+            <button id="sourceModalClose" class="text-gray-400 hover:text-white transition shrink-0 w-8 h-8 rounded-lg hover:bg-white/5 flex items-center justify-center">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-6">
+            <div id="sourceModalContent" class="text-sm text-gray-300 whitespace-pre-wrap leading-7 bg-dark-850/50 rounded-xl p-5 border border-white/5"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast 通知 -->
+<div id="toast" class="fixed bottom-6 right-6 z-50 hidden">
+    <div class="px-5 py-3 rounded-xl shadow-2xl text-sm flex items-center gap-2" id="toastInner"></div>
+</div>
+
+<!-- 登录界面（未登录时显示，替代遮罩） -->
+<div id="loginView" class="hidden min-h-screen items-center justify-center bg-dark-950">
+    <div class="bg-dark-900 rounded-2xl border border-white/10 w-full max-w-sm m-4 p-6 shadow-2xl">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center">
+                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            </div>
+            <div>
+                <h2 class="text-lg font-bold">管理员登录</h2>
+                <p class="text-xs text-gray-400">访问管理界面需先登录</p>
+            </div>
+        </div>
+        <form id="loginForm" class="space-y-4">
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">用户名</label>
+                <input id="loginUsername" type="text" autocomplete="username" value=""
+                    class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">密码</label>
+                <input id="loginPassword" type="password" autocomplete=""
+                    class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
+            </div>
+            <button type="submit" id="loginBtn"
+                class="w-full py-2.5 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition disabled:opacity-40">登 录</button>
+        </form>
+    </div>
+</div>
+
+<script src="js/config.js?v=1"></script>
+<script src="js/app.js?v=116"></script>
+</body>
+</html>
