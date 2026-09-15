@@ -126,33 +126,34 @@ public class GraphRagService {
         log.info("收到GraphRAG查询: question={}, userId={}, sessionId={}, tenant={}, system={}",
                 ragQuery.getQuestion(), ragQuery.getUserId(), ragQuery.getSessionId(),
                 ragQuery.getTenantCode(), ragQuery.getSystemType());
+        Mono<String> context = buildHistoryContext(ragQuery.getSessionId());
 
-        return Mono.fromCallable(() -> {
+        return context.flatMap(historyContext -> {
             // 1. 拉取多轮对话历史（长对话自动摘要压缩，永远只取最新5条原始+摘要）
-            String historyContext = buildHistoryContext(ragQuery.getSessionId());
             // 2. 向量检索 + 图谱召回，同时提取来源
             ContextResult ctx = buildContextWithSources(ragQuery);
             if (ctx != null) {
-                return new ContextResult(ctx.fullContext(), ctx.sources(), historyContext);
+                ContextResult contextResult = new ContextResult(ctx.fullContext(), ctx.sources(), historyContext);
+                return Mono.just(contextResult);
             } else {
                 // 检索无结果也保留历史对话，AI 可依据多轮历史理解"重新回答上个问题"等指令
-                return new ContextResult("无", List.of(), historyContext);
+                return Mono.empty();
             }
-        }).subscribeOn(Schedulers.boundedElastic()).map(ctx -> {
+        }).map(ctx -> {
             ChatClient.ChatClientRequestSpec answerSpec = this.chatClient.prompt()
-                    .system(s -> s.text(SYSTEM_PROMPT)
-                            .param("context", ctx.fullContext())
-                            .param("history", ctx.historyContext()))
-                    .user(ragQuery.getQuestion());
+                    .system(s -> s.text(SYSTEM_PROMPT).param("context", ctx.fullContext())
+                            .param("history", ctx.historyContext())).user(ragQuery.getQuestion());
             applyModelOptions(answerSpec, ragQuery.getModel());
             AtomicReference<Usage> usageRef = new AtomicReference<>();
             Flux<ChatStreamEvent> answer = streamChatEvents(answerSpec, usageRef);
             return new QueryResult(ctx.sources(), answer, usageRef);
-        }).switchIfEmpty(Mono.fromCallable(() -> {
+        }).switchIfEmpty(context.map(historyContext -> {
             // 向量检索无结果：仍调用 AI，让其判断是打招呼/闲聊还是知识问题
             // 打招呼类客气回复，知识类说明未找到相关内容
             String noResultPrompt = """
-                    你是一个友好的智能助手。当前知识库中没有检索到与用户问题相关的文档内容。
+                    你是企业知识库问答助手，请优先依据下面提供的知识库上下文回答用户问题。
+                    如果知识库上下文没有相关内容，但【历史对话】中已存在用户要求重新回答的问题及对应回答，请直接基于历史对话中的原回答重新组织语言作答，不要复述"知识库无相关内容"。
+                    只有知识库上下文与历史对话都没有相关内容时，才回复知识库无相关内容，不要编造信息。
                     
                     请根据用户问题判断：
                     1. 如果是打招呼、问候、闲聊（如"你好"、"谢谢"、"你是谁"等），请礼貌、自然地回复，不要提及知识库。
@@ -162,8 +163,8 @@ public class GraphRagService {
                     
                     回复使用 标准的Markdown 格式，简洁友好，不超过100字。""";
             ChatClient.ChatClientRequestSpec noResultSpec = this.chatClient.prompt()
-                    .system(noResultPrompt)
-                    .user(ragQuery.getQuestion());
+                    .system(s -> s.text(noResultPrompt).param("context", "无")
+                            .param("history", historyContext)).user(ragQuery.getQuestion());
             applyModelOptions(noResultSpec, ragQuery.getModel());
             AtomicReference<Usage> usageRef = new AtomicReference<>();
             Flux<ChatStreamEvent> answer = streamChatEvents(noResultSpec, usageRef);
@@ -686,76 +687,74 @@ public class GraphRagService {
      * 构建多轮对话上下文：长对话自动摘要压缩，永远只取最新5条原始对话+摘要
      * 用户看到的聊天记录不变，仅减少发给AI的token
      */
-    private String buildHistoryContext(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) return "（无历史对话）";
-
+    private Mono<String> buildHistoryContext(String sessionId) {
+        Mono<String> just = Mono.just("（无历史对话）");
+        if (sessionId == null || sessionId.isBlank()) return just;
         // 1. 准确统计会话总条数
-        Long count = this.chatMessageRepository.countBySessionId(sessionId).block();
-        int totalCount = count != null ? count.intValue() : 0;
-        if (totalCount == 0) return "（无历史对话）";
-
-        // 2. 取最近5条原始对话（倒序查询后反转为正序）
-        List<ChatMessage> recent = this.chatMessageRepository
-                .findRecentBySessionId(sessionId, HISTORY_KEEP_RECENT, 0).collectList().block();
-        if (recent == null || recent.isEmpty()) return "（无历史对话）";
-        Collections.reverse(recent);
-
-        String recentText = recent.stream()
-                .map(h -> "用户：" + h.getQuestion() + "\n助手：" + (h.getAnswer() != null ? h.getAnswer() : ""))
-                .collect(Collectors.joining("\n\n"));
-
-        // 不足5条，直接返回原始对话
-        if (totalCount <= HISTORY_KEEP_RECENT) {
-            log.info("加载多轮历史 {} 条（未触发摘要）", totalCount);
-            return recentText;
-        }
-
-        // 3. 超过5条，查询已有摘要
-        ChatSessionSummary summaryRecord = null;
-        try {
-            summaryRecord = this.summaryRepository.findBySessionId(sessionId).block();
-        } catch (Exception e) {
-            log.warn("查询会话摘要失败: {}", e.getMessage());
-        }
-
-        int lastCount = (summaryRecord != null && summaryRecord.getLastMessageCount() != null)
-                ? summaryRecord.getLastMessageCount() : 0;
-        // 每新增5条触发一次重新摘要（第5、10、15...条时）
-        boolean needRecordSummary = summaryRecord == null
-                || summaryRecord.getSummary() == null || summaryRecord.getSummary().isBlank()
-                || (totalCount - lastCount) >= HISTORY_KEEP_RECENT;
-
-        String summary;
-        if (needRecordSummary) {
-            // 本次不阻塞，异步生成摘要，下次提问自动使用
-            int olderCount = totalCount - HISTORY_KEEP_RECENT;
-            String oldSummary = (summaryRecord != null && summaryRecord.getSummary() != null)
-                    ? summaryRecord.getSummary() : "";
-            Mono.fromRunnable(() -> {
-                // 加载老对话（正序，取最早的 olderCount 条，即除最近5条外的全部）
-                List<ChatMessage> older = this.chatMessageRepository
-                        .findBySessionId(sessionId, olderCount).collectList().block();
-                if (older == null || older.isEmpty()) return;
-                String olderText = older.stream()
-                        .map(h -> "用户：" + h.getQuestion() + "\n助手：" + (h.getAnswer() != null ? h.getAnswer() : ""))
-                        .collect(Collectors.joining("\n\n"));
-                if (!oldSummary.isBlank()) {
-                    olderText = "【此前摘要】\n" + oldSummary + "\n\n【新增对话】\n" + olderText;
+        return this.chatMessageRepository.countBySessionId(sessionId).flatMap(count -> {
+            int totalCount = count.intValue();
+            if (totalCount == 0) {
+                return just;
+            }
+            Mono<List<ChatMessage>> listMono = this.chatMessageRepository
+                    .findRecentBySessionId(sessionId, HISTORY_KEEP_RECENT, 0).collectList();
+            return listMono.flatMap(recent -> {
+                if (ObjectUtils.isEmpty(recent)) {
+                    return just;
                 }
-                String newSummary = summarizeHistory(olderText);
-                saveSummary(sessionId, newSummary, totalCount);
-                log.info("异步生成会话摘要完成: sessionId={}, 老对话{}条, 总{}条", sessionId, olderCount, totalCount);
-            }).subscribeOn(Schedulers.boundedElastic()).subscribe();
-            // 本次使用旧摘要（没有则只用最近5条原始对话）
-            summary = oldSummary;
-            log.info("会话摘要待更新，本次使用旧摘要: sessionId={}, 总{}条", sessionId, totalCount);
-        } else {
-            summary = summaryRecord.getSummary();
-            log.info("复用会话摘要: sessionId={}, 总{}条", sessionId, totalCount);
-        }
+                Collections.reverse(recent);
+                String recentText = recent.stream()
+                        .map(h -> "用户：" + h.getQuestion() + "\n助手：" +
+                                (h.getAnswer() != null ? h.getAnswer() : ""))
+                        .collect(Collectors.joining("\n\n"));
 
-        if (summary.isBlank()) return recentText;
-        return "【历史对话摘要】\n" + summary + "\n\n【最近对话】\n" + recentText;
+                // 不足5条，直接返回原始对话
+                if (totalCount <= HISTORY_KEEP_RECENT) {
+                    log.info("加载多轮历史 {} 条（未触发摘要）", totalCount);
+                    return Mono.just(recentText);
+                }
+                Mono<ChatSessionSummary> summaryMono = this.summaryRepository.findBySessionId(sessionId)
+                        .defaultIfEmpty(new ChatSessionSummary());
+                return summaryMono.flatMap(summaryRecord -> {
+                    int lastCount = summaryRecord.getLastMessageCount() != null
+                            ? summaryRecord.getLastMessageCount() : 0;
+                    // 每新增5条触发一次重新摘要（第5、10、15...条时）
+                    boolean needRecordSummary = summaryRecord.getSummary() == null || summaryRecord.getSummary().isBlank()
+                            || totalCount - lastCount >= HISTORY_KEEP_RECENT;
+
+                    String summary;
+                    if (needRecordSummary) {
+                        // 本次不阻塞，异步生成摘要，下次提问自动使用
+                        int olderCount = totalCount - HISTORY_KEEP_RECENT;
+                        String oldSummary = summaryRecord.getSummary() != null ? summaryRecord.getSummary() : "";
+                        Mono.fromRunnable(() -> {
+                            // 加载老对话（正序，取最早的 olderCount 条，即除最近5条外的全部）
+                            List<ChatMessage> older = this.chatMessageRepository
+                                    .findBySessionId(sessionId, olderCount).collectList().block();
+                            if (older == null || older.isEmpty()) return;
+                            String olderText = older.stream()
+                                    .map(h -> "用户：" + h.getQuestion() + "\n助手：" + (h.getAnswer() != null ? h.getAnswer() : ""))
+                                    .collect(Collectors.joining("\n\n"));
+                            if (!oldSummary.isBlank()) {
+                                olderText = "【此前摘要】\n" + oldSummary + "\n\n【新增对话】\n" + olderText;
+                            }
+                            String newSummary = summarizeHistory(olderText);
+                            saveSummary(sessionId, newSummary, totalCount);
+                            log.info("异步生成会话摘要完成: sessionId={}, 老对话{}条, 总{}条", sessionId, olderCount, totalCount);
+                        }).subscribeOn(Schedulers.boundedElastic()).subscribe();
+                        // 本次使用旧摘要（没有则只用最近5条原始对话）
+                        summary = oldSummary;
+                        log.info("会话摘要待更新，本次使用旧摘要: sessionId={}, 总{}条", sessionId, totalCount);
+                    } else {
+                        summary = summaryRecord.getSummary();
+                        log.info("复用会话摘要: sessionId={}, 总{}条", sessionId, totalCount);
+                    }
+
+                    if (summary.isBlank()) return Mono.just(recentText);
+                    return Mono.just("【历史对话摘要】\n" + summary + "\n\n【最近对话】\n" + recentText);
+                }).switchIfEmpty(just);
+            });
+        });
     }
 
     /**

@@ -28,10 +28,6 @@ public class ChatSessionSummary implements Serializable {
     @Schema(description = "会话ID", example = "sess_abc123")
     private String sessionId;
 
-    @Column("title")
-    @Schema(description = "会话主题名称（AI生成或用户自定义，生成后固定不变）")
-    private String title;
-
     @Column("summary")
     @Schema(description = "历史对话摘要内容")
     private String summary;
