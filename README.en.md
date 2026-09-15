@@ -24,6 +24,9 @@ and citation traceability. Ships with **admin login + API Key authentication** a
   key
 - Export conversations as Markdown, single/batch deletion
 - Clear prompts when no results found (no docs / processing / mismatch)
+- **Multi-turn re-answer support**: when the user asks to "re-answer the previous question" (or similar phrasing), even
+  if this round's KB retrieval returns nothing, the model re-organizes an answer from the original Q&A already in the
+  conversation history (history is always sent with the conversation; it automatically kicks in when retrieval is empty)
 
 ### Document Management
 
@@ -40,12 +43,17 @@ and citation traceability. Ships with **admin login + API Key authentication** a
   delete their own uploads
 - Lightweight stats API (aggregated query, scales to millions of documents)
 - Failed uploads support retry with auto-filled form
-- **Tenant / system-type dropdowns**: upload modal and document management page select tenant and system type from
-  dropdowns
+- **Searchable tenant / system-type dropdowns**: the top global bar, upload modal, URL upload, document management
+  filter and API Key creation all select tenant and system type from dropdowns
     - Tenant options come from the tenant config table (`tenant_config`, via `GET /documents/v1/tenants`); `0` is the
       admin's "all tenants" option
+    - **Tenant dropdown supports keyword fuzzy search**: type a keyword (e.g. "长安") to instantly filter tenant names;
+      no need to scroll through a long list as tenants grow; the API Key creation dropdown excludes tenant `0` (cannot
+      bind the admin global tenant)
     - System-type options come from the frontend config `js/config.js` (`window.MOTCS_CONFIG.systems`), editable at
       deployment without rebuilding
+- **Document management filter**: the document list page filters independently by tenant + system type (independent of
+  the top global selection; the list refreshes on change)
 - **Tenant management page**: left-nav "Tenant Management" with add / delete tenants and fuzzy search by tenant name;
   tenant `0` is system-reserved and not listed there
 
@@ -76,6 +84,10 @@ and citation traceability. Ships with **admin login + API Key authentication** a
 - Four authorization tiers: public / admin-only / login-or-API-Key / API-Key-only
   (see [Authentication & Authorization](#authentication--authorization))
 - OpenAI-style key design: only SHA-256 hashes stored, plaintext shown once at creation, note/tenant/system required
+- **API Key creation UI**: left-nav "API Key Management" → note is a text box (required); tenant is a **searchable
+  dropdown** (options from the tenant config table, keyword fuzzy filter, excludes tenant `0`); system type is a
+  **dropdown** (options from `js/config.js`); both dropdowns default to the top global selection (when the global
+  tenant is `0`, pick a specific tenant manually)
 - **Key enable/disable**: disable anytime (requests with the key return 401 immediately, temporarily invalid) or
   re-enable; history is kept
 - **Usage monitoring**: token cost per call (prompt/completion/total) is recorded automatically; admin views per-key
@@ -301,7 +313,8 @@ Key auth**.
   once at creation** — regenerate if lost
 - **Note required**: `name` is mandatory, empty returns `400`
 - **Tenant/system required**: must bind `tenantCode` and `systemType` at creation (used for chat/doc ownership);
-  **tenant `0` is forbidden** (admin global tenant), returns `400`
+  **tenant `0` is forbidden** (admin global tenant), returns `400`; the admin UI provides dropdowns (tenant =
+  searchable, system type = dropdown)
 - **Authorization**: API Key identity is `ROLE_API_KEY` — it can **only** access `/keys/v1/**` (AI chat & history);
   `/documents/v1/**`, `/auth/v1/**` and other admin/business endpoints return `403`
 - **Management**: only the admin can generate / list / delete keys (deleting a key instantly invalidates requests
@@ -671,8 +684,10 @@ motcs-graphrag/
 │   └── static/                             # Frontend SPA
 │       ├── index.html                      # Login / Q&A / Docs / Graph / API-Key mgmt + model dropdown
 │       ├── css/style.css                   # Dark theme
-│       ├── js/app.js                       # 401 interception / login / CSRF / key management
+│       ├── js/app.js                       # 401 interception / login / CSRF / key management / searchable dropdowns
+│       ├── js/config.js                    # Frontend config (system-type dropdown options window.MOTCS_CONFIG.systems, editable at deployment)
 │       ├── js/marked.min.js                # Markdown renderer
+│       ├── js/tailwindcss.js               # Tailwind CSS (Play CDN, compiles classes at runtime)
 │       ├── js/vis-network.min.js           # Graph visualization
 │       └── favicon.ico
 ├── build.gradle                            # Gradle + Jib config
