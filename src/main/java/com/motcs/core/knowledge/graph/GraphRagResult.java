@@ -5,6 +5,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
+
 /**
  * GraphRAG 多跳查询结果 DTO
  * 只返回字符串字段，避免 OPTIONAL MATCH 的 null 实体导致映射错误
@@ -15,7 +17,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class GraphRagResult {
+public class GraphRagResult implements Serializable {
 
     @Schema(description = "源分片")
     private String sourceContent;

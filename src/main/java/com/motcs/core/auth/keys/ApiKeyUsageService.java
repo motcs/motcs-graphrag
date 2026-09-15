@@ -8,11 +8,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * API Key 使用监控服务：记录每次 Key 对话的 token 消耗，提供总量/明细查询
@@ -26,6 +22,10 @@ import java.util.Map;
 public class ApiKeyUsageService {
 
     private final ApiKeyUsageRepository apiKeyUsageRepository;
+
+    private static int nullToZero(Integer v) {
+        return v == null ? 0 : v;
+    }
 
     /**
      * 记录一次 API Key 对话的 token 消耗（流结束后异步调用，不阻塞响应）
@@ -144,9 +144,5 @@ public class ApiKeyUsageService {
             result.put("keys", perKey);
             return result;
         });
-    }
-
-    private static int nullToZero(Integer v) {
-        return v == null ? 0 : v;
     }
 }

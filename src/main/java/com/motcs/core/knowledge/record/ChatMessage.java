@@ -10,6 +10,7 @@ import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 import tools.jackson.databind.JsonNode;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
@@ -25,7 +26,7 @@ import java.time.LocalDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ChatMessage {
+public class ChatMessage implements Serializable {
 
     @Id
     @Schema(description = "主键ID", example = "1")

@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
+
 /**
  * 文档统计响应 DTO
  *
@@ -17,7 +19,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class DocumentStatsResponse {
+public class DocumentStatsResponse implements Serializable {
 
     @Schema(description = "文档数量", example = "10")
     private Long docCount;

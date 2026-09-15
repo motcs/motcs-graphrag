@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
+
 /**
  * 文档查询请求 DTO（统计、列表等 GET 接口统一接参）
  *
@@ -17,7 +19,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class DocumentRequest {
+public class DocumentRequest implements Serializable {
 
     @Schema(description = "租户编码", example = "410725")
     private String tenantCode;

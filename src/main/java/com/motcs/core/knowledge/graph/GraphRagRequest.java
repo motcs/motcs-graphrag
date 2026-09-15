@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
+
 /**
  * 多跳ai智能查询参数封装
  *
@@ -17,7 +19,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public class GraphRagRequest {
+public class GraphRagRequest implements Serializable {
 
     @Schema(description = "用户提问", example = "会议的核心内容是什么？", requiredMode = Schema.RequiredMode.REQUIRED)
     private String question;

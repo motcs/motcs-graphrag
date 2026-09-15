@@ -7,6 +7,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.Serializable;
+
 /**
  * 文档上传请求DTO
  *
@@ -18,7 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class DocumentUploadRequest {
+public class DocumentUploadRequest implements Serializable {
 
     @Schema(description = "上传的文件", requiredMode = Schema.RequiredMode.REQUIRED)
     private MultipartFile file;

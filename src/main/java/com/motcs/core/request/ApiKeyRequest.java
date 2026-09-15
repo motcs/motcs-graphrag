@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
+
 /**
  * 创建 API Key 请求 DTO（POST /auth/v1/api-keys）
  * 备注/租户编码/系统类型均必填
@@ -17,7 +19,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ApiKeyRequest {
+public class ApiKeyRequest implements Serializable {
 
     @Schema(description = "用途备注（必填）", example = "第三方对接")
     private String name;

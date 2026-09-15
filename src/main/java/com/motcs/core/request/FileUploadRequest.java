@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
+
 /**
  * url文件上传请求DTO
  *
@@ -16,7 +18,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class FileUploadRequest {
+public class FileUploadRequest implements Serializable {
 
     @Schema(description = "文档URL", example = "文档URL")
     private String url;

@@ -6,6 +6,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
@@ -17,7 +18,7 @@ import java.time.LocalDateTime;
 @Data
 @Table("chat_session_summary")
 @Schema(description = "会话摘要")
-public class ChatSessionSummary {
+public class ChatSessionSummary implements Serializable {
 
     @Id
     @Schema(description = "主键ID")

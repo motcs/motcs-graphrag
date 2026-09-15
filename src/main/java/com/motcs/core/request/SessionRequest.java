@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
 import java.util.List;
 
 /**
@@ -18,7 +19,7 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class SessionRequest {
+public class SessionRequest implements Serializable {
 
     @Schema(description = "会话ID列表", example = "会话ID列表组")
     private List<String> sessionIds;
