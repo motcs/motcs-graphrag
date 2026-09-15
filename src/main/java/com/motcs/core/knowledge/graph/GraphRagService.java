@@ -249,7 +249,7 @@ public class GraphRagService {
 
         // 租户0（超管全局文档）不限系统类型；指定租户的文档按系统类型过滤
         String filterExpr = getFilterExpr(request);
-
+        log.info("搜搜条件：{}", filterExpr);
         SearchRequest searchRequest = SearchRequest.builder()
                 .query(request.getQuestion()).topK(request.getTopK())
                 .similarityThreshold(request.getThreshold())
@@ -333,13 +333,14 @@ public class GraphRagService {
         String filterExpr = "enabled == true && status == 'SUCCESS'";
         if (!request.getTenantCode().equals("0")) {
             if (!request.getSystemType().equals("other")) {
-                filterExpr += " && ((tenantCode == '%s' && systemType == '%s') || (tenantCode == '0' && systemType == 'other'))"
-                        .formatted(request.getTenantCode(), request.getSystemType());
+                filterExpr += " && ((tenantCode == '%s' && systemType == '%s') || (tenantCode == '0' && systemType == '%s') || (tenantCode == '0' && systemType == 'other'))"
+                        .formatted(request.getTenantCode(), request.getSystemType(), request.getSystemType());
             } else {
-                filterExpr += " && (tenantCode == '%s' || tenantCode == '0')".formatted(request.getTenantCode());
+                filterExpr += " && (tenantCode == '%s' || tenantCode == '0') ".formatted(request.getTenantCode());
             }
         } else {
-            filterExpr += " && (tenantCode == '%s' || tenantCode == '0') &&  systemType == 'other'".formatted(request.getTenantCode());
+            filterExpr += " && tenantCode == '0' && (systemType == 'other' || systemType == '%s')"
+                    .formatted(request.getSystemType());
         }
         return filterExpr;
     }
