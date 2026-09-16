@@ -7,7 +7,7 @@ import com.motcs.core.auth.keys.ApiKeyUsageService;
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.http.MediaType;
 import org.springframework.util.ObjectUtils;
@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * {"type":"session","sessionId":...} → {"type":"sources","sources":[...]}
  * → {"type":"reasoning"|"content","text":...}
  */
-@Slf4j
+@Log4j2
 @RestController
 @RequestMapping("/keys/v1")
 @RequiredArgsConstructor

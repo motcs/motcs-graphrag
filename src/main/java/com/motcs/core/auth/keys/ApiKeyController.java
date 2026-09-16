@@ -4,7 +4,7 @@ import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
 import io.swagger.v3.oas.annotations.Operation;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,7 +24,7 @@ import java.util.Map;
  * @author <a href="https://github.com/motcs">motcs</a>
  * @since 2026-09-09 星期三
  */
-@Slf4j
+@Log4j2
 @RestController
 @RequestMapping("/keys/v1")
 @RequiredArgsConstructor

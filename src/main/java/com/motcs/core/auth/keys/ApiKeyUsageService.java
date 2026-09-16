@@ -1,9 +1,11 @@
 package com.motcs.core.auth.keys;
 
+import com.motcs.commons.utils.Utils;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.util.ObjectUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -16,38 +18,28 @@ import java.util.*;
  * @author <a href="https://github.com/motcs">motcs</a>
  * @since 2026-09-09 星期三
  */
-@Slf4j
+@Log4j2
 @Service
 @RequiredArgsConstructor
 public class ApiKeyUsageService {
 
     private final ApiKeyUsageRepository apiKeyUsageRepository;
 
-    private static int nullToZero(Integer v) {
-        return v == null ? 0 : v;
-    }
-
     /**
      * 记录一次 API Key 对话的 token 消耗（流结束后异步调用，不阻塞响应）
      */
     public Mono<Void> record(Long apiKeyId, String userId, String sessionId, String model,
                              Integer promptTokens, Integer completionTokens, Integer totalTokens) {
-        if (apiKeyId == null || totalTokens == null || totalTokens <= 0) {
+        if (ObjectUtils.isEmpty(apiKeyId) || ObjectUtils.isEmpty(totalTokens) || totalTokens <= 0) {
             // token 缺失（如异常中断未拿到 usage）时不落库，避免脏数据
             return Mono.empty();
         }
-        ApiKeyUsage usage = ApiKeyUsage.builder()
-                .apiKeyId(apiKeyId)
-                .userId(userId == null ? "" : userId)
-                .sessionId(sessionId == null ? "" : sessionId)
-                .model(model == null ? "" : model)
-                .promptTokens(promptTokens == null ? 0 : promptTokens)
-                .completionTokens(completionTokens == null ? 0 : completionTokens)
-                .totalTokens(totalTokens)
-                .createdTime(LocalDateTime.now())
-                .build();
-        return apiKeyUsageRepository.save(usage).doOnSuccess(u -> {
-            if (u != null) {
+        ApiKeyUsage usage = ApiKeyUsage.builder().apiKeyId(apiKeyId).userId(userId)
+                .sessionId(sessionId).model(model).promptTokens(Utils.nullToZero(promptTokens))
+                .completionTokens(Utils.nullToZero(completionTokens))
+                .totalTokens(totalTokens).createdTime(LocalDateTime.now()).build();
+        return this.apiKeyUsageRepository.save(usage).doOnSuccess(u -> {
+            if (!ObjectUtils.isEmpty(u)) {
                 log.info("API Key 用量已记录: apiKeyId={}, userId={}, totalTokens={}", apiKeyId, userId, totalTokens);
             }
         }).then();
@@ -57,16 +49,16 @@ public class ApiKeyUsageService {
      * 按 Key 汇总使用情况：调用次数 + 总 token 消耗
      */
     public Mono<Map<String, Object>> summary(Long apiKeyId) {
-        Mono<Long> countMono = apiKeyUsageRepository.countByApiKeyId(apiKeyId).defaultIfEmpty(0L);
-        Mono<Map<String, Object>> sumMono = apiKeyUsageRepository.findByApiKeyIdOrderByCreatedTimeDesc(apiKeyId)
+        Mono<Long> countMono = this.apiKeyUsageRepository.countByApiKeyId(apiKeyId).defaultIfEmpty(0L);
+        Mono<Map<String, Object>> sumMono = this.apiKeyUsageRepository.findByApiKeyIdOrderByCreatedTimeDesc(apiKeyId)
                 .collect(() -> new HashMap<>() {{
                     put("promptTokens", 0);
                     put("completionTokens", 0);
                     put("totalTokens", 0);
                 }}, (acc, u) -> {
-                    acc.put("promptTokens", (Integer) acc.get("promptTokens") + nullToZero(u.getPromptTokens()));
-                    acc.put("completionTokens", (Integer) acc.get("completionTokens") + nullToZero(u.getCompletionTokens()));
-                    acc.put("totalTokens", (Integer) acc.get("totalTokens") + nullToZero(u.getTotalTokens()));
+                    acc.put("promptTokens", (Integer) acc.get("promptTokens") + Utils.nullToZero(u.getPromptTokens()));
+                    acc.put("completionTokens", (Integer) acc.get("completionTokens") + Utils.nullToZero(u.getCompletionTokens()));
+                    acc.put("totalTokens", (Integer) acc.get("totalTokens") + Utils.nullToZero(u.getTotalTokens()));
                 });
         return Mono.zip(countMono, sumMono).map(t -> {
             Map<String, Object> result = new HashMap<>();
@@ -80,7 +72,7 @@ public class ApiKeyUsageService {
      * 按 Key 分页查询调用明细
      */
     public Flux<ApiKeyUsage> list(Long apiKeyId, Pageable pageable) {
-        return apiKeyUsageRepository.findByApiKeyIdOrderByCreatedTimeDesc(apiKeyId, pageable);
+        return this.apiKeyUsageRepository.findByApiKeyIdOrderByCreatedTimeDesc(apiKeyId, pageable);
     }
 
     /**
@@ -91,21 +83,23 @@ public class ApiKeyUsageService {
      */
     public Mono<Map<String, Object>> overview(Flux<ApiKey> keys) {
         Mono<List<ApiKey>> keysMono = keys.collectList().defaultIfEmpty(List.of());
-        Mono<List<ApiKeyUsage>> usageMono = apiKeyUsageRepository.findAll().collectList().defaultIfEmpty(List.of());
+        Mono<List<ApiKeyUsage>> usageMono = this.apiKeyUsageRepository.findAll()
+                .collectList().defaultIfEmpty(List.of());
+
         return Mono.zip(keysMono, usageMono).map(t -> {
             // 按 apiKeyId 聚合用量
             Map<Long, int[]> agg = new HashMap<>();      // calls, prompt, completion, total
             Map<Long, LocalDateTime> lastUsed = new HashMap<>();
             for (ApiKeyUsage u : t.getT2()) {
                 Long kid = u.getApiKeyId();
-                if (kid == null) {
+                if (ObjectUtils.isEmpty(kid)) {
                     continue;
                 }
-                int[] a = agg.computeIfAbsent(kid, k -> new int[4]);
+                int[] a = agg.computeIfAbsent(kid, _ -> new int[4]);
                 a[0]++;
-                a[1] += nullToZero(u.getPromptTokens());
-                a[2] += nullToZero(u.getCompletionTokens());
-                a[3] += nullToZero(u.getTotalTokens());
+                a[1] += Utils.nullToZero(u.getPromptTokens());
+                a[2] += Utils.nullToZero(u.getCompletionTokens());
+                a[3] += Utils.nullToZero(u.getTotalTokens());
                 LocalDateTime ct = u.getCreatedTime();
                 LocalDateTime prev = lastUsed.get(kid);
                 if (ct != null && (prev == null || ct.isAfter(prev))) {
@@ -145,4 +139,5 @@ public class ApiKeyUsageService {
             return result;
         });
     }
+
 }

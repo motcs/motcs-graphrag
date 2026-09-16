@@ -57,7 +57,7 @@ public class DocumentController {
      */
     @GetMapping("/tenants")
     public Mono<ResponseEntity<Flux<TenantConfig>>> listTenants() {
-        Flux<TenantConfig> configFlux = tenantConfigRepository.findByEnabledTrueOrderByIdAsc();
+        Flux<TenantConfig> configFlux = this.tenantConfigRepository.findByEnabledTrueOrderByIdAsc();
         TenantConfig config = new TenantConfig();
         config.setTenantCode("0");
         config.setTenantName("全部租户");
@@ -71,33 +71,34 @@ public class DocumentController {
      * POST /documents/v1/tenants  Body: {"tenantCode":"410725","tenantName":"长安区人大"}
      */
     @PostMapping("/tenants")
-    public Mono<ResponseEntity<Map<String, Object>>> createTenant(@RequestBody Map<String, String> body) {
-        String code = body == null ? null : body.get("tenantCode");
-        String name = body == null ? null : body.get("tenantName");
-        if (ObjectUtils.isEmpty(code) || ObjectUtils.isEmpty(name)) {
-            return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户编码与租户名称必填")));
+    public Mono<ResponseEntity<Map<String, Object>>> createTenant(@RequestBody TenantConfig body) {
+        if (ObjectUtils.isEmpty(body.getTenantCode())) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户编码必填")));
         }
-        code = code.trim();
-        name = name.trim();
-        if ("0".equals(code)) {
+        if (ObjectUtils.isEmpty(body.getTenantName())) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户名称必填")));
+        }
+        if ("0".equals(body.getTenantCode())) {
             return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户 0 为系统保留项，不能添加")));
         }
-        String finalCode = code;
-        Mono<ResponseEntity<Map<String, Object>>> responseEntityMono = tenantConfigRepository.findByTenantCode(code)
-                .flatMap(_ -> Mono.just(ResponseEntity.badRequest().body(Map
-                        .of("success", false, "message", "租户编码已存在: " + finalCode))));
+        Mono<TenantConfig> configMono = this.tenantConfigRepository.findByTenantCode(body.getTenantCode());
+        Mono<ResponseEntity<Map<String, Object>>> responseEntityMono = configMono.flatMap(_ ->
+                Mono.just(ResponseEntity.badRequest().body(Map.of("success", false,
+                        "message", "租户编码已存在: " + body.getTenantCode()))));
 
-        String finalCode1 = code;
-        String finalName = name;
-        return responseEntityMono.switchIfEmpty(Mono.defer(() -> tenantConfigRepository.save(TenantConfig.builder()
-                        .tenantCode(finalCode1).tenantName(finalName).enabled(true).createdTime(LocalDateTime.now()).build())
-                .flatMap(saved -> {
-                    Map<String, Object> result = new HashMap<>();
-                    result.put("success", true);
-                    result.put("id", saved.getId());
-                    result.put("message", "租户添加成功");
-                    return Mono.just(ResponseEntity.ok(result));
-                })));
+        return responseEntityMono.switchIfEmpty(Mono.defer(() -> {
+            TenantConfig tenantConfig = TenantConfig.builder()
+                    .tenantCode(body.getTenantCode())
+                    .tenantName(body.getTenantName()).enabled(true)
+                    .createdTime(LocalDateTime.now()).build();
+            return this.tenantConfigRepository.save(tenantConfig).flatMap(saved -> {
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("id", saved.getId());
+                result.put("message", "租户添加成功");
+                return Mono.just(ResponseEntity.ok(result));
+            });
+        }));
     }
 
     /**
@@ -106,12 +107,12 @@ public class DocumentController {
      */
     @DeleteMapping("/tenants/{id}")
     public Mono<ResponseEntity<Map<String, Object>>> deleteTenant(@PathVariable("id") Long id) {
-        return tenantConfigRepository.existsById(id).flatMap(exists -> {
+        return this.tenantConfigRepository.existsById(id).flatMap(exists -> {
             if (!exists) {
                 return Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND)
                         .body(Map.of("success", false, "message", "租户不存在或已被删除")));
             }
-            return tenantConfigRepository.deleteById(id).then(Mono.fromCallable(() -> {
+            return this.tenantConfigRepository.deleteById(id).then(Mono.fromCallable(() -> {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", true);
                 result.put("id", id);
@@ -245,7 +246,7 @@ public class DocumentController {
         }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
             // 取消时由前端手动保存（避免重复），正常完成/出错时保存（answer 可为空，确保提问不丢失）
             if (signal == reactor.core.publisher.SignalType.CANCEL) return;
-            if (request.getQuestion() != null && !request.getQuestion().isBlank()) {
+            if (!ObjectUtils.isEmpty(request.getQuestion())) {
                 request.setAnswer(answerBuilder.toString());
                 request.setSessionId(sessionId);
                 request.setSources(sourcesJson.get());
@@ -261,8 +262,8 @@ public class DocumentController {
      */
     @PostMapping("/conversations")
     public Mono<ResponseEntity<Map<String, Object>>> saveConversation(@RequestBody GraphRagRequest request) {
-        return graphRagService.saveConversation(request, 0L)
-                .then(Mono.fromCallable(() -> ResponseEntity.ok(Map.of("success", true))));
+        return graphRagService.saveConversation(request, 0L).then(Mono
+                .fromCallable(() -> ResponseEntity.ok(Map.of("success", true))));
     }
 
     /**
@@ -316,7 +317,7 @@ public class DocumentController {
     @PutMapping("/conversations/session/{sessionId}/title")
     public Mono<ResponseEntity<Map<String, Object>>> updateSessionTitle(
             @PathVariable("sessionId") String sessionId, @RequestBody SessionRequest request) {
-        String title = request != null ? request.getTitle() : null;
+        String title = !ObjectUtils.isEmpty(request) ? request.getTitle() : "未命名对话";
         log.info("收到更新会话标题请求: sessionId={}, title={}", sessionId, title);
         return graphRagService.updateSessionTitle(sessionId, title).map(cnt -> {
             Map<String, Object> result = new HashMap<>();
@@ -350,12 +351,12 @@ public class DocumentController {
      */
     @DeleteMapping("/conversations/batch")
     public Mono<ResponseEntity<Map<String, Object>>> deleteSessionsBatch(@RequestBody SessionRequest request) {
-        List<String> sessionIds = request != null ? request.getSessionIds() : null;
-        log.info("收到批量删除会话请求: count={}", sessionIds != null ? sessionIds.size() : 0);
-        return graphRagService.deleteSessions(sessionIds).then(Mono.fromCallable(() -> {
+        List<String> sessionIds = !ObjectUtils.isEmpty(request) ? request.getSessionIds() : List.of();
+        log.info("收到批量删除会话请求: count={}", sessionIds.size());
+        return this.graphRagService.deleteSessions(sessionIds).then(Mono.fromCallable(() -> {
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("deletedCount", sessionIds != null ? sessionIds.size() : 0);
+            result.put("deletedCount", sessionIds.size());
             return ResponseEntity.ok(result);
         }));
     }
@@ -367,7 +368,7 @@ public class DocumentController {
     @GetMapping("/list")
     public Mono<ResponseEntity<List<DocumentResponse>>> listDocuments(DocumentRequest request) {
         log.info("收到文档列表查询请求: tenantCode={}", request.getTenantCode());
-        return documentService.queryDocuments(request.getTenantCode(), request.getSystemType())
+        return this.documentService.queryDocuments(request.getTenantCode(), request.getSystemType())
                 .doOnNext(docs -> log.info("查询到 {} 个文档", docs.size()))
                 .map(ResponseEntity::ok);
     }
@@ -379,7 +380,7 @@ public class DocumentController {
     @DeleteMapping("/docCode/{docCode}")
     public Mono<ResponseEntity<Map<String, Object>>> deleteDocument(@PathVariable("docCode") String docCode) {
         log.info("收到文档删除请求: docCode={}", docCode);
-        return documentService.deleteByDocCode(docCode).then(Mono.fromCallable(() -> {
+        return this.documentService.deleteByDocCode(docCode).then(Mono.fromCallable(() -> {
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("docCode", docCode);
@@ -394,7 +395,7 @@ public class DocumentController {
      */
     @GetMapping("/stats")
     public Mono<ResponseEntity<DocumentStatsResponse>> getStats(DocumentRequest request) {
-        return documentService.getStats(request).map(ResponseEntity::ok);
+        return this.documentService.getStats(request).map(ResponseEntity::ok);
     }
 
     /**
@@ -416,7 +417,7 @@ public class DocumentController {
             @RequestParam(value = "systemType", required = false) String systemType,
             @RequestParam(value = "limit", defaultValue = "200") int limit) {
         log.info("收到图谱数据请求: tenantCode={}, systemType={}, limit={}", tenantCode, systemType, limit);
-        return graphRagService.getGraphData(tenantCode, systemType, limit)
+        return this.graphRagService.getGraphData(tenantCode, systemType, limit)
                 .map(ResponseEntity::ok);
     }
 
@@ -432,7 +433,7 @@ public class DocumentController {
                 .documentType(Utils.getFileType(file.getOriginalFilename()))
                 .docCode(docCode).tenantCode(tenantCode).systemType(systemType)
                 .userId(userId).build();
-        return graphRagService.insertKnowledgeDoc(request).map(response -> {
+        return this.graphRagService.insertKnowledgeDoc(request).map(response -> {
             if ("FAILED".equals(response.getStatus())) {
                 log.warn("文档上传失败: {}", response.getErrorMessage());
                 return ResponseEntity.badRequest().body(response);

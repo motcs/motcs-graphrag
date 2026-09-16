@@ -10,7 +10,7 @@ import com.motcs.core.knowledge.chunk.DocumentChunkRepository;
 import com.motcs.core.knowledge.record.ChatMessage;
 import com.motcs.core.knowledge.record.ChatMessageRepository;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
  * @author <a href="https://github.com/motcs">motcs</a>
  * @since 2026-09-09 星期三
  */
-@Slf4j
+@Log4j2
 @Service
 @RequiredArgsConstructor
 public class DocumentService {

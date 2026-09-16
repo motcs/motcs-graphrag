@@ -4,6 +4,7 @@ import com.motcs.commons.ContextUtil;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpHeaders;
+import org.springframework.util.ObjectUtils;
 import org.springframework.web.server.ServerWebExchange;
 
 import java.net.URI;
@@ -154,7 +155,6 @@ public class Utils {
         }
     }
 
-
     public static String extractApiKey(ServerWebExchange exchange) {
         String auth = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         if (auth != null && auth.startsWith("Bearer ")) {
@@ -170,6 +170,14 @@ public class Utils {
             return trimmed;
         }
         return null;
+    }
+
+    public static int nullToZero(Integer v) {
+        return ObjectUtils.isEmpty(v) ? 0 : v;
+    }
+
+    public static String blankToNull(String s) {
+        return ObjectUtils.isEmpty(s) ? null : s;
     }
 
 }

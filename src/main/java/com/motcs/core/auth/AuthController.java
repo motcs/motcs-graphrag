@@ -55,14 +55,14 @@ public class AuthController {
     @Operation(summary = "超管登录（HTTP Basic Auth）")
     public Mono<AuthenticationToken> login(ServerWebExchange exchange, Authentication authentication) {
         // 仅当请求未携带 Basic 凭据仍打到本方法时兜底（如空凭据请求），明确返回 401
-        if (authentication == null || !authentication.isAuthenticated()) {
+        if (ObjectUtils.isEmpty(authentication) || !authentication.isAuthenticated()) {
             return Mono.error(RestServerException.withMsg("用户名或密码错误"));
         }
         return exchange.getSession().flatMap(session -> {
             // 按现有处理方式：以 WebSession id 作为 token 登记到 TokenStore，
             // 过期时间默认 2 小时（可配置 app.auth.token.ttl-seconds），每次使用自动续期
-            long ttlSeconds = tokenStore.getDefaultTtlSeconds();
-            tokenStore.put(session.getId(), authentication.getName());
+            long ttlSeconds = this.tokenStore.getDefaultTtlSeconds();
+            this.tokenStore.put(session.getId(), authentication.getName());
             // 显式下发 CSRF cookie（双提交模式）：前端读取 XSRF-TOKEN cookie 值放入
             // X-CSRF-TOKEN 请求头，后端比对 cookie 与 header。
             // 不依赖 CSRF 过滤器的异步生成时序，保证登录响应必定携带 cookie。
@@ -71,8 +71,7 @@ public class AuthController {
             // 此后 CSRF 过滤器只读不写，cookie 值始终保持登录时的值，直到重新登录更新
             exchange.getResponse().addCookie(ResponseCookie.from("XSRF-TOKEN", csrfValue)
                     .path("/").httpOnly(false).sameSite("Lax").maxAge(java.time.Duration.ofDays(30)).build());
-            return Mono.just(AuthenticationToken.of(
-                    session.getId(), ttlSeconds, Instant.now().getEpochSecond()));
+            return Mono.just(AuthenticationToken.of(session.getId(), ttlSeconds, Instant.now().getEpochSecond()));
         });
     }
 
@@ -80,7 +79,7 @@ public class AuthController {
     @Operation(summary = "退出登录：注销 x-token（从请求头读取）")
     public Mono<ResponseEntity<Void>> logout(ServerWebExchange exchange) {
         String token = exchange.getRequest().getHeaders().getFirst(Utils.X_TOKEN);
-        tokenStore.remove(token);
+        this.tokenStore.remove(token);
         return Mono.just(ResponseEntity.ok().build());
     }
 
@@ -98,33 +97,39 @@ public class AuthController {
     @GetMapping("/api-keys")
     @Operation(summary = "Key 列表（仅掩码，不含哈希与明文）")
     public Flux<ApiKey> listApiKeys() {
-        return apiKeyService.list();
+        return this.apiKeyService.list();
     }
 
     @PostMapping("/api-keys")
     @Operation(summary = " 生成新 Key（明文仅此一次返回；备注/租户编码/系统类型必填，为空返回 400）")
     public Mono<ResponseEntity<?>> createApiKey(@RequestBody ApiKeyRequest request,
                                                 @AuthenticationPrincipal Object principal) {
-        String name = ObjectUtils.isEmpty(request.getName()) ? "" : request.getName().trim();
-        String tenantCode = ObjectUtils.isEmpty(request.getTenantCode()) ? "" : request.getTenantCode().trim();
-        String systemType = ObjectUtils.isEmpty(request.getSystemType()) ? "" : request.getSystemType().trim();
-        if (name.isEmpty() || tenantCode.isEmpty() || systemType.isEmpty()) {
-            return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false,
-                    "message", "备注（name）、租户编码（tenantCode）、系统类型（systemType）均必填")));
+        if (ObjectUtils.isEmpty(request.getName())) {
+            Map<String, Object> stringMap = Map.of("success", false, "message", "备注（name）必填");
+            return Mono.just(ResponseEntity.badRequest().body(stringMap));
         }
-        if ("0".equals(tenantCode)) {
+        if (ObjectUtils.isEmpty(request.getTenantCode())) {
+            Map<String, Object> stringMap = Map.of("success", false, "message", "租户编码（tenantCode）必填");
+            return Mono.just(ResponseEntity.badRequest().body(stringMap));
+        }
+        if (ObjectUtils.isEmpty(request.getSystemType())) {
+            Map<String, Object> stringMap = Map.of("success", false, "message", "系统类型（systemType）必填");
+            return Mono.just(ResponseEntity.badRequest().body(stringMap));
+        }
+
+        if ("0".equals(request.getTenantCode())) {
             return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false,
                     "message", "API Key 不允许绑定租户 0（超管全局租户），请填写具体租户编码")));
         }
         String createdBy = ObjectUtils.isEmpty(principal) ? "xxhzj" : String.valueOf(principal);
-        return apiKeyService.generate(name, tenantCode, systemType, createdBy)
-                .map(ResponseEntity::ok);
+        return this.apiKeyService.generate(request.getName(), request.getTenantCode(),
+                request.getSystemType(), createdBy).map(ResponseEntity::ok);
     }
 
     @DeleteMapping("/api-keys/{id}")
     @Operation(summary = "删除 Key（撤销后携带该 Key 的请求立即失效）")
     public Mono<ResponseEntity<Void>> deleteApiKey(@PathVariable Long id) {
-        return apiKeyService.delete(id).thenReturn(ResponseEntity.ok().build());
+        return this.apiKeyService.delete(id).thenReturn(ResponseEntity.ok().build());
     }
 
     /**
@@ -133,23 +138,22 @@ public class AuthController {
      */
     @PutMapping("/api-keys/{id}/enabled")
     @Operation(summary = "启用/停用 Key（关闭后临时失效，可随时重新开启）")
-    public Mono<ResponseEntity<Map<String, Object>>> setApiKeyEnabled(@PathVariable Long id, @RequestBody Map<String, Boolean> body) {
-        Boolean enabled = body == null ? null : body.get("enabled");
-        Map<String, Object> objectObjectHashMap = new HashMap<>();
-        if (enabled == null) {
-            objectObjectHashMap.put("success", false);
-            objectObjectHashMap.put("message", "enabled 字段必填（true/false）");
-            return Mono.just(ResponseEntity.badRequest().body(objectObjectHashMap));
+    public Mono<ResponseEntity<Map<String, Object>>> setApiKeyEnabled(@PathVariable Long id, @RequestBody ApiKey body) {
+        Map<String, Object> objectMap = new HashMap<>();
+        if (ObjectUtils.isEmpty(body.getEnabled())) {
+            objectMap.put("success", false);
+            objectMap.put("message", "enabled 字段必填（true/false）");
+            return Mono.just(ResponseEntity.badRequest().body(objectMap));
         }
-        return apiKeyService.setEnabled(id, enabled).flatMap(updated -> {
-            objectObjectHashMap.put("success", true);
-            objectObjectHashMap.put("id", updated.getId());
-            objectObjectHashMap.put("enabled", updated.getEnabled());
-            return Mono.just(ResponseEntity.ok(objectObjectHashMap));
+        return this.apiKeyService.setEnabled(id, body.getEnabled()).flatMap(updated -> {
+            objectMap.put("success", true);
+            objectMap.put("id", updated.getId());
+            objectMap.put("enabled", updated.getEnabled());
+            return Mono.just(ResponseEntity.ok(objectMap));
         }).switchIfEmpty(Mono.fromCallable(() -> {
-            objectObjectHashMap.put("success", false);
-            objectObjectHashMap.put("message", "API Key 不存在");
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(objectObjectHashMap);
+            objectMap.put("success", false);
+            objectMap.put("message", "API Key 不存在");
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(objectMap);
         }));
     }
 
@@ -159,7 +163,7 @@ public class AuthController {
     @GetMapping("/api-keys/{id}/usage-summary")
     @Operation(summary = "Key 使用汇总：调用次数 + 总 token 消耗")
     public Mono<ResponseEntity<Map<String, Object>>> apiKeyUsageSummary(@PathVariable Long id) {
-        return apiKeyUsageService.summary(id).map(ResponseEntity::ok);
+        return this.apiKeyUsageService.summary(id).map(ResponseEntity::ok);
     }
 
     /**
@@ -168,7 +172,7 @@ public class AuthController {
     @GetMapping("/api-keys/{id}/usage")
     @Operation(summary = "Key 使用明细（每次对话的 token 消耗，分页）")
     public Mono<ResponseEntity<Flux<ApiKeyUsage>>> apiKeyUsageList(@PathVariable Long id, Pageable pageable) {
-        return Mono.just(ResponseEntity.ok(apiKeyUsageService.list(id, pageable)));
+        return Mono.just(ResponseEntity.ok(this.apiKeyUsageService.list(id, pageable)));
     }
 
     /**
@@ -177,7 +181,7 @@ public class AuthController {
     @GetMapping("/usage-overview")
     @Operation(summary = "用量监控总览：全部 Key 汇总 + 全局合计")
     public Mono<ResponseEntity<Map<String, Object>>> apiKeyUsageOverview() {
-        return apiKeyUsageService.overview(apiKeyService.list()).map(ResponseEntity::ok);
+        return this.apiKeyUsageService.overview(this.listApiKeys()).map(ResponseEntity::ok);
     }
 
 }
