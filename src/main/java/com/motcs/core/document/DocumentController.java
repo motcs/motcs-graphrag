@@ -230,8 +230,9 @@ public class DocumentController {
             } catch (Exception e) {
                 sourcesJson.set(ContextUtil.OBJECT_MAPPER.createArrayNode());
             }
-            // 发送顺序：1.session 2.sources 3.思考/正文事件（JSON type 字段区分思考/正文，不依赖内容判空）
+            // 发送顺序：1.session 2.rewrite(优化后检索词,前端渲染"搜索中") 3.sources 4.思考/正文事件
             Mono<String> sessionMono = Mono.just(Utils.jsonEvent("session", Map.of("sessionId", sessionId)));
+            Mono<String> rewriteMono = Mono.just(Utils.jsonEvent("rewrite", Map.of("query", result.rewriteQuery())));
             Mono<String> sourcesMono = Mono.just(Utils.jsonEvent("sources", Map.of("sources", result.sources())));
             Flux<String> answerMono = result.answer().doOnNext(ev -> {
                 if ("reasoning".equals(ev.type())) {
@@ -240,7 +241,7 @@ public class DocumentController {
                     answerBuilder.append(ev.text());
                 }
             }).map(ev -> Utils.jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
-            return Flux.concat(sessionMono, sourcesMono, answerMono);
+            return Flux.concat(sessionMono, rewriteMono, sourcesMono, answerMono);
         }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
             // 取消时由前端手动保存（避免重复），正常完成/出错时保存（answer 可为空，确保提问不丢失）
             if (signal == reactor.core.publisher.SignalType.CANCEL) return;

@@ -583,6 +583,26 @@ body {
 }
 
 /* 引用来源（AI 消息下方，横向排列） */
+/* 检索词优化提示（AI 消息内，检索阶段显示，sources 到达后隐藏） */
+.msg-rewrite {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #8b93a7;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.msg-rewrite::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #6366f1;
+    animation: pulse-dot 1.2s infinite;
+    flex-shrink: 0;
+}
+
 .msg-sources {
     margin-top: 12px;
     padding-top: 10px;

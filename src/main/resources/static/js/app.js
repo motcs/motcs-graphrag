@@ -193,13 +193,20 @@ function fillSystemSelects(ids, withAll) {
 }
 // 租户选项填充：其余来自租户配置表；下拉框仅显示租户名称，不显示编码（避免过长）。
 // withAll=true（默认）：首项"全部租户"（值 0，超管全局）；withAll=false：首项"请选择租户"（空值），
-// 用于不允许绑定租户 0 的场景（如 API Key 绑定租户）
-function fillTenantSelects(ids, tenants, withAll) {
+// 用于不允许绑定租户 0 的场景（如 API Key 绑定租户）。
+// extraOptions：额外附加选项（如 API Key 场景的"-1 通用密钥"），插在租户列表之前
+function fillTenantSelects(ids, tenants, withAll, extraOptions) {
     ids.forEach(id => {
         const el = $(id);
         if (!el) return;
         el.innerHTML = withAll === false ? '<option value="">请选择租户</option>'
                 : '<option value="0">全部租户</option>';
+        (extraOptions || []).forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = o.value;
+            opt.textContent = o.text;
+            el.appendChild(opt);
+        });
         (tenants || []).forEach(t => {
             const tc = t ? (t.tenantCode ?? t.code) : null;
             const tn = t ? (t.tenantName ?? t.name) : '';
@@ -346,8 +353,8 @@ async function initTenantSystemSelects() {
         if (res.ok) tenants = await res.json();
     } catch (e) { /* 接口不可用时保留"0 - 全部租户"兜底 */ }
     fillTenantSelects(['globalTenant', 'uploadTenant', 'urlTenant', 'docFilterTenant'], tenants);
-    // API Key 绑定租户：不允许 0（超管全局租户），首项"请选择租户"必选
-    fillTenantSelects(['apiKeyTenant'], tenants, false);
+    // API Key 绑定租户：不允许 0（超管全局租户），首项"请选择租户"必选；"-1"为通用密钥（检索全部文档）
+    fillTenantSelects(['apiKeyTenant'], tenants, false, [{ value: '-1', text: '通用密钥' }]);
     // 所有租户下拉统一改为可搜索组件（宽度按所在位置适配）
     initTenantSearchable('globalTenant', 'w-40');
     initTenantSearchable('uploadTenant', 'w-full');
@@ -953,9 +960,23 @@ async function askQuestion() {
                 if (ev.type === 'session') {
                     state.sessionId = ev.sessionId;
                     syncLabels();
+                } else if (ev.type === 'rewrite') {
+                    // 优化后的检索词已下发：进入向量检索阶段，渲染"搜索中"动画（sources 到达后隐藏）
+                    statusEl.classList.remove('hidden');
+                    statusEl.innerHTML = '<span class="status-dot status-dot-anim"></span>正在搜索知识库…';
+                    let rwEl = bubble.querySelector('.msg-rewrite');
+                    if (!rwEl) {
+                        rwEl = document.createElement('div');
+                        rwEl.className = 'msg-rewrite';
+                        bubble.insertBefore(rwEl, sourcesEl);
+                    }
+                    rwEl.textContent = '检索优化：' + (ev.query || '');
+                    rwEl.classList.remove('hidden');
                 } else if (ev.type === 'sources') {
                     state.currentSources = ev.sources || [];
                     renderSourcesInMessage(sourcesEl, state.currentSources);
+                    const rwEl = bubble.querySelector('.msg-rewrite');
+                    if (rwEl) rwEl.classList.add('hidden');
                 } else if (ev.type === 'reasoning') {
                     // 思考片段：按 type 字段识别，不依赖内容判空
                     reasoningText += ev.text || '';

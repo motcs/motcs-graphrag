@@ -24,6 +24,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Service;
@@ -33,12 +34,10 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -72,6 +71,24 @@ public class GraphRagService {
             __TEXT__
             """;
     /**
+     * 检索查询词优化 Prompt：把口语化问题改写为适合向量检索的查询词（1~3 个，每行一个）
+     */
+    private static final String REWRITE_PROMPT = """
+            你是检索查询优化助手。请把用户的问题改写为最适合知识库向量检索的查询词。
+            要求：
+            1. 保留核心实体与真实意图，把口语化表达改写为标准术语（如"怎么提交"改写为"提交流程"、"办理程序"、"提交渠道"）；
+            2. 必要时补充该领域的关键词，让检索更精准；
+            3. 只输出 1~3 个查询词，每行一个，不要序号、引号、解释或Markdown格式。
+            """;
+    /**
+     * 检索改写预算（毫秒）：超时立即回退原始问题检索，保证响应速度不因改写而降级
+     */
+    private static final long REWRITE_TIMEOUT_MS = 800;
+    /**
+     * 改写结果缓存（问题 → 查询词），重复问题不再重复调用 AI；简单防膨胀（>200 清空）
+     */
+    private final Map<String, List<String>> rewriteCache = new ConcurrentHashMap<>();
+    /**
      * 系统提示词（含多轮历史和知识库上下文）
      */
     private static final String SYSTEM_PROMPT = """
@@ -102,6 +119,8 @@ public class GraphRagService {
             【知识库上下文】
             {context}
             """;
+    @Value("${app.ai.provider:zhipu}")
+    private String provider;
     private final ChatClient chatClient;
     private final Neo4jClient neo4jClient;
     private final VectorStore vectorStore;
@@ -127,27 +146,58 @@ public class GraphRagService {
         Mono<String> context = buildHistoryContext(ragQuery.getSessionId());
 
         return context.flatMap(historyContext -> {
-            // 1. 拉取多轮对话历史（长对话自动摘要压缩，永远只取最新5条原始+摘要）
-            // 2. 向量检索 + 图谱召回，同时提取来源
-            ContextResult ctx = buildContextWithSources(ragQuery);
-            if (ctx != null) {
-                ContextResult contextResult = new ContextResult(ctx.fullContext(), ctx.sources(), historyContext);
-                return Mono.just(contextResult);
-            } else {
-                // 检索无结果也保留历史对话，AI 可依据多轮历史理解"重新回答上个问题"等指令
-                return Mono.empty();
+            // 1. 改写问题为检索查询词：异步 + 限时预算（REWRITE_TIMEOUT_MS），
+            //    超时/失败立即回退原始问题，避免改写拖慢响应；结果随 SSE 下发前端展示"搜索中"
+            Mono<List<String>> rewriteMono = Mono.fromCallable(() -> rewriteQuery(ragQuery.getQuestion()))
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .timeout(Duration.ofMillis(REWRITE_TIMEOUT_MS))
+                    .onErrorReturn(List.of(ragQuery.getQuestion()));
+            return rewriteMono.map(queries -> {
+                String rewriteDisplay = queries.getFirst();
+                // 2. 用改写后的查询词做向量检索 + 图谱召回，同时提取来源
+                ContextResult ctx = buildContextWithSources(ragQuery, queries);
+                if (ctx != null) {
+                    ContextResult contextResult = new ContextResult(ctx.fullContext(), ctx.sources(), historyContext);
+                    return new Enriched(contextResult, historyContext, rewriteDisplay);
+                }
+                return new Enriched(null, historyContext, rewriteDisplay);
+            });
+        }).flatMap(enriched -> {
+            // 3. 有结果：直接回答；无结果：保留历史对话，AI 可依据多轮历史理解"重新回答上个问题"等指令
+            if (enriched.ctx() != null) {
+                return buildAnswerQueryResult(ragQuery, enriched.ctx(), enriched.rewriteDisplay());
             }
-        }).map(ctx -> {
+            return buildNoResultQueryResult(ragQuery, enriched.historyContext(), enriched.rewriteDisplay());
+        }).doOnError(e -> log.error("GraphRAG查询出错: {}", e.getMessage(), e));
+    }
+
+    /**
+     * 检索上下文 + 改写展示词 内部封装（供两个分支共用）
+     */
+    private record Enriched(ContextResult ctx, String historyContext, String rewriteDisplay) {
+    }
+
+    /**
+     * 检索命中分支：组装回答 SSE 流
+     */
+    private Mono<QueryResult> buildAnswerQueryResult(GraphRagRequest ragQuery, ContextResult ctx, String rewriteDisplay) {
+        return Mono.fromCallable(() -> {
             ChatClient.ChatClientRequestSpec answerSpec = this.chatClient.prompt()
                     .system(s -> s.text(SYSTEM_PROMPT).param("context", ctx.fullContext())
                             .param("history", ctx.historyContext())).user(ragQuery.getQuestion());
             applyModelOptions(answerSpec, ragQuery.getModel());
             AtomicReference<Usage> usageRef = new AtomicReference<>();
             Flux<ChatStreamEvent> answer = streamChatEvents(answerSpec, usageRef);
-            return new QueryResult(ctx.sources(), answer, usageRef);
-        }).switchIfEmpty(context.map(historyContext -> {
-            // 向量检索无结果：仍调用 AI，让其判断是打招呼/闲聊还是知识问题
-            // 打招呼类客气回复，知识类说明未找到相关内容
+            return new QueryResult(ctx.sources(), answer, usageRef, rewriteDisplay);
+        });
+    }
+
+    /**
+     * 检索无结果分支：仍调用 AI，让其判断是打招呼/闲聊还是知识问题；
+     * 保留历史对话，AI 可依据多轮历史理解"重新回答上个问题"等指令
+     */
+    private Mono<QueryResult> buildNoResultQueryResult(GraphRagRequest ragQuery, String historyContext, String rewriteDisplay) {
+        return Mono.fromCallable(() -> {
             String noResultPrompt = """
                     你是企业知识库问答助手，请优先依据下面提供的知识库上下文回答用户问题。
                     如果知识库上下文没有相关内容，但【历史对话】中已存在用户要求重新回答的问题及对应回答，请直接基于历史对话中的原回答重新组织语言作答，不要复述"知识库无相关内容"。
@@ -159,15 +209,56 @@ public class GraphRagService {
                     3. 你主要能力：分析文档，通过私有知识库回答问题。
                     4. 回答的内容中不要带有文档原文这样的字眼，只需要根据文档内容回答即可，界面已经显示了引用的文档内容。
                     
-                    回复使用 标准的Markdown 格式，简洁友好，不超过100字。""";
+                    回复使用 标准的Markdown 格式，简洁友好，通常建议不超过100字。""";
             ChatClient.ChatClientRequestSpec noResultSpec = this.chatClient.prompt()
                     .system(s -> s.text(noResultPrompt).param("context", "无")
                             .param("history", historyContext)).user(ragQuery.getQuestion());
             applyModelOptions(noResultSpec, ragQuery.getModel());
             AtomicReference<Usage> usageRef = new AtomicReference<>();
             Flux<ChatStreamEvent> answer = streamChatEvents(noResultSpec, usageRef);
-            return new QueryResult(List.of(), answer, usageRef);
-        })).doOnError(e -> log.error("GraphRAG查询出错: {}", e.getMessage(), e));
+            return new QueryResult(List.of(), answer, usageRef, rewriteDisplay);
+        });
+    }
+
+    /**
+     * 检索查询词优化：调用 AI 把口语化问题改写为适合向量检索的查询词（1~3 个）。
+     * 失败/超时自动回退原始问题，保证不影响检索主流程。
+     *
+     * @return 查询词列表（首个为展示用改写词），至少包含原始问题
+     */
+    private List<String> rewriteQuery(String question) {
+        List<String> cached = rewriteCache.get(question);
+        if (cached != null) return cached;
+        try {
+            ChatClient.ChatClientRequestSpec spec = this.chatClient.prompt().system(REWRITE_PROMPT)
+                    .user("用户问题：" + question);
+            // 固定用快模型改写，不跟随用户选择的重型思考模型
+            if (Objects.equals(provider, "baidu")) {
+                spec.options(OpenAiChatOptions.builder().model("ernie-4.5-turbo-20260402"));
+            } else if (Objects.equals(provider, "zhipu")) {
+                spec.options(OpenAiChatOptions.builder().model("glm-4-flash"));
+            } else {
+                spec.options(OpenAiChatOptions.builder().model("deepseek-v3.2"));
+            }
+            String text = spec.call().content();
+            if (text == null || text.isBlank()) return List.of(question);
+            List<String> queries = Arrays.stream(text.split("\\R"))
+                    .map(String::trim).filter(s -> !s.isEmpty())
+                    .map(s -> s.replaceAll("^[\\[\\]\"'`0-9.、\\-\\s]+", "")
+                            .replaceAll("[\"'`]$", "").trim())
+                    .filter(s -> !s.isEmpty()).limit(3).distinct().toList();
+            if (queries.isEmpty()) return List.of(question);
+            // 改写词 + 原始问题兜底（去重），多查询提高召回
+            List<String> merged = new ArrayList<>(queries);
+            if (!merged.contains(question)) merged.add(question);
+            log.info("检索查询词优化: {} → {}", question, merged);
+            if (rewriteCache.size() > 200) rewriteCache.clear();
+            rewriteCache.put(question, merged);
+            return merged;
+        } catch (Exception e) {
+            log.warn("检索查询词优化失败，使用原始问题: {}", e.getMessage());
+            return List.of(question);
+        }
     }
 
     /**
@@ -235,7 +326,7 @@ public class GraphRagService {
      *
      * @return ContextResult；向量检索无结果时返回 null
      */
-    private ContextResult buildContextWithSources(GraphRagRequest request) {
+    private ContextResult buildContextWithSources(GraphRagRequest request, List<String> queries) {
         // 1、向量检索（按租户/系统/启用状态过滤）
         // 租户0 = 超管上传的全局默认文档，对所有租户开放：检索时同时命中指定租户与租户0；
         // 当查询租户本身为 0 时不过滤租户，检索所有租户的全部文档（超管全局视角）
@@ -248,11 +339,22 @@ public class GraphRagService {
         // 租户0（超管全局文档）不限系统类型；指定租户的文档按系统类型过滤
         String filterExpr = getFilterExpr(request);
         log.info("搜搜条件：{}", filterExpr);
-        SearchRequest searchRequest = SearchRequest.builder()
-                .query(request.getQuestion()).topK(request.getTopK())
-                .similarityThreshold(request.getThreshold())
-                .filterExpression(filterExpr).build();
-        List<Document> vectorDocs = this.vectorStore.similaritySearch(searchRequest);
+        // 多查询词逐一检索（改写词 + 原始问题），按 文档+分片 去重合并，提高召回
+        List<Document> vectorDocs = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String q : queries) {
+            SearchRequest searchRequest = SearchRequest.builder()
+                    .query(q).topK(request.getTopK())
+                    .similarityThreshold(request.getThreshold())
+                    .filterExpression(filterExpr).build();
+            List<Document> docs = this.vectorStore.similaritySearch(searchRequest);
+            for (Document doc : docs) {
+                String key = doc.getMetadata().getOrDefault("docCode", "")
+                        + "|" + doc.getMetadata().getOrDefault("chunkIndex", "");
+                if (!seen.add(key)) continue;
+                vectorDocs.add(doc);
+            }
+        }
 
         if (vectorDocs.isEmpty()) {
             log.info("向量检索未找到相关文档");
@@ -267,7 +369,7 @@ public class GraphRagService {
                 return t != null && request.getTenantCode().equals(String.valueOf(t)) ? 0 : 1;
             })).toList();
         }
-        log.info("向量检索找到 {} 个相关文档（租户{}优先）", vectorDocs.size(), request.getTenantCode());
+        log.info("向量检索找到 {} 个相关文档（查询词{}个，租户{}优先）", vectorDocs.size(), queries.size(), request.getTenantCode());
 
         // 2、提取知识库来源（供前端展示和点击查看原文）
         List<Map<String, Object>> sources = vectorDocs.stream().map(doc -> {
@@ -329,18 +431,27 @@ public class GraphRagService {
 
     private @NonNull String getFilterExpr(GraphRagRequest request) {
         String filterExpr = "enabled == true && status == 'SUCCESS'";
-        if (!request.getTenantCode().equals("0")) {
-            if (!request.getSystemType().equals("other")) {
-                filterExpr += " && ((tenantCode == '%s' && systemType == '%s') || (tenantCode == '0' && systemType == '%s') || (tenantCode == '0' && systemType == 'other'))"
-                        .formatted(request.getTenantCode(), request.getSystemType(), request.getSystemType());
-            } else {
-                filterExpr += " && (tenantCode == '%s' || tenantCode == '0') ".formatted(request.getTenantCode());
-            }
-        } else {
-            filterExpr += " && tenantCode == '0' && (systemType == 'other' || systemType == '%s')"
-                    .formatted(request.getSystemType());
+        String tenantCode = request.getTenantCode();
+        String systemType = request.getSystemType();
+        if ("-1".equals(tenantCode)) {
+            // 通用密钥（租户 -1）：不限制租户与系统类型，检索全部文档
+            return filterExpr;
         }
-        return filterExpr;
+        if ("0".equals(tenantCode) && "other".equals(systemType)) {
+            // 全局租户 + 综合平台：使用全部文档
+            return filterExpr;
+        }
+        if ("0".equals(tenantCode)) {
+            // 全局租户 + 指定系统类型：仅全局租户的该系统类型文档
+            return filterExpr + " && tenantCode == '0' && systemType == '%s'".formatted(systemType);
+        }
+        if (!"other".equals(systemType)) {
+            // 指定租户 + 指定系统类型：全局综合平台文档 或 该租户的该系统类型文档
+            return filterExpr + " && ((tenantCode == '0' && systemType == 'other') || (tenantCode == '%s' && systemType == '%s'))"
+                    .formatted(tenantCode, systemType);
+        }
+        // 指定租户 + 综合平台：该租户或全局租户的全部文档
+        return filterExpr + " && (tenantCode == '%s' || tenantCode == '0')".formatted(tenantCode);
     }
 
     /**
@@ -1043,9 +1154,10 @@ public class GraphRagService {
 
     /**
      * 查询结果封装：知识库来源 + SSE 事件流（思考/正文通过 type 字段区分）
+     * rewriteQuery：优化后的检索查询词（供前端展示"搜索中"状态）
      */
     public record QueryResult(List<Map<String, Object>> sources, Flux<ChatStreamEvent> answer,
-                              AtomicReference<Usage> usageRef) {
+                              AtomicReference<Usage> usageRef, String rewriteQuery) {
     }
 
     /**

@@ -89,6 +89,7 @@ public class ApiChatController {
                     sourcesJson = ContextUtil.OBJECT_MAPPER.createArrayNode();
                 }
                 Mono<String> sessionMono = Mono.just(Utils.jsonEvent("session", Map.of("sessionId", sessionId)));
+                Mono<String> rewriteMono = Mono.just(Utils.jsonEvent("rewrite", Map.of("query", result.rewriteQuery())));
                 Mono<String> sourcesMono = Mono.just(Utils.jsonEvent("sources", Map.of("sources", result.sources())));
                 Flux<String> answerMono = result.answer().doOnNext(ev -> {
                     if ("reasoning".equals(ev.type())) {
@@ -98,7 +99,7 @@ public class ApiChatController {
                     }
                 }).map(ev -> Utils.jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
                 JsonNode finalSourcesJson = sourcesJson;
-                return Flux.concat(sessionMono, sourcesMono, answerMono)
+                return Flux.concat(sessionMono, rewriteMono, sourcesMono, answerMono)
                         .publishOn(Schedulers.boundedElastic())
                         .doFinally(signal -> {
                             if (signal == SignalType.CANCEL) return;
