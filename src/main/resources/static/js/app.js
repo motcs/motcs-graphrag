@@ -1028,7 +1028,7 @@ async function askQuestion() {
                             answer: fullAnswer || '',
                             userId: getUser(),
                             sessionId: mySessionId,
-                            sources: JSON.stringify(state.currentSources || []), reasoning: reasoningText,
+                            sources: state.currentSources || [], reasoning: reasoningText,
                             tenantCode: getTenant(),
                             systemType: getSystem()
                         })
@@ -1077,7 +1077,7 @@ function newChat() {
                 body: JSON.stringify({
                     question: q, answer: a || '',
                     userId: getUser(), sessionId: sid,
-                    sources: JSON.stringify(s || []), reasoning: state.currentReasoning || '',
+                    sources: s || [], reasoning: state.currentReasoning || '',
                     tenantCode: getTenant(), systemType: getSystem()
                 })
             }).then(() => loadHistory()).catch(e => console.warn('新对话前保存失败', e));
