@@ -5,6 +5,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
 
 import java.io.Serializable;
 
@@ -49,7 +51,7 @@ public class GraphRagRequest implements Serializable {
     private String answer;
 
     @Schema(description = "来源 JSON", example = "文档json数组，包含文档id、标题、来源、内容等信息")
-    private String sources;
+    private JsonNode sources;
 
     @Schema(description = "思考过程", example = "思考内容...")
     private String reasoning;

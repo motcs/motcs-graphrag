@@ -19,7 +19,9 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 import reactor.core.scheduler.Schedulers;
+import tools.jackson.databind.JsonNode;
 
 import java.util.Map;
 import java.util.UUID;
@@ -76,14 +78,15 @@ public class ApiChatController {
             request.setSystemType(apiKey.getSystemType());
             StringBuilder answerBuilder = new StringBuilder();
             StringBuilder reasoningBuilder = new StringBuilder();
-            final String[] sourcesJson = {"[]"};
+
             return graphRagService.graphRagQueryStream(request).flatMapMany(result -> {
                 // 直接持有 QueryResult 内部的 usage 引用（流结束时可读到最终 token 用量）
                 AtomicReference<Usage> usageRef = result.usageRef();
+                JsonNode sourcesJson;
                 try {
-                    sourcesJson[0] = ContextUtil.OBJECT_MAPPER.writeValueAsString(result.sources());
+                    sourcesJson = ContextUtil.OBJECT_MAPPER.convertValue(result.sources(), JsonNode.class);
                 } catch (Exception e) {
-                    sourcesJson[0] = "[]";
+                    sourcesJson = ContextUtil.OBJECT_MAPPER.createArrayNode();
                 }
                 Mono<String> sessionMono = Mono.just(Utils.jsonEvent("session", Map.of("sessionId", sessionId)));
                 Mono<String> sourcesMono = Mono.just(Utils.jsonEvent("sources", Map.of("sources", result.sources())));
@@ -94,14 +97,15 @@ public class ApiChatController {
                         answerBuilder.append(ev.text());
                     }
                 }).map(ev -> Utils.jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
+                JsonNode finalSourcesJson = sourcesJson;
                 return Flux.concat(sessionMono, sourcesMono, answerMono)
                         .publishOn(Schedulers.boundedElastic())
                         .doFinally(signal -> {
-                            if (signal == reactor.core.publisher.SignalType.CANCEL) return;
+                            if (signal == SignalType.CANCEL) return;
                             if (StringUtils.hasLength(request.getQuestion())) {
                                 request.setAnswer(answerBuilder.toString());
                                 request.setSessionId(sessionId);
-                                request.setSources(sourcesJson[0]);
+                                request.setSources(finalSourcesJson);
                                 request.setReasoning(reasoningBuilder.toString());
                                 graphRagService.saveConversation(request, apiKey.getId()).subscribe();
                                 // 记录 token 用量（用量监控）

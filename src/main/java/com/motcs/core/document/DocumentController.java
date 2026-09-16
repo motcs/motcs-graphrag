@@ -25,12 +25,14 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 文档管理控制器（上传、查询、删除、智能问答、对话历史、知识图谱）
@@ -221,14 +223,12 @@ public class DocumentController {
                 ? UUID.randomUUID().toString() : request.getSessionId();
         StringBuilder answerBuilder = new StringBuilder(); // AI回答完整内容累积
         StringBuilder reasoningBuilder = new StringBuilder(); // AI思考过程累积（入库）
-        final String[] sourcesJson = {"[]"};
-
+        AtomicReference<JsonNode> sourcesJson = new AtomicReference<>();
         return this.graphRagService.graphRagQueryStream(request).flatMapMany(result -> {
-            // 序列化来源
             try {
-                sourcesJson[0] = ContextUtil.OBJECT_MAPPER.writeValueAsString(result.sources());
+                sourcesJson.set(ContextUtil.OBJECT_MAPPER.convertValue(result.sources(), JsonNode.class));
             } catch (Exception e) {
-                sourcesJson[0] = "[]";
+                sourcesJson.set(ContextUtil.OBJECT_MAPPER.createArrayNode());
             }
             // 发送顺序：1.session 2.sources 3.思考/正文事件（JSON type 字段区分思考/正文，不依赖内容判空）
             Mono<String> sessionMono = Mono.just(Utils.jsonEvent("session", Map.of("sessionId", sessionId)));
@@ -247,7 +247,7 @@ public class DocumentController {
             if (request.getQuestion() != null && !request.getQuestion().isBlank()) {
                 request.setAnswer(answerBuilder.toString());
                 request.setSessionId(sessionId);
-                request.setSources(sourcesJson[0]);
+                request.setSources(sourcesJson.get());
                 request.setReasoning(reasoningBuilder.toString());
                 this.graphRagService.saveConversation(request, 0L).subscribe();
             }

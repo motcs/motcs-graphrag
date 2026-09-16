@@ -1,7 +1,6 @@
 package com.motcs.core.knowledge.graph;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.motcs.commons.ContextUtil;
 import com.motcs.commons.annotation.RestServerException;
 import com.motcs.core.auth.keys.ApiKey;
 import com.motcs.core.document.DocumentResponse;
@@ -33,7 +32,6 @@ import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
-import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -812,18 +810,6 @@ public class GraphRagService {
         if (ObjectUtils.isEmpty(request.getAnswer())) {
             request.setAnswer("");
         }
-        JsonNode sourcesNode;
-        if (StringUtils.hasLength(request.getSources())) {
-            JsonNode parsed = null;
-            try {
-                parsed = ContextUtil.OBJECT_MAPPER.readTree(request.getSources());
-            } catch (Exception e) {
-                log.warn("解析来源JSON失败: {}", e.getMessage());
-            }
-            sourcesNode = parsed;
-        } else {
-            sourcesNode = null;
-        }
         // 查询该会话已有的标题（取最新一条记录的title），新记录继承相同标题
         return this.chatMessageRepository.findRecentBySessionId(request.getSessionId(), 1, 0)
                 .next().map(latest -> StringUtils.hasLength(latest.getTitle()) ? latest.getTitle() : "")
@@ -831,7 +817,7 @@ public class GraphRagService {
                     ChatMessage record = ChatMessage.builder().userId(request.getUserId())
                             .sessionId(request.getSessionId()).title(existingTitle)
                             .question(request.getQuestion()).answer(request.getAnswer())
-                            .reasoning(request.getReasoning()).sources(sourcesNode)
+                            .reasoning(request.getReasoning()).sources(request.getSources())
                             .tenantCode(request.getTenantCode()).systemType(request.getSystemType())
                             .apiKeyId(apiKeyId).createTime(LocalDateTime.now()).build();
                     return this.chatMessageRepository.save(record).doOnSuccess(r -> {
