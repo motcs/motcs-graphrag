@@ -31,7 +31,7 @@ import java.util.Map;
 public class ApiKeyController {
 
     private static final Map<String, Object> UNAUTHORIZED_BODY = Map
-            .of("code", 401, "message", "非常抱歉，您的密钥无效或已过期，请检查后重试。");
+            .of("code", 401, "message", "非常抱歉，您的密钥无效或已停用，请检查后重试。");
     private final ApiKeyService apiKeyService;
     private final GraphRagService graphRagService;
 
@@ -60,12 +60,12 @@ public class ApiKeyController {
      */
     @PostMapping("/conversations")
     public Mono<ResponseEntity<Map<String, Object>>> saveConversation(ServerWebExchange exchange, @RequestBody GraphRagRequest request) {
-        return this.apiKeyService.resolveApiKey(exchange).flatMap(apiKey -> {
+        return this.apiKeyService.resolveApiKey(exchange).<ResponseEntity<Map<String, Object>>>flatMap(apiKey -> {
             request.setTenantCode(apiKey.getTenantCode());
             request.setSystemType(apiKey.getSystemType());
             return graphRagService.saveConversation(request, apiKey.getId())
                     .then(Mono.fromCallable(() -> ResponseEntity.ok(Map.of("success", true))));
-        });
+        }).switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(UNAUTHORIZED_BODY)));
     }
 
     @DeleteMapping("/session/{sessionId}")

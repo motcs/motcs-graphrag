@@ -57,4 +57,5 @@ public class LoginIssuedCsrfTokenRepository implements ServerCsrfTokenRepository
         // 从请求 Cookie 中读取 XSRF-TOKEN，供 CSRF 过滤器与请求头 X-CSRF-TOKEN 比对
         return this.delegate.loadToken(exchange);
     }
+
 }
