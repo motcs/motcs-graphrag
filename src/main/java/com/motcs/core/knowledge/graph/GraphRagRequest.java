@@ -6,7 +6,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.node.ArrayNode;
 
 import java.io.Serializable;
 
