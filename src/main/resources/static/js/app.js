@@ -676,20 +676,87 @@ async function checkHealth() {
 }
 
 /* ---------- 聊天辅助函数 ---------- */
+/**
+ * 各系统类型对应的欢迎语配置（标题/能力/范围/快捷问题）
+ * clearChat 时按当前全局系统类型取对应配置；未匹配时用 other（综合平台）
+ */
+const WELCOME_CONFIG = {
+    other: {
+        title: '您好，我是AI小智，平台知识库智能助手。',
+        subtitle: '已接入本单位文档知识库，支持：',
+        capabilities: ['📄 文档问答（附引用来源）', '🔁 多轮对话（结合上下文）', '🔗 跨文档关联（知识图谱）'],
+        coverage: '覆盖：人大 · 政协 · 党建 · 社会工作部 · 数智统战 · 综合平台',
+        suggestions: ['人大代表建议怎么提交？', '党建工作的主要职责是什么？', '数智统战平台包含哪些功能？']
+    },
+    congress: {
+        title: '您好，我是AI小智，人大知识库智能助手',
+        subtitle: '已接入人大系统文档知识库，支持：',
+        capabilities: ['📄 建议议案问答', '📋 会议文件检索', '🔁 多轮对话（结合上下文）'],
+        coverage: '范围：人大代表建议 · 议案办理 · 会议文件 · 政策法规',
+        suggestions: ['人大代表建议怎么提交？', '议案和建议有什么区别？', '人大代表的职责是什么？']
+    },
+    cppcc: {
+        title: '您好，我是AI小智，政协知识库智能助手',
+        subtitle: '已接入政协系统文档知识库，支持：',
+        capabilities: ['📄 提案社情民意问答', '📋 会议文件检索', '🔁 多轮对话（结合上下文）'],
+        coverage: '范围：政协提案 · 社情民意 · 会议文件 · 政策法规',
+        suggestions: ['政协提案怎么提交？', '社情民意信息怎么写？', '政协委员的职责是什么？']
+    },
+    party: {
+        title: '您好，我是AI小智，党建知识库智能助手',
+        subtitle: '已接入党建系统文档知识库，支持：',
+        capabilities: ['📄 党建工作问答', '📋 组织建设文件检索', '🔁 多轮对话（结合上下文）'],
+        coverage: '范围：党建工作 · 组织建设 · 党员管理 · 政策文件',
+        suggestions: ['党建工作的主要职责是什么？', '党支部的组织生活有哪些？', '发展党员的流程是什么？']
+    },
+    msw: {
+        title: '您好，我是AI小智，社会工作部知识库智能助手',
+        subtitle: '已接入社会工作部文档知识库，支持：',
+        capabilities: ['📄 基层治理问答', '📋 信访工作文件检索', '🔁 多轮对话（结合上下文）'],
+        coverage: '范围：基层治理 · 社会工作 · 信访维稳 · 政策文件',
+        suggestions: ['社会工作部的主要职责是什么？', '基层治理的重点工作有哪些？', '信访工作流程是什么？']
+    },
+    digital: {
+        title: '您好，我是AI小智，数智统战知识库智能助手',
+        subtitle: '已接入数智统战文档知识库，支持：',
+        capabilities: ['📄 统战工作问答', '📋 数字平台文件检索', '🔁 多轮对话（结合上下文）'],
+        coverage: '范围：统战工作 · 数字平台 · 党外人士 · 政策文件',
+        suggestions: ['数智统战平台包含哪些功能？', '统战工作的主要职责是什么？', '党外人士管理有哪些要求？']
+    }
+};
+
 function scrollToBottom() {
     const el = $('chatMessages');
     el.scrollTop = el.scrollHeight;
 }
 
 function clearChat() {
+    const cfg = WELCOME_CONFIG[getSystem()] || WELCOME_CONFIG.other;
+    const caps = (cfg.capabilities || []).map(c =>
+        `<span class="px-3 py-1.5 text-sm bg-white/5 text-gray-300 rounded-lg">${escapeHtml(c)}</span>`).join('');
+    const sugs = (cfg.suggestions || []).map(q =>
+        `<button class="welcome-suggestion w-full px-4 py-2 text-sm text-left bg-primary-500/10 text-primary-300 border border-primary-500/30 rounded-lg hover:bg-primary-500/20 transition" data-q="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('');
     $('chatMessages').innerHTML = `
-        <div id="emptyState" class="h-full flex flex-col items-center justify-center text-center">
+        <div id="emptyState" class="h-full flex flex-col items-center justify-center text-center px-4">
             <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center mb-4">
                 <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
             </div>
-            <h2 class="text-xl font-bold text-gray-200 mb-2">有什么可以帮你的？</h2>
-            <p class="text-sm text-gray-500">基于向量检索 + Neo4j 多跳图谱的 GraphRAG 智能问答</p>
+            <h2 class="text-xl font-bold text-gray-200 mb-2">${escapeHtml(cfg.title)}</h2>
+            <p class="text-sm text-gray-400 mb-4">${escapeHtml(cfg.subtitle)}</p>
+            <div class="flex flex-wrap justify-center gap-2 mb-4">${caps}</div>
+            <p class="text-xs text-gray-500 mb-5">${escapeHtml(cfg.coverage)}</p>
+            <p class="text-xs text-gray-500 mb-2">试试问我：</p>
+            <div class="flex flex-col items-center gap-2 w-full max-w-md">${sugs}</div>
         </div>`;
+    // 快捷问题：点击后直接填入输入框并发送（欢迎语仅作展示，不进入对话传输）
+    document.querySelectorAll('.welcome-suggestion').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const q = btn.getAttribute('data-q');
+            if (!q) return;
+            $('questionInput').value = q;
+            askQuestion();
+        });
+    });
 }
 
 function appendUserMessage(text) {

@@ -431,19 +431,13 @@ public class GraphRagService {
     }
 
     private @NonNull String getFilterExpr(GraphRagRequest request) {
-        String filterExpr = "enabled == true && status == 'SUCCESS'";
         String tenantCode = request.getTenantCode();
         String systemType = request.getSystemType();
-        if (("-1".equals(tenantCode) || "0".equals(tenantCode))) {
-            // 通用密钥（租户 -1）：不限制租户与系统类型，检索全部文档
-            if ("other".equals(systemType)) {
-                return filterExpr;
-            } else {
-                return filterExpr + " && tenantCode == '0' && systemType == '%s'".formatted(systemType);
-            }
-        }
         // 指定租户 + 默认租户 + 指定系统 全部文档
-        return filterExpr + " && (tenantCode == '%s' || tenantCode == '0') && systemType == '%s'".formatted(tenantCode, systemType);
+        return """
+                enabled == true && status == 'SUCCESS' && (tenantCode == '%s'
+                 || tenantCode == '0') && systemType == '%s'
+                """.formatted(tenantCode, systemType);
     }
 
     /**
