@@ -106,3 +106,23 @@ create table tenant_config
 )
     comment '租户配置（文档管理/对话租户下拉数据源）';
 
+-- ============================================================
+-- API Key 用量汇总表（按 Key 聚合的快照，供用量监控总览快速查询）
+-- 每次 /keys/v1/chat 结束记录明细时同步累加本表；监控页直接查本表，
+-- 不再每次全量扫描 api_key_usage 明细表内存聚合。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS api_key_usage_summary
+(
+    id                BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    api_key_id        BIGINT NOT NULL COMMENT 'API Key 主键ID（唯一）',
+    total_calls       BIGINT DEFAULT 0 COMMENT '累计调用次数',
+    prompt_tokens     BIGINT DEFAULT 0 COMMENT '累计输入 token',
+    completion_tokens BIGINT DEFAULT 0 COMMENT '累计输出 token',
+    total_tokens      BIGINT DEFAULT 0 COMMENT '累计总 token',
+    last_used_at      DATETIME NULL COMMENT '最近调用时间',
+    updated_time      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_summary_api_key (api_key_id),
+    KEY idx_summary_total_tokens (total_tokens)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='API Key 用量汇总表（按 Key 聚合）';
+

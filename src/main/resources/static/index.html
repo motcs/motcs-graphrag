@@ -317,6 +317,7 @@
             </div>
 
             <div id="docsList" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+            <div id="docsPagination" class="mt-4 flex items-center justify-between text-xs text-gray-400"></div>
         </section>
 
         <!-- ===== 租户管理 ===== -->
@@ -350,6 +351,7 @@
                     </thead>
                     <tbody id="tenantList"></tbody>
                 </table>
+                <div id="tenantPagination" class="mt-4 flex items-center justify-between text-xs text-gray-400"></div>
                 <div id="tenantEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无租户，点击上方按钮添加</div>
             </div>
         </section>
@@ -470,6 +472,7 @@
                     </thead>
                     <tbody id="apiKeyList"></tbody>
                 </table>
+                <div id="apiKeyPagination" class="mt-4 flex items-center justify-between text-xs text-gray-400"></div>
                 <div id="apiKeyEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无 API Key，点击上方按钮生成</div>
             </div>
         </section>
@@ -523,6 +526,7 @@
                     </thead>
                     <tbody id="monitorUsageList"></tbody>
                 </table>
+                <div id="monitorPagination" class="mt-4 flex items-center justify-between text-xs text-gray-400"></div>
                 <div id="monitorUsageEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无 API Key 或调用记录</div>
             </div>
         </section>
@@ -613,6 +617,6 @@
 </div>
 
 <script src="js/config.js?v=1"></script>
-<script src="js/app.js?v=116"></script>
+<script src="js/app.js?v=117"></script>
 </body>
 </html>

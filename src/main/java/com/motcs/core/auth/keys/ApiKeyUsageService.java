@@ -3,6 +3,8 @@ package com.motcs.core.auth.keys;
 import com.motcs.commons.utils.Utils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
@@ -10,10 +12,17 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
- * API Key 使用监控服务：记录每次 Key 对话的 token 消耗，提供总量/明细查询
+ * API Key 使用监控服务：
+ * <ul>
+ *   <li>明细：每次 Key 对话的 token 消耗写入 api_key_usage（保留流水，供单 Key 明细弹窗）；</li>
+ *   <li>汇总：同时把本次用量累加到 api_key_usage_summary（按 Key 聚合快照），
+ *       监控总览直接查汇总表，按 total_tokens 降序分页，避免每次全量扫描明细表内存聚合。</li>
+ * </ul>
  *
  * @author <a href="https://github.com/motcs">motcs</a>
  * @since 2026-09-09 星期三
@@ -24,9 +33,34 @@ import java.util.*;
 public class ApiKeyUsageService {
 
     private final ApiKeyUsageRepository apiKeyUsageRepository;
+    private final ApiKeyUsageSummaryRepository summaryRepository;
 
     /**
-     * 记录一次 API Key 对话的 token 消耗（流结束后异步调用，不阻塞响应）
+     * 应用启动后：若汇总表为空但明细表有数据，则从明细表一次性重建汇总。
+     * 用于首次上线升级时把历史用量迁移到汇总表，避免历史数据丢失。
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void initSummaryIfEmpty() {
+        summaryRepository.countSummary().defaultIfEmpty(0L).flatMap(cnt -> {
+            if (cnt != null && cnt > 0) {
+                return Mono.empty();
+            }
+            log.info("用量汇总表为空，开始从 api_key_usage 明细表重建...");
+            return summaryRepository.truncate()
+                    .then(summaryRepository.rebuildFromDetail())
+                    .doOnSuccess(n -> log.info("用量汇总表重建完成，共 {} 个 Key 的汇总记录", n))
+                    .onErrorResume(e -> {
+                        log.warn("用量汇总表重建失败（不影响主流程，后续 record 会继续累加）: {}", e.getMessage());
+                        return Mono.empty();
+                    });
+        }).subscribe(v -> {
+        }, e -> log.warn("用量汇总初始化异常: {}", e.getMessage()));
+    }
+
+    /**
+     * 记录一次 API Key 对话的 token 消耗：
+     * 1) 写明细流水（api_key_usage）；2) 同步累加到汇总表（api_key_usage_summary）。
+     * 流结束后异步调用，不阻塞响应。
      */
     public Mono<Void> record(Long apiKeyId, String userId, String sessionId, String model,
                              Integer promptTokens, Integer completionTokens, Integer totalTokens) {
@@ -34,109 +68,100 @@ public class ApiKeyUsageService {
             // token 缺失（如异常中断未拿到 usage）时不落库，避免脏数据
             return Mono.empty();
         }
+        int p = Utils.nullToZero(promptTokens);
+        int c = Utils.nullToZero(completionTokens);
+        int t = Utils.nullToZero(totalTokens);
         ApiKeyUsage usage = ApiKeyUsage.builder().apiKeyId(apiKeyId).userId(userId)
-                .sessionId(sessionId).model(model).promptTokens(Utils.nullToZero(promptTokens))
-                .completionTokens(Utils.nullToZero(completionTokens))
-                .totalTokens(totalTokens).createdTime(LocalDateTime.now()).build();
-        return this.apiKeyUsageRepository.save(usage).doOnSuccess(u -> {
-            if (!ObjectUtils.isEmpty(u)) {
-                log.info("API Key 用量已记录: apiKeyId={}, userId={}, totalTokens={}", apiKeyId, userId, totalTokens);
-            }
-        }).then();
+                .sessionId(sessionId).model(model).promptTokens(p)
+                .completionTokens(c).totalTokens(t).createdTime(LocalDateTime.now()).build();
+        // 明细落库 + 汇总累加，两者并行；任一项失败不影响另一个
+        Mono<Void> detail = this.apiKeyUsageRepository.save(usage).then();
+        Mono<Void> summary = this.summaryRepository.incrementUsage(apiKeyId, p, c, t, LocalDateTime.now()).then();
+        return Mono.when(detail, summary).doOnSuccess(v ->
+                log.info("API Key 用量已记录并累加汇总: apiKeyId={}, userId={}, totalTokens={}", apiKeyId, userId, t));
     }
 
     /**
-     * 按 Key 汇总使用情况：调用次数 + 总 token 消耗
+     * 按 Key 汇总使用情况：直接读汇总表（快照，O(1)）。
      */
     public Mono<Map<String, Object>> summary(Long apiKeyId) {
-        Mono<Long> countMono = this.apiKeyUsageRepository.countByApiKeyId(apiKeyId).defaultIfEmpty(0L);
-        Mono<Map<String, Object>> sumMono = this.apiKeyUsageRepository.findByApiKeyIdOrderByCreatedTimeDesc(apiKeyId)
-                .collect(() -> new HashMap<>() {{
-                    put("promptTokens", 0);
-                    put("completionTokens", 0);
-                    put("totalTokens", 0);
-                }}, (acc, u) -> {
-                    acc.put("promptTokens", (Integer) acc.get("promptTokens") + Utils.nullToZero(u.getPromptTokens()));
-                    acc.put("completionTokens", (Integer) acc.get("completionTokens") + Utils.nullToZero(u.getCompletionTokens()));
-                    acc.put("totalTokens", (Integer) acc.get("totalTokens") + Utils.nullToZero(u.getTotalTokens()));
-                });
-        return Mono.zip(countMono, sumMono).map(t -> {
-            Map<String, Object> result = new HashMap<>();
-            result.put("totalCalls", t.getT1());
-            result.putAll(t.getT2());
-            return result;
-        });
+        return this.summaryRepository.findByApiKeyId(apiKeyId)
+                .map(s -> {
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("totalCalls", s.getTotalCalls() == null ? 0 : s.getTotalCalls());
+                    result.put("promptTokens", s.getPromptTokens() == null ? 0 : s.getPromptTokens());
+                    result.put("completionTokens", s.getCompletionTokens() == null ? 0 : s.getCompletionTokens());
+                    result.put("totalTokens", s.getTotalTokens() == null ? 0 : s.getTotalTokens());
+                    return result;
+                })
+                .defaultIfEmpty(Map.of(
+                        "totalCalls", 0L, "promptTokens", 0L, "completionTokens", 0L, "totalTokens", 0L));
     }
 
     /**
-     * 按 Key 分页查询调用明细
+     * 按 Key 分页查询调用明细（明细表流水，监控明细弹窗用）
      */
     public Flux<ApiKeyUsage> list(Long apiKeyId, Pageable pageable) {
         return this.apiKeyUsageRepository.findByApiKeyIdOrderByCreatedTimeDesc(apiKeyId, pageable);
     }
 
     /**
-     * 用量监控总览：所有 Key 的用量汇总 + 全局合计
-     * <p>一次全量拉取后在内存分组聚合（Key 与用量规模有限，避免 N+1 与复杂聚合 SQL）</p>
-     *
-     * @param keys 全部 API Key（含掩码/备注/租户/系统/启用状态）
+     * API Key 管理列表分页：api_key LEFT JOIN 汇总表，按创建时间降序，
+     * 每行直接带出累计用量（避免前端逐行再调 usage-summary 造成 N+1）。
      */
-    public Mono<Map<String, Object>> overview(Flux<ApiKey> keys) {
-        Mono<List<ApiKey>> keysMono = keys.collectList().defaultIfEmpty(List.of());
-        Mono<List<ApiKeyUsage>> usageMono = this.apiKeyUsageRepository.findAll()
-                .collectList().defaultIfEmpty(List.of());
-
-        return Mono.zip(keysMono, usageMono).map(t -> {
-            // 按 apiKeyId 聚合用量
-            Map<Long, int[]> agg = new HashMap<>();      // calls, prompt, completion, total
-            Map<Long, LocalDateTime> lastUsed = new HashMap<>();
-            for (ApiKeyUsage u : t.getT2()) {
-                Long kid = u.getApiKeyId();
-                if (ObjectUtils.isEmpty(kid)) {
-                    continue;
-                }
-                int[] a = agg.computeIfAbsent(kid, _ -> new int[4]);
-                a[0]++;
-                a[1] += Utils.nullToZero(u.getPromptTokens());
-                a[2] += Utils.nullToZero(u.getCompletionTokens());
-                a[3] += Utils.nullToZero(u.getTotalTokens());
-                LocalDateTime ct = u.getCreatedTime();
-                LocalDateTime prev = lastUsed.get(kid);
-                if (ct != null && (prev == null || ct.isAfter(prev))) {
-                    lastUsed.put(kid, ct);
-                }
-            }
-            List<Map<String, Object>> perKey = new ArrayList<>();
-            long totalCalls = 0, prompt = 0, completion = 0, total = 0;
-            for (ApiKey k : t.getT1()) {
-                Long kid = k.getId();
-                int[] a = agg.getOrDefault(kid, new int[4]);
-                Map<String, Object> row = new LinkedHashMap<>();
-                row.put("id", kid);
-                row.put("prefix", k.getKeyPrefix());
-                row.put("name", k.getName());
-                row.put("tenantCode", k.getTenantCode());
-                row.put("systemType", k.getSystemType());
-                row.put("enabled", k.getEnabled());
-                row.put("totalCalls", a[0]);
-                row.put("promptTokens", a[1]);
-                row.put("completionTokens", a[2]);
-                row.put("totalTokens", a[3]);
-                row.put("lastUsedAt", lastUsed.get(kid));
-                perKey.add(row);
-                totalCalls += a[0];
-                prompt += a[1];
-                completion += a[2];
-                total += a[3];
-            }
+    public Mono<Map<String, Object>> listApiKeysPage(Pageable pageable) {
+        Mono<Long> totalMono = this.summaryRepository.countAllKeys().defaultIfEmpty(0L);
+        Flux<UsageOverviewRow> rows = this.summaryRepository.findApiKeyList(pageable);
+        return Mono.zip(totalMono, rows.collectList()).map(t -> {
+            long totalKeys = t.getT1();
             Map<String, Object> result = new LinkedHashMap<>();
-            result.put("totalKeys", t.getT1().size());
-            result.put("totalCalls", totalCalls);
-            result.put("promptTokens", prompt);
-            result.put("completionTokens", completion);
-            result.put("totalTokens", total);
-            result.put("keys", perKey);
+            result.put("content", t.getT2());
+            result.put("number", pageable.getPageNumber());
+            result.put("size", pageable.getPageSize());
+            result.put("totalElements", totalKeys);
+            int totalPages = pageable.getPageSize() == 0 ? 0
+                    : (int) ((totalKeys + pageable.getPageSize() - 1) / pageable.getPageSize());
+            result.put("totalPages", totalPages);
             return result;
+        });
+    }
+
+    /**
+     * 用量监控总览：直接查汇总表 JOIN api_key，按 total_tokens 降序分页。
+     * <p>
+     * 返回：全局合计卡片数字 + 当前页数据行 + 分页信息（totalElements/totalPages/number/size）。
+     *
+     * @param pageable 分页参数（默认 size=10，由 Controller 设定）
+     */
+    public Mono<Map<String, Object>> overview(Pageable pageable) {
+        Mono<Long> totalMono = this.summaryRepository.countAllKeys().defaultIfEmpty(0L);
+        Mono<UsageOverviewRow> totalsMono = this.summaryRepository.globalTotals()
+                .defaultIfEmpty(new UsageOverviewRow(null, null, null, null,
+                        null, null, 0L, 0L, 0L,
+                        0L, null, null));
+        Flux<UsageOverviewRow> rows = this.summaryRepository.findOverview(pageable);
+        return Mono.zip(totalMono, totalsMono).flatMap(t -> {
+            long totalKeys = t.getT1();
+            UsageOverviewRow g = t.getT2();
+            return rows.collectList().map(list -> {
+                Map<String, Object> result = new LinkedHashMap<>();
+                // 顶部统计卡片
+                result.put("totalKeys", totalKeys);
+                result.put("totalCalls", g.totalCalls() == null ? 0L : g.totalCalls());
+                result.put("promptTokens", g.promptTokens() == null ? 0L : g.promptTokens());
+                result.put("completionTokens", g.completionTokens() == null ? 0L : g.completionTokens());
+                result.put("totalTokens", g.totalTokens() == null ? 0L : g.totalTokens());
+                // 当前页数据
+                result.put("content", list);
+                // 分页信息
+                result.put("number", pageable.getPageNumber());
+                result.put("size", pageable.getPageSize());
+                result.put("totalElements", totalKeys);
+                int totalPages = pageable.getPageSize() == 0 ? 0
+                        : (int) ((totalKeys + pageable.getPageSize() - 1) / pageable.getPageSize());
+                result.put("totalPages", totalPages);
+                return result;
+            });
         });
     }
 

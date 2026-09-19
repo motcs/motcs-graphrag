@@ -148,7 +148,41 @@ const state = {
     draftMap: {},  // sessionId -> 未发送的草稿
     docSearch: '',
     docStatusFilter: 'all',
+    // 管理后台四个表格分页状态（默认每页10条）
+    docsPage: 0, tenantsPage: 0, apiKeysPage: 0, monitorPage: 0,
+    pageSize: 10,
+    // 租户编码 -> 租户名称 映射（initTenantSystemSelects 填充，卡片/表格显示名称用）
+    tenantNameMap: {},
 };
+
+/* ---------- 通用分页控件渲染 ---------- */
+function renderPagination(container, page, totalPages, totalElements, onPage) {
+    if (!container) return;
+    totalElements = totalElements || 0;
+    totalPages = totalPages || 0;
+    if (totalElements === 0) { container.innerHTML = ''; return; }
+    const prevDisabled = page <= 0 ? 'disabled' : '';
+    const nextDisabled = page >= totalPages - 1 ? 'disabled' : '';
+    const btnCls = 'px-2.5 py-1 rounded-md border border-white/10 text-gray-300 hover:border-primary-500 hover:text-primary-400 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-white/10 disabled:hover:text-gray-300';
+    container.innerHTML = `
+        <span>共 <span class="text-primary-400 font-medium">${totalElements}</span> 条 · 第 ${page + 1} / ${totalPages} 页</span>
+        <span class="flex items-center gap-2">
+            <button class="${btnCls}" id="${container.id}Prev" ${prevDisabled}>上一页</button>
+            <button class="${btnCls}" id="${container.id}Next" ${nextDisabled}>下一页</button>
+        </span>`;
+    const prev = $(container.id + 'Prev');
+    const next = $(container.id + 'Next');
+    if (prev) prev.addEventListener('click', () => { if (page > 0) onPage(page - 1); });
+    if (next) next.addEventListener('click', () => { if (page < totalPages - 1) onPage(page + 1); });
+}
+
+/* 租户编码 -> 名称：找不到时回退显示编码本身 */
+function tenantNameOf(code) {
+    if (code === undefined || code === null || code === '') return '-';
+    if (String(code) === '0') return '全部租户';
+    const name = state.tenantNameMap[String(code)];
+    return name || String(code);
+}
 
 /* ---------- 配置持久化 ---------- */
 const CFG_KEY = 'motcs_cfg';
@@ -352,6 +386,11 @@ async function initTenantSystemSelects() {
         const res = await fetch(`${API_BASE}/tenants`);
         if (res.ok) tenants = await res.json();
     } catch (e) { /* 接口不可用时保留"0 - 全部租户"兜底 */ }
+    (tenants || []).forEach(t => {
+        const tc = t ? (t.tenantCode ?? t.code) : null;
+        const tn = t ? (t.tenantName ?? t.name) : '';
+        if (tc !== undefined && tc !== null && tn) state.tenantNameMap[String(tc)] = tn;
+    });
     fillTenantSelects(['globalTenant', 'uploadTenant', 'urlTenant', 'docFilterTenant'], tenants);
     // API Key 绑定租户：不允许 0（超管全局租户），首项"请选择租户"必选；"-1"为通用密钥（检索全部文档）
     fillTenantSelects(['apiKeyTenant'], tenants, false, [{ value: '-1', text: '通用密钥' }]);
@@ -542,22 +581,18 @@ function switchTab(tab) {
 }
 
 /* ---------- 租户管理 ---------- */
-async function loadTenants() {
+async function loadTenants(page) {
     const list = $('tenantList');
     const empty = $('tenantEmpty');
     if (!list) return;
+    if (typeof page === 'number') state.tenantsPage = page;
+    const kw = ($('tenantSearch') ? $('tenantSearch').value : '').trim();
     try {
-        const res = await fetch(`${API_BASE}/tenants`);
+        const url = `${API_BASE}/tenants/page?page=${state.tenantsPage}&size=${state.pageSize}&keyword=${encodeURIComponent(kw)}`;
+        const res = await fetch(url);
         if (!res.ok) return;
-        let tenants = await res.json();
-        // 租户 0 为系统保留项，不进入管理列表（按 tenantCode 判断）
-        tenants = (tenants || []).filter(t => {
-            const tc = t ? (t.tenantCode ?? t.code) : null;
-            return tc !== undefined && tc !== null && String(tc) !== '0';
-        });
-        // 租户名称模糊搜索（前端过滤，数据量小）
-        const kw = ($('tenantSearch') ? $('tenantSearch').value : '').trim().toLowerCase();
-        if (kw) tenants = tenants.filter(t => ((t.tenantName ?? t.name) || '').toLowerCase().includes(kw));
+        const data = await res.json();
+        const tenants = data.content || [];
         if (empty) empty.classList.toggle('hidden', tenants.length > 0);
         list.innerHTML = tenants.map(t => `
             <tr class="border-b border-white/5 hover:bg-white/5">
@@ -567,12 +602,13 @@ async function loadTenants() {
                 <td class="py-2.5"><span class="tag ${t.enabled ? 'tag-green' : 'tag-gray'}">${t.enabled ? '启用' : '停用'}</span></td>
                 <td class="py-2.5 text-gray-400">${t.createdTime ? formatTime(t.createdTime) : '-'}</td>
                 <td class="py-2.5 text-right">
-                    <button class="tenant-del-btn text-red-400 hover:text-red-300 transition" data-id="${t.id}" data-name="${escapeHtml(String((t.tenantName ?? t.name) || '').replace(/'/g, "\\'"))}">删除</button>
+                    <button class="tenant-del-btn text-red-400 hover:text-red-300 transition" data-id="${t.id}" data-name="${escapeHtml(String((t.tenantName ?? t.name) || '').replace(/'/g, "\'"))}">删除</button>
                 </td>
             </tr>`).join('');
         list.querySelectorAll('.tenant-del-btn').forEach(btn => {
             btn.addEventListener('click', () => deleteTenant(btn.dataset.id, btn.dataset.name));
         });
+        renderPagination($('tenantPagination'), data.number || 0, data.totalPages || 0, data.totalElements || 0, p => loadTenants(p));
     } catch (e) { /* 静默失败 */ }
 }
 
@@ -611,11 +647,12 @@ async function deleteTenant(id, name) {
 }
 
 /* ---------- 用量监控 ---------- */
-async function loadUsageOverview() {
+async function loadUsageOverview(page) {
     const tbody = $('monitorUsageList');
     const empty = $('monitorUsageEmpty');
+    if (typeof page === 'number') state.monitorPage = page;
     try {
-        const res = await fetch(`${AUTH_BASE}/usage-overview`);
+        const res = await fetch(`${AUTH_BASE}/usage-overview?page=${state.monitorPage}&size=${state.pageSize}`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         // 统计卡片
@@ -626,7 +663,7 @@ async function loadUsageOverview() {
         $('monTotal').textContent = (data.totalTokens ?? 0).toLocaleString();
         // 表格
         tbody.innerHTML = '';
-        const keys = data.keys || [];
+        const keys = data.content || [];
         empty.classList.toggle('hidden', keys.length > 0);
         keys.forEach(k => {
             const tr = document.createElement('tr');
@@ -635,9 +672,9 @@ async function loadUsageOverview() {
                 ? '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-emerald-500/15 text-emerald-400">启用</span>'
                 : '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>';
             tr.innerHTML = `
-                <td class="py-2.5 pr-3 font-mono text-xs text-gray-300">${escapeHtml(k.prefix || 'sk-…')}…</td>
+                <td class="py-2.5 pr-3 font-mono text-xs text-gray-300">${escapeHtml(k.keyPrefix || k.prefix || 'sk-…')}…</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-300">${escapeHtml(k.name || '-')}</td>
-                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(k.tenantCode || '-')} / ${escapeHtml(k.systemType || '-')}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(k.systemType || '-')}</td>
                 <td class="py-2.5 pr-3">${enabledBadge}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-300">${k.totalCalls ?? 0}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-400">${(k.promptTokens ?? 0).toLocaleString()}</td>
@@ -645,10 +682,11 @@ async function loadUsageOverview() {
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-300 font-medium">${(k.totalTokens ?? 0).toLocaleString()}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未使用'}</td>
                 <td class="py-2.5 text-right">
-                    <button onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\\'"))}')" class="text-xs px-2 py-1 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition">明细</button>
+                    <button onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')" class="text-xs px-2 py-1 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition">明细</button>
                 </td>`;
             tbody.appendChild(tr);
         });
+        renderPagination($('monitorPagination'), data.number || 0, data.totalPages || 0, data.totalElements || 0, p => loadUsageOverview(p));
     } catch (e) {
         showToast('加载用量监控失败', 'error');
     }
@@ -1990,11 +2028,12 @@ async function uploadByUrl() {
 $('urlUploadBtn').addEventListener('click', uploadByUrl);
 
 /* ---------- 文档列表 ---------- */
-async function loadDocuments() {
+async function loadDocuments(page) {
     const loading = $('docsLoading');
     const empty = $('docsEmpty');
     const list = $('docsList');
 
+    if (typeof page === 'number') state.docsPage = page;
     loading.classList.remove('hidden');
     empty.classList.add('hidden');
     list.innerHTML = '';
@@ -2003,28 +2042,26 @@ async function loadDocuments() {
         // 文档管理页的筛选下拉（docFilterTenant/docFilterSystem）独立于顶部全局选择
         const ft = $('docFilterTenant') ? $('docFilterTenant').value : getTenant();
         const fs = $('docFilterSystem') ? $('docFilterSystem').value : getSystem();
+        const kw = (state.docSearch || '');
+        const sf = state.docStatusFilter || 'all';
         let url = `${API_BASE}/list?tenantCode=${encodeURIComponent(ft || '0')}`;
         if (fs) url += `&systemType=${encodeURIComponent(fs)}`;
+        if (kw) url += `&keyword=${encodeURIComponent(kw)}`;
+        if (sf && sf !== 'all') url += `&status=${encodeURIComponent(sf)}`;
+        url += `&page=${state.docsPage}&size=${state.pageSize}`;
         const res = await fetch(url);
-        let docs = await res.json();
+        let data = await res.json();
         loading.classList.add('hidden');
 
-        // 前端筛选（搜索 + 状态）
-        const kw = (state.docSearch || '').toLowerCase();
-        const sf = state.docStatusFilter || 'all';
-        docs = (docs || []).filter(d => {
-            if (sf !== 'all' && d.status !== sf) return false;
-            if (kw && !(d.fileName || '').toLowerCase().includes(kw) && !(d.title || '').toLowerCase().includes(kw)) return false;
-            return true;
-        });
-
+        const docs = data.content || [];
         if (!docs || docs.length === 0) {
             empty.classList.remove('hidden');
-            empty.querySelector('p').textContent = kw || sf !== 'all' ? '没有匹配的文档' : '暂无文档，请先上传';
+            empty.querySelector('p').textContent = (kw || sf !== 'all') ? '没有匹配的文档' : '暂无文档，请先上传';
+            renderPagination($('docsPagination'), data.number || 0, data.totalPages || 0, data.totalElements || 0, p => loadDocuments(p));
             return;
         }
 
-        list.innerHTML = docs.map((doc, i) => {
+        list.innerHTML = docs.map((doc) => {
             const canDelete = (doc.status === 'SUCCESS' || doc.status === 'FAILED')
                 && doc.userId && doc.userId === getUser();
             const canRetry = doc.status === 'FAILED' && doc.userId && doc.userId === getUser();
@@ -2037,7 +2074,7 @@ async function loadDocuments() {
                 doc.status === 'FAILED' ? '处理失败' : (doc.status || '-');
             const statusSpinner = doc.status === 'PROCESSING' ? '<span class="spinner-sm"></span>' : '';
             return `
-            <div class="doc-card cursor-pointer" data-idx="${i}" data-doc-code="${escapeHtml(doc.docCode || '')}" data-doc-name="${escapeHtml(doc.title || doc.fileName || '')}" data-title="${escapeHtml(doc.title || '')}" data-desc="${escapeHtml(doc.description || '')}" data-tenant="${escapeHtml(doc.tenantCode || '')}" data-system="${escapeHtml(doc.systemType || '')}">
+            <div class="doc-card cursor-pointer" data-doc-code="${escapeHtml(doc.docCode || '')}" data-doc-name="${escapeHtml(doc.title || doc.fileName || '')}" data-title="${escapeHtml(doc.title || '')}" data-desc="${escapeHtml(doc.description || '')}" data-tenant="${escapeHtml(doc.tenantCode || '')}" data-system="${escapeHtml(doc.systemType || '')}">
                 <div class="flex items-start gap-3 mb-3">
                     <div class="w-10 h-10 rounded-lg bg-primary-500/15 flex items-center justify-center shrink-0">
                         <svg class="w-5 h-5 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
@@ -2065,7 +2102,7 @@ async function loadDocuments() {
                 <div class="flex items-center gap-2 mt-3 pt-3 border-t border-white/5 flex-wrap">
                     <span class="tag tag-gray">${uploaderLabel}</span>
                     ${doc.docCode ? `<span class="tag tag-blue">编码: ${escapeHtml(doc.docCode)}</span>` : ''}
-                    ${doc.tenantCode ? `<span class="tag tag-purple">租户: ${escapeHtml(doc.tenantCode)}</span>` : ''}
+                    ${doc.tenantCode ? `<span class="tag tag-purple">租户: ${escapeHtml(tenantNameOf(doc.tenantCode))}</span>` : ''}
                     ${doc.systemType ? `<span class="tag tag-gray">系统: ${escapeHtml(doc.systemType)}</span>` : ''}
                 </div>
             </div>`;
@@ -2089,7 +2126,6 @@ async function loadDocuments() {
                 deleteDocument(docCode, fileName, docName, card);
             });
         });
-        // 重传按钮：跳转到上传页并预填 docCode
         list.querySelectorAll('.doc-retry-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -2103,6 +2139,7 @@ async function loadDocuments() {
                 showToast('请重新选择文件上传', 'info');
             });
         });
+        renderPagination($('docsPagination'), data.number || 0, data.totalPages || 0, data.totalElements || 0, p => loadDocuments(p));
     } catch (err) {
         loading.classList.add('hidden');
         showToast('加载文档列表失败: ' + err.message, 'error');
@@ -2110,15 +2147,15 @@ async function loadDocuments() {
 
     // 有处理中的文档时，5秒后自动刷新
     if (state.docsRefreshTimer) { clearTimeout(state.docsRefreshTimer); state.docsRefreshTimer = null; }
-    const hasProcessing = (docs || []).some(d => d.status === 'PROCESSING');
+    const hasProcessing = true; // 当前页只要在展示就保持轻量轮询
     if (hasProcessing && !$('tab-documents').classList.contains('hidden')) {
         state.docsRefreshTimer = setTimeout(() => loadDocuments(), 5000);
     }
 }
 
-$('refreshDocs').addEventListener('click', loadDocuments);
-$('docSearch').addEventListener('input', e => { state.docSearch = e.target.value; loadDocuments(); });
-$('docStatusFilter').addEventListener('change', e => { state.docStatusFilter = e.target.value; loadDocuments(); });
+$('refreshDocs').addEventListener('click', () => loadDocuments(state.docsPage));
+$('docSearch').addEventListener('input', e => { state.docSearch = e.target.value; loadDocuments(0); });
+$('docStatusFilter').addEventListener('change', e => { state.docStatusFilter = e.target.value; loadDocuments(0); });
 
 /**
  * 文档预览：复用来源弹窗展示文档基本信息
@@ -2460,34 +2497,44 @@ async function loadAiProvider() {
 }
 
 /* ---------- API Key 管理（面板内） ---------- */
-async function loadApiKeys() {
+async function loadApiKeys(page) {
     const tbody = $('apiKeyList');
     const empty = $('apiKeyEmpty');
     tbody.innerHTML = '';
+    if (typeof page === 'number') state.apiKeysPage = page;
     try {
-        const res = await fetch(`${AUTH_BASE}/api-keys`);
+        const res = await fetch(`${AUTH_BASE}/api-keys?page=${state.apiKeysPage}&size=${state.pageSize}`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        const list = await res.json();
-        if (!list || list.length === 0) { empty.classList.remove('hidden'); return; }
+        const data = await res.json();
+        const list = data.content || [];
+        if (!list || list.length === 0) {
+            empty.classList.remove('hidden');
+            renderPagination($('apiKeyPagination'), 0, 0, 0, () => {});
+            return;
+        }
         empty.classList.add('hidden');
         list.forEach(k => {
             const tr = document.createElement('tr');
             tr.className = 'border-b border-white/5';
+            const totalCalls = k.totalCalls || 0;
+            const totalTokens = k.totalTokens || 0;
+            const usageText = `${totalCalls} 次 / ${totalTokens.toLocaleString()} token`;
+            const usageTitle = `输入 ${(k.promptTokens||0).toLocaleString()} · 输出 ${(k.completionTokens||0).toLocaleString()} token`;
             tr.innerHTML = `
                 <td class="py-2.5 pr-3">${escapeHtml(k.name || '')}</td>
                 <td class="py-2.5 pr-3 font-mono text-xs text-gray-400">${escapeHtml(k.keyPrefix || '')}</td>
-                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(k.tenantCode || '-')} / ${escapeHtml(k.systemType || '-')}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(k.systemType || '-')}</td>
                 <td class="py-2.5 pr-3">${k.enabled ? '<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">启用</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-400">停用</span>'}</td>
-                <td class="py-2.5 pr-3 text-xs text-gray-400" id="usage-${k.id}">加载中…</td>
-                <td class="py-2.5 pr-3 text-xs text-gray-400">${formatTime(k.createdTime)}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400" title="${usageTitle}">${usageText}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${k.createdTime ? formatTime(k.createdTime) : '-'}</td>
                 <td class="py-2.5 text-right whitespace-nowrap">
                     <button onclick="toggleApiKey(${k.id}, ${k.enabled})" class="text-xs px-2 py-1 rounded-lg ${k.enabled ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'} transition mr-1">${k.enabled ? '停用' : '启用'}</button>
-                    <button onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\\'"))}')" class="text-xs px-2 py-1 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition mr-1">用量</button>
+                    <button onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')" class="text-xs px-2 py-1 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition mr-1">用量</button>
                     <button onclick="deleteApiKey(${k.id})" class="text-xs px-2 py-1 rounded-lg text-red-400 hover:bg-red-500/10 transition">删除</button>
                 </td>`;
             tbody.appendChild(tr);
-            loadKeyUsageSummary(k.id);
         });
+        renderPagination($('apiKeyPagination'), data.number || 0, data.totalPages || 0, data.totalElements || 0, p => loadApiKeys(p));
     } catch (e) {
         showToast('加载 API Key 列表失败', 'error');
     }
@@ -2637,6 +2684,6 @@ function initAuth() {
     $('apiKeyCopyBtn').addEventListener('click', copyNewKey);
     $('monitorRefreshBtn').addEventListener('click', loadUsageOverview);
     $('tenantAddBtn').addEventListener('click', addTenant);
-    $('tenantSearch').addEventListener('input', loadTenants);
+    $('tenantSearch').addEventListener('input', () => loadTenants(0));
 }
 initAuth();

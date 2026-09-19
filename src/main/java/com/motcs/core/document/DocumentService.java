@@ -403,27 +403,75 @@ public class DocumentService {
                     tenantCode != null && !tenantCode.isBlank() ? tenantCode : "default",
                     systemType != null && !systemType.isBlank() ? systemType : "default"
             );
-            return summaries.stream().map(s -> DocumentResponse.builder()
-                    .documentId(FileUtils.parseDocumentId(s.documentId()))
-                    .docCode(s.docCode())
-                    .tenantCode(s.tenantCode())
-                    .systemType(s.systemType())
-                    .enabled(s.enabled() == null || s.enabled())
-                    .fileName(s.fileName())
-                    .title(s.title() != null ? s.title() : s.fileName())
-                    .description(s.description())
-                    .chunkCount(s.chunkCount() != null ? s.chunkCount().intValue() : 0)
-                    .status(s.status() != null ? s.status() : "UNKNOWN")
-                    .errorMessage(s.errorMessage())
-                    .fileSize(s.fileSize() != null ? s.fileSize() : 0L)
-                    .uploadTime(FileUtils.parseUploadTime(s.uploadTime()))
-                    .userId(s.userId())
-                    .build()
-            ).collect(Collectors.toList());
+            return summaries.stream().map(s -> toResponse(s)).collect(Collectors.toList());
         }).subscribeOn(Schedulers.boundedElastic()).onErrorResume(e -> {
             log.error("查询文档列表失败: {}", e.getMessage(), e);
             return Mono.just(List.of());
         });
+    }
+
+    /**
+     * 查询文档分页列表（管理表格用）：支持租户/系统筛选 + 文件名标题关键字 + 状态筛选 + 分页。
+     *
+     * @param tenantCode 租户编码（空/'0' 表示全部）
+     * @param systemType 系统类型（空表示全部）
+     * @param keyword    文件名/标题模糊关键字
+     * @param status     文档状态精确过滤（all/空 表示全部）
+     * @param page       页码（从0开始）
+     * @param size       每页条数
+     * @return 分页结果（content + totalElements + totalPages + number + size）
+     */
+    public Mono<Map<String, Object>> queryDocumentsPage(String tenantCode, String systemType,
+                                                        String keyword, String status,
+                                                        int page, int size) {
+        String tc = tenantCode != null && !tenantCode.isBlank() ? tenantCode : "0";
+        String st = systemType != null && !systemType.isBlank() ? systemType : "";
+        String kw = keyword != null ? keyword.trim() : "";
+        String stFilter = (status == null || status.isBlank() || "all".equalsIgnoreCase(status)) ? "" : status;
+        long skip = (long) page * size;
+        return Mono.fromCallable(() -> {
+            long total = this.chunkRepository.countDocumentSummaries(tc, st, kw, stFilter);
+            List<DocumentResponse> content = this.chunkRepository
+                    .findDocumentSummariesPage(tc, st, kw, stFilter, skip, size)
+                    .stream().map(this::toResponse).collect(Collectors.toList());
+            Map<String, Object> result = new HashMap<>();
+            result.put("content", content);
+            result.put("number", page);
+            result.put("size", size);
+            result.put("totalElements", total);
+            int totalPages = size == 0 ? 0 : (int) ((total + size - 1) / size);
+            result.put("totalPages", totalPages);
+            return result;
+        }).subscribeOn(Schedulers.boundedElastic()).onErrorResume(e -> {
+            log.error("分页查询文档列表失败: {}", e.getMessage(), e);
+            Map<String, Object> empty = new HashMap<>();
+            empty.put("content", List.of());
+            empty.put("number", page);
+            empty.put("size", size);
+            empty.put("totalElements", 0L);
+            empty.put("totalPages", 0);
+            return Mono.just(empty);
+        });
+    }
+
+    /** DocumentSummary -> DocumentResponse 映射（与原 queryDocuments 一致） */
+    private DocumentResponse toResponse(DocumentSummary s) {
+        return DocumentResponse.builder()
+                .documentId(FileUtils.parseDocumentId(s.documentId()))
+                .docCode(s.docCode())
+                .tenantCode(s.tenantCode())
+                .systemType(s.systemType())
+                .enabled(s.enabled() == null || s.enabled())
+                .fileName(s.fileName())
+                .title(s.title() != null ? s.title() : s.fileName())
+                .description(s.description())
+                .chunkCount(s.chunkCount() != null ? s.chunkCount().intValue() : 0)
+                .status(s.status() != null ? s.status() : "UNKNOWN")
+                .errorMessage(s.errorMessage())
+                .fileSize(s.fileSize() != null ? s.fileSize() : 0L)
+                .uploadTime(FileUtils.parseUploadTime(s.uploadTime()))
+                .userId(s.userId())
+                .build();
     }
 
     /**

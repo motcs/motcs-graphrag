@@ -179,4 +179,73 @@ public interface DocumentChunkRepository extends Neo4jRepository<DocumentChunk, 
     List<DocumentSummary> findDocumentSummaries(@Param("tenantCode") String tenantCode,
                                                 @Param("systemType") String systemType);
 
+    /**
+     * 文档列表分页聚合查询：在 Neo4j 层面分组聚合 + 关键字/状态筛选 + SKIP/LIMIT 分页。
+     * 按 uploadTime 降序。
+     *
+     * @param tenantCode 租户编码（'0' 表示全部）
+     * @param systemType 系统类型（空字符串表示全部）
+     * @param keyword    文件名/标题模糊关键字（空字符串表示不过滤）
+     * @param status     文档状态精确过滤（空字符串表示全部状态）
+     * @param skip       偏移量
+     * @param limit      页大小
+     */
+    @Query("""
+            MATCH (c:DocumentChunk)
+             WHERE ($tenantCode = '0' OR ((c.tenantCode = $tenantCode AND c.systemType = $systemType) OR c.tenantCode = '0'))
+             WITH c.documentId AS documentId,
+                  sum(CASE WHEN c.chunkIndex >= 0 AND c.chunkType <> 'COARSE' THEN 1 ELSE 0 END) AS chunkCount,
+                  collect(c {.docCode, .fileName, .status, .errorMessage,
+                            .userId, .tenantCode, .systemType, .enabled, .chunkIndex, .chunkType,
+                            title: c.`metadata.title`, description: c.`metadata.description`,
+                            uploadTime: c.`metadata.uploadTime`, fileSize: c.`metadata.fileSize`}) AS metas
+             WITH documentId, chunkCount,
+                  coalesce([m IN metas WHERE m.chunkIndex >= 0 AND m.chunkType <> 'COARSE'][0],
+                           [m IN metas WHERE m.chunkIndex = -1][0], metas[0]) AS meta
+             WITH documentId, chunkCount,
+                  meta.docCode AS docCode, meta.fileName AS fileName, meta.title AS title,
+                  meta.description AS description, meta.status AS status,
+                  meta.errorMessage AS errorMessage, meta.userId AS userId,
+                  meta.tenantCode AS tenantCode, meta.systemType AS systemType,
+                  meta.enabled AS enabled, meta.uploadTime AS uploadTime, meta.fileSize AS fileSize
+             WHERE ($status IS NULL OR $status = '' OR status = $status)
+               AND ($keyword IS NULL OR $keyword = '' OR
+                    toLower(COALESCE(fileName, '')) CONTAINS toLower($keyword) OR
+                    toLower(COALESCE(title, '')) CONTAINS toLower($keyword))
+             RETURN documentId, chunkCount, docCode, fileName, title, description, status,
+                    errorMessage, userId, tenantCode, systemType, enabled, uploadTime, fileSize
+             ORDER BY uploadTime DESC
+             SKIP $skip LIMIT $limit
+            """)
+    List<DocumentSummary> findDocumentSummariesPage(@Param("tenantCode") String tenantCode,
+                                                    @Param("systemType") String systemType,
+                                                    @Param("keyword") String keyword,
+                                                    @Param("status") String status,
+                                                    @Param("skip") long skip,
+                                                    @Param("limit") long limit);
+
+    /**
+     * 文档列表总数（与 findDocumentSummariesPage 同筛选条件，用于分页 total）
+     */
+    @Query("""
+            MATCH (c:DocumentChunk)
+             WHERE ($tenantCode = '0' OR ((c.tenantCode = $tenantCode AND c.systemType = $systemType) OR c.tenantCode = '0'))
+             WITH c.documentId AS documentId,
+                  collect(c {.fileName, .status, .chunkIndex, .chunkType,
+                            title: c.`metadata.title`}) AS metas
+             WITH documentId,
+                  coalesce([m IN metas WHERE m.chunkIndex >= 0 AND m.chunkType <> 'COARSE'][0],
+                           [m IN metas WHERE m.chunkIndex = -1][0], metas[0]) AS meta
+             WITH documentId, meta.fileName AS fileName, meta.title AS title, meta.status AS status
+             WHERE ($status IS NULL OR $status = '' OR status = $status)
+               AND ($keyword IS NULL OR $keyword = '' OR
+                    toLower(COALESCE(fileName, '')) CONTAINS toLower($keyword) OR
+                    toLower(COALESCE(title, '')) CONTAINS toLower($keyword))
+             RETURN COUNT(DISTINCT documentId)
+            """)
+    long countDocumentSummaries(@Param("tenantCode") String tenantCode,
+                                @Param("systemType") String systemType,
+                                @Param("keyword") String keyword,
+                                @Param("status") String status);
+
 }

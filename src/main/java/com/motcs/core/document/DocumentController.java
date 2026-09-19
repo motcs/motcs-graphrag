@@ -67,6 +67,32 @@ public class DocumentController {
     }
 
     /**
+     * 租户管理分页列表（管理表格专用）：GET /documents/v1/tenants/page
+     * 支持按租户名称模糊搜索（keyword）、分页（page/size，默认每页10条）。
+     * 注意：原 GET /tenants（全量）保留供各处下拉框使用，不受影响。
+     */
+    @GetMapping("/tenants/page")
+    public Mono<ResponseEntity<Map<String, Object>>> listTenantsPage(
+            @RequestParam(value = "keyword", required = false) String keyword,
+            Pageable pageable) {
+        String kw = ObjectUtils.isEmpty(keyword) ? "" : keyword.trim();
+        Mono<Long> totalMono = this.tenantConfigRepository.countSearch(kw).defaultIfEmpty(0L);
+        return Mono.zip(totalMono, this.tenantConfigRepository.searchPage(kw, pageable).collectList())
+                .map(t -> {
+                    long total = t.getT1();
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("content", t.getT2());
+                    result.put("number", pageable.getPageNumber());
+                    result.put("size", pageable.getPageSize());
+                    result.put("totalElements", total);
+                    int totalPages = pageable.getPageSize() == 0 ? 0
+                            : (int) ((total + pageable.getPageSize() - 1) / pageable.getPageSize());
+                    result.put("totalPages", totalPages);
+                    return ResponseEntity.ok(result);
+                });
+    }
+
+    /**
      * 新增租户（租户配置表，租户 0 为系统保留项不可添加）
      * POST /documents/v1/tenants  Body: {"tenantCode":"410725","tenantName":"长安区人大"}
      */
@@ -362,15 +388,21 @@ public class DocumentController {
     }
 
     /**
-     * 查询文档列表接口
-     * GET /documents/v1/list
+     * 查询文档分页列表接口（管理表格用）
+     * GET /documents/v1/list?tenantCode=&systemType=&keyword=&status=&page=0&size=10
+     * 支持租户/系统筛选 + 文件名标题关键字 + 状态筛选 + 分页（默认每页10条，按上传时间降序）
      */
     @GetMapping("/list")
-    public Mono<ResponseEntity<List<DocumentResponse>>> listDocuments(DocumentRequest request) {
-        log.info("收到文档列表查询请求: tenantCode={}", request.getTenantCode());
-        return this.documentService.queryDocuments(request.getTenantCode(), request.getSystemType())
-                .doOnNext(docs -> log.info("查询到 {} 个文档", docs.size()))
-                .map(ResponseEntity::ok);
+    public Mono<ResponseEntity<Map<String, Object>>> listDocuments(
+            DocumentRequest request,
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "10") int size) {
+        log.info("收到文档分页查询请求: tenantCode={}, systemType={}, keyword={}, status={}, page={}, size={}",
+                request.getTenantCode(), request.getSystemType(), keyword, status, page, size);
+        return this.documentService.queryDocumentsPage(request.getTenantCode(), request.getSystemType(),
+                keyword, status, page, size).map(ResponseEntity::ok);
     }
 
     /**

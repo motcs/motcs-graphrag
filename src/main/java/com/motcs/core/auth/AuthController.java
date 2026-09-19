@@ -95,9 +95,9 @@ public class AuthController {
     }
 
     @GetMapping("/api-keys")
-    @Operation(summary = "Key 列表（仅掩码，不含哈希与明文）")
-    public Flux<ApiKey> listApiKeys() {
-        return this.apiKeyService.list();
+    @Operation(summary = "Key 列表分页（含累计用量，按创建时间降序；默认每页10条）")
+    public Mono<ResponseEntity<Map<String, Object>>> listApiKeys(Pageable pageable) {
+        return this.apiKeyUsageService.listApiKeysPage(pageable).map(ResponseEntity::ok);
     }
 
     @PostMapping("/api-keys")
@@ -176,12 +176,13 @@ public class AuthController {
     }
 
     /**
-     * 用量监控总览：所有 Key 的用量汇总 + 全局合计（监控界面）
+     * 用量监控总览：查汇总表（按 Key 聚合快照）JOIN api_key，按 total_tokens 降序分页
+     * （默认每页10条），顶部统计卡片为全局合计。
      */
     @GetMapping("/usage-overview")
-    @Operation(summary = "用量监控总览：全部 Key 汇总 + 全局合计")
-    public Mono<ResponseEntity<Map<String, Object>>> apiKeyUsageOverview() {
-        return this.apiKeyUsageService.overview(this.listApiKeys()).map(ResponseEntity::ok);
+    @Operation(summary = "用量监控总览（分页，按使用量降序，默认每页10条）")
+    public Mono<ResponseEntity<Map<String, Object>>> apiKeyUsageOverview(Pageable pageable) {
+        return this.apiKeyUsageService.overview(pageable).map(ResponseEntity::ok);
     }
 
 }
