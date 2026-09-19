@@ -2088,6 +2088,9 @@ async function loadDocuments(page) {
                         ${canRetry ? `<button class="doc-retry-btn w-9 h-9 rounded-lg bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 flex items-center justify-center transition" title="重新上传">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                         </button>` : ''}
+                        ${(doc.docCode && doc.status !== 'PROCESSING') ? `<button class="doc-edit-btn w-9 h-9 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 flex items-center justify-center transition" data-doc-code="${escapeHtml(doc.docCode)}" data-doc-title="${escapeHtml(doc.title || doc.fileName || '')}" title="重新上传最新版">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                        </button>` : ''}
                         ${canDelete ? `<button class="doc-delete-btn w-9 h-9 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 flex items-center justify-center transition" data-doc-code="${escapeHtml(doc.docCode || '')}" data-file-name="${escapeHtml(doc.fileName || '')}" title="删除文档">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                         </button>` : ''}
@@ -2112,6 +2115,7 @@ async function loadDocuments(page) {
         list.querySelectorAll('.doc-card').forEach(card => {
             card.addEventListener('click', (e) => {
                 if (e.target.closest('.doc-delete-btn') || e.target.closest('.doc-retry-btn')
+                    || e.target.closest('.doc-edit-btn')
                     || e.target.closest('.doc-actions') || e.target.closest('.tag')) return;
                 showDocPreview(card.dataset.docCode, card.dataset.docName);
             });
@@ -2124,6 +2128,12 @@ async function loadDocuments(page) {
                 const fileName = btn.dataset.fileName;
                 const docName = card.querySelector('h3').textContent;
                 deleteDocument(docCode, fileName, docName, card);
+            });
+        });
+        list.querySelectorAll('.doc-edit-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                replaceDocumentFile(btn.dataset.docCode, btn.dataset.docTitle || '', btn);
             });
         });
         list.querySelectorAll('.doc-retry-btn').forEach(btn => {
@@ -2145,11 +2155,12 @@ async function loadDocuments(page) {
         showToast('加载文档列表失败: ' + err.message, 'error');
     }
 
-    // 有处理中的文档时，5秒后自动刷新
+    // 仅当当前页有处理中(PROCESSING)的文档时才自动轮询，否则不重复请求
     if (state.docsRefreshTimer) { clearTimeout(state.docsRefreshTimer); state.docsRefreshTimer = null; }
-    const hasProcessing = true; // 当前页只要在展示就保持轻量轮询
+    const hasProcessing = Array.from(list.querySelectorAll('.tag-yellow')).length > 0
+        || Array.from(list.querySelectorAll('.doc-card')).some(c => c.textContent.includes('处理中'));
     if (hasProcessing && !$('tab-documents').classList.contains('hidden')) {
-        state.docsRefreshTimer = setTimeout(() => loadDocuments(), 5000);
+        state.docsRefreshTimer = setTimeout(() => loadDocuments(state.docsPage), 5000);
     }
 }
 
@@ -2174,9 +2185,10 @@ $('docStatusFilter').addEventListener('change', e => { state.docStatusFilter = e
  */
 function showDocPreview(docCode, docName) {
     if (!docCode) { showToast('该文档无编码', 'error'); return; }
-    fetch(`${API_BASE}/list?tenantCode=${encodeURIComponent(getTenant())}&systemType=${encodeURIComponent(getSystem())}`)
-        .then(r => r.json()).then(docs => {
-            const doc = (docs || []).find(d => d.docCode === docCode);
+    fetch(`${API_BASE}/list?tenantCode=${encodeURIComponent(getTenant())}&systemType=${encodeURIComponent(getSystem())}&page=0&size=100`)
+        .then(r => r.json()).then(data => {
+            const docs = (data && data.content) ? data.content : (Array.isArray(data) ? data : []);
+            const doc = docs.find(d => d.docCode === docCode);
             if (!doc) { showToast('未找到文档', 'error'); return; }
             const statusText = doc.status === 'SUCCESS' ? '已完成' : doc.status === 'PROCESSING' ? '处理中' : doc.status === 'FAILED' ? '处理失败' : (doc.status || '-');
             const statusClass = doc.status === 'SUCCESS' ? 'text-green-400' : doc.status === 'PROCESSING' ? 'text-yellow-400' : doc.status === 'FAILED' ? 'text-red-400' : 'text-gray-400';
@@ -2200,6 +2212,52 @@ function showDocPreview(docCode, docName) {
             $('sourceModal').classList.add('flex');
         }).catch(() => showToast('加载文档信息失败', 'error'));
 }
+
+/**
+ * 重新上传最新版：打开弹窗，可同时修改名称和描述，选新文件提交
+ */
+let reuploadCtx = { docCode: null, btn: null };
+
+function replaceDocumentFile(docCode, oldTitle, btn) {
+    if (!docCode) { showToast('该文档无 docCode，无法更换', 'error'); return; }
+    reuploadCtx = { docCode, btn };
+    $('reuploadTitle').value = oldTitle || '';
+    $('reuploadDesc').value = '';
+    $('reuploadFile').value = '';
+    $('reuploadModal').classList.remove('hidden');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    $('reuploadClose')?.addEventListener('click', () => $('reuploadModal').classList.add('hidden'));
+    $('reuploadSubmit')?.addEventListener('click', async () => {
+        const file = $('reuploadFile').files[0];
+        if (!file) { showToast('请选择新文件', 'error'); return; }
+        const title = $('reuploadTitle').value.trim();
+        const desc = $('reuploadDesc').value.trim();
+        const btn = reuploadCtx.btn;
+        const original = btn ? btn.innerHTML : '';
+        $('reuploadModal').classList.add('hidden');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<span class="inline-block w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></span>'; }
+        try {
+            const fd = new FormData();
+            fd.append('file', file);
+            if (title) fd.append('title', title);
+            if (desc) fd.append('description', desc);
+            const res = await fetch(`${API_BASE}/${encodeURIComponent(reuploadCtx.docCode)}/file`, { method: 'PUT', body: fd });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showToast('新文件已上传，处理中...', 'success');
+                setTimeout(() => loadDocuments(state.docsPage), 3000);
+            } else {
+                showToast(data.errorMessage || data.message || '更换失败', 'error');
+                if (btn) { btn.disabled = false; btn.innerHTML = original; }
+            }
+        } catch (err) {
+            showToast('更换失败: ' + err.message, 'error');
+            if (btn) { btn.disabled = false; btn.innerHTML = original; }
+        }
+    });
+});
 
 /**
  * 删除文档（按 docCode 级联删除分片、知识点、关系、向量、文件）
