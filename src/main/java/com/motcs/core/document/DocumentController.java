@@ -4,11 +4,14 @@ import com.motcs.commons.ContextUtil;
 import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.utils.ByteArrayMultipartFile;
 import com.motcs.commons.utils.Utils;
+import com.motcs.core.document.info.DocumentInfoRepository;
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
 import com.motcs.core.knowledge.record.ChatMessage;
 import com.motcs.core.request.FileUploadRequest;
 import com.motcs.core.request.SessionRequest;
+import com.motcs.core.tenant.TenantConfig;
+import com.motcs.core.tenant.TenantConfigRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.data.domain.Pageable;
@@ -50,6 +53,7 @@ public class DocumentController {
     private final GraphRagService graphRagService;
     private final WebClient.Builder webClientBuilder;
     private final TenantConfigRepository tenantConfigRepository;
+    private final DocumentInfoRepository documentInfoRepository;
 
     /**
      * 租户下拉列表：固定附加"0 - 全部租户（超管）"选项，其余取自租户配置表（启用中）
@@ -419,6 +423,44 @@ public class DocumentController {
             result.put("message", "文档已删除");
             return ResponseEntity.ok(result);
         }));
+    }
+
+    /**
+     * 手动触发：从 Neo4j 迁移历史文档元数据到 document_info 表。
+     * POST /documents/v1/migrate-documents
+     */
+    @PostMapping("/migrate-documents")
+    public Mono<ResponseEntity<Map<String, Object>>> migrateDocuments() {
+        return this.documentService.migrateFromNeo4j().map(n -> {
+            Map<String, Object> body = new HashMap<>();
+            body.put("success", true);
+            body.put("message", "迁移完成，新增 " + n + " 条文档记录");
+            return ResponseEntity.ok(body);
+        });
+    }
+
+    /**
+     * 编辑文档：更换上传的文件（同 docCode）。
+     * 先删除老数据（Neo4j 分片/向量/原始文件/MySQL 记录），再上传新文件。
+     * PUT /documents/v1/{docCode}/file  Content-Type: multipart/form-data
+     */
+    @PutMapping(value = "/{docCode}/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Mono<ResponseEntity<DocumentResponse>> updateDocumentFile(
+            @PathVariable("docCode") String docCode,
+            @RequestPart("file") FilePart file,
+            @RequestPart(value = "title", required = false) String title,
+            @RequestPart(value = "description", required = false) String description) {
+        log.info("收到更换文档文件请求: docCode={}, fileName={}", docCode, file.filename());
+        return documentInfoRepository.findByDocCode(docCode)
+                .switchIfEmpty(Mono.error(RestServerException.withMsg("文档不存在: " + docCode)))
+                .flatMap(info -> file.content().collectList().map(buffers -> {
+                    byte[] fileBytes = Utils.concatenateBuffers(buffers);
+                    MediaType ct = file.headers().getContentType();
+                    return new ByteArrayMultipartFile("file", file.filename(),
+                            ct != null ? ct.toString() : "application/octet-stream", fileBytes);
+                }).flatMap(multipartFile -> buildAndUpload(multipartFile,
+                        title, description, docCode, info.getTenantCode(),
+                        info.getSystemType(), info.getUserId())));
     }
 
     /**

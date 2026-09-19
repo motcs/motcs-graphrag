@@ -1,4 +1,4 @@
-package com.motcs.core.auth.keys;
+package com.motcs.core.auth.keys.usage.summary;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.r2dbc.repository.Modifying;

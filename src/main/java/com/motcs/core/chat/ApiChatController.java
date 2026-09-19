@@ -3,7 +3,7 @@ package com.motcs.core.chat;
 import com.motcs.commons.ContextUtil;
 import com.motcs.commons.utils.Utils;
 import com.motcs.core.auth.keys.ApiKeyService;
-import com.motcs.core.auth.keys.ApiKeyUsageService;
+import com.motcs.core.auth.keys.usage.ApiKeyUsageService;
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
 import lombok.RequiredArgsConstructor;

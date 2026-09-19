@@ -126,3 +126,35 @@ CREATE TABLE IF NOT EXISTS api_key_usage_summary
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='API Key 用量汇总表（按 Key 聚合）';
 
+-- ============================================================
+-- 文档元数据表（MySQL R2DBC）：记录每个文档的上传元信息。
+-- 文档列表/搜索/筛选直接查本表（快），Neo4j 只负责向量检索与知识图谱。
+-- 删除文档时本表记录与 Neo4j 分片/向量/原始文件级联删除。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS document_info
+(
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    document_id   VARCHAR(64)  NOT NULL COMMENT '文档UUID（与Neo4j documentId一致）',
+    doc_code      VARCHAR(100) NOT NULL COMMENT '文档业务编码（唯一）',
+    tenant_code   VARCHAR(64)  NOT NULL COMMENT '租户编码',
+    system_type   VARCHAR(64)  NOT NULL COMMENT '系统类型',
+    file_name     VARCHAR(255) DEFAULT NULL COMMENT '文件名',
+    title         VARCHAR(255) DEFAULT NULL COMMENT '文档标题',
+    description   TEXT COMMENT '文档描述',
+    file_size     BIGINT       DEFAULT 0 COMMENT '文件大小（字节）',
+    file_path     VARCHAR(500) DEFAULT NULL COMMENT '文件存储路径',
+    status        VARCHAR(20)  DEFAULT 'PROCESSING' COMMENT '状态：PROCESSING/SUCCESS/FAILED',
+    error_message TEXT COMMENT '失败原因',
+    chunk_count   INT          DEFAULT 0 COMMENT '分片数',
+    enabled       TINYINT(1)   DEFAULT 0 COMMENT '是否启用参与检索',
+    user_id       VARCHAR(64)  DEFAULT NULL COMMENT '上传者',
+    created_time  DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '上传时间',
+    updated_time  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_doc_code (doc_code),
+    UNIQUE KEY uk_document_id (document_id),
+    KEY idx_doc_tenant_system (tenant_code, system_type),
+    KEY idx_doc_status (status),
+    KEY idx_doc_created (created_time)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='文档元数据表';
+

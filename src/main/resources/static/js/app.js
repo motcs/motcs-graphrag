@@ -2154,6 +2154,18 @@ async function loadDocuments(page) {
 }
 
 $('refreshDocs').addEventListener('click', () => loadDocuments(state.docsPage));
+$('migrateDocsBtn').addEventListener('click', async () => {
+    const btn = $('migrateDocsBtn');
+    const origin = btn.innerHTML;
+    btn.disabled = true; btn.textContent = '同步中...';
+    try {
+        const res = await fetch(`${API_BASE}/migrate-documents`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        alert(data.message || (res.ok ? '同步完成' : '同步失败'));
+        loadDocuments(0);
+    } catch (e) { alert('同步失败: ' + e.message); }
+    finally { btn.disabled = false; btn.innerHTML = origin; }
+});
 $('docSearch').addEventListener('input', e => { state.docSearch = e.target.value; loadDocuments(0); });
 $('docStatusFilter').addEventListener('change', e => { state.docStatusFilter = e.target.value; loadDocuments(0); });
 
@@ -2683,6 +2695,17 @@ function initAuth() {
     $('apiKeyCreateBtn').addEventListener('click', createApiKey);
     $('apiKeyCopyBtn').addEventListener('click', copyNewKey);
     $('monitorRefreshBtn').addEventListener('click', loadUsageOverview);
+    $('monitorRebuildBtn').addEventListener('click', async () => {
+        const btn = $('monitorRebuildBtn');
+        btn.disabled = true; btn.textContent = '同步中...';
+        try {
+            const res = await fetch(`${AUTH_BASE}/usage-summary/rebuild`, { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            alert(data.message || (res.ok ? '同步完成' : '同步失败'));
+            loadUsageOverview(0);
+        } catch (e) { alert('同步失败: ' + e.message); }
+        finally { btn.disabled = false; btn.textContent = '同步历史数据'; }
+    });
     $('tenantAddBtn').addEventListener('click', addTenant);
     $('tenantSearch').addEventListener('input', () => loadTenants(0));
 }

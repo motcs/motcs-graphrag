@@ -1,4 +1,4 @@
-package com.motcs.core.document;
+package com.motcs.core.tenant;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;

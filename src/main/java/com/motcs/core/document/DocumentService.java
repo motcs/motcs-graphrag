@@ -4,6 +4,8 @@ import com.motcs.commons.utils.AnyDocConverterUtil;
 import com.motcs.commons.utils.EnterpriseChunker;
 import com.motcs.commons.utils.FileUtils;
 import com.motcs.commons.utils.Utils;
+import com.motcs.core.document.info.DocumentInfo;
+import com.motcs.core.document.info.DocumentInfoRepository;
 import com.motcs.core.knowledge.KnowledgeEntity;
 import com.motcs.core.knowledge.chunk.DocumentChunk;
 import com.motcs.core.knowledge.chunk.DocumentChunkRepository;
@@ -21,6 +23,9 @@ import reactor.core.scheduler.Schedulers;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.util.StringUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -45,6 +50,7 @@ public class DocumentService {
     private final AnyDocConverterUtil anyDocConverter;
     private final DocumentChunkRepository chunkRepository;
     private final ChatMessageRepository chatMessageRepository;
+    private final DocumentInfoRepository documentInfoRepository;
 
     @Value("${app.file.upload-dir:./uploads}")
     private String uploadDir;
@@ -80,6 +86,28 @@ public class DocumentService {
                     .systemType(request.getSystemType()).enabled(false)
                     .fileName(request.getFileName()).userId(request.getUserId())
                     .content("").chunkIndex(-1).status("PROCESSING").build());
+
+            // 同时写入 MySQL 文档元数据表（列表查询走 MySQL，不再每次扫 Neo4j）
+            try {
+                DocumentInfo info = DocumentInfo.builder()
+                        .documentId(documentId)
+                        .docCode(request.getDocCode())
+                        .tenantCode(request.getTenantCode())
+                        .systemType(request.getSystemType())
+                        .fileName(request.getFileName())
+                        .title(StringUtils.hasLength(request.getTitle()) ? request.getTitle() : request.getFileName())
+                        .description(request.getDescription())
+                        .fileSize(file.getSize())
+                        .filePath(filePath)
+                        .status("PROCESSING")
+                        .chunkCount(0)
+                        .enabled(false)
+                        .userId(request.getUserId())
+                        .build();
+                documentInfoRepository.save(info).block();
+            } catch (Exception e) {
+                log.warn("写入 document_info 失败（不影响主流程）: {}", e.getMessage());
+            }
 
             UploadContext context = new UploadContext();
             context.setDocumentId(documentId);
@@ -185,6 +213,12 @@ public class DocumentService {
 
                 log.info("文档处理完成: documentId={}, fileName={}, 细粒度={}, 粗粒度={}",
                         documentId, request.getFileName(), fineChunks.size(), coarseCount);
+                // 更新 MySQL 文档元数据为 SUCCESS
+                try {
+                    documentInfoRepository.markSuccess(request.getDocCode(), fineChunks.size()).block();
+                } catch (Exception ex) {
+                    log.warn("更新 document_info 为 SUCCESS 失败: {}", ex.getMessage());
+                }
             } catch (Exception e) {
                 log.error("文档异步处理失败: {}", e.getMessage(), e);
                 failUpload(context, e.getMessage());
@@ -210,6 +244,15 @@ public class DocumentService {
                 chunkRepository.updateStatusByDocumentId(context.getDocumentId(), "FAILED", errorMessage);
                 log.info("已标记 documentId={} 为 FAILED: {}", context.getDocumentId(), errorMessage);
             }
+            // 同步更新 MySQL 文档元数据为 FAILED
+            try {
+                String docCode = context.getResponse() != null ? context.getResponse().getDocCode() : null;
+                if (docCode != null) {
+                    documentInfoRepository.markFailed(docCode, errorMessage).block();
+                }
+            } catch (Exception ex) {
+                log.warn("更新 document_info 为 FAILED 失败: {}", ex.getMessage());
+            }
         } catch (Exception ex) {
             log.warn("失败清理异常: {}", ex.getMessage());
         }
@@ -230,6 +273,8 @@ public class DocumentService {
      */
     private void deleteByDocCodeSync(String docCode) {
         try {
+            // 先删 MySQL 元数据记录（doc_code 唯一键，否则新插入会冲突）
+            try { documentInfoRepository.deleteByDocCode(docCode).block(); } catch (Exception ignore) {}
             List<String> chunkIds = this.chunkRepository.findChunkIdsByDocCode(docCode);
             if (!chunkIds.isEmpty()) this.vectorStore.delete(chunkIds);
             this.chunkRepository.deleteChunksByDocCode(docCode);
@@ -249,6 +294,13 @@ public class DocumentService {
      */
     public Mono<Void> deleteByDocCode(String docCode) {
         return Mono.fromCallable(() -> {
+            // 0. 删除 MySQL 文档元数据记录
+            try {
+                documentInfoRepository.deleteByDocCode(docCode).block();
+                log.info("已删除 document_info 记录: docCode={}", docCode);
+            } catch (Exception e) {
+                log.warn("删除 document_info 记录失败: {}", e.getMessage());
+            }
             // 1. 查询分片ID
             List<String> chunkIds = chunkRepository.findChunkIdsByDocCode(docCode);
             if (chunkIds.isEmpty()) {
@@ -424,25 +476,25 @@ public class DocumentService {
     public Mono<Map<String, Object>> queryDocumentsPage(String tenantCode, String systemType,
                                                         String keyword, String status,
                                                         int page, int size) {
-        String tc = tenantCode != null && !tenantCode.isBlank() ? tenantCode : "0";
+        String tc = tenantCode != null && !tenantCode.isBlank() && !"0".equals(tenantCode) ? tenantCode : "";
         String st = systemType != null && !systemType.isBlank() ? systemType : "";
         String kw = keyword != null ? keyword.trim() : "";
         String stFilter = (status == null || status.isBlank() || "all".equalsIgnoreCase(status)) ? "" : status;
-        long skip = (long) page * size;
-        return Mono.fromCallable(() -> {
-            long total = this.chunkRepository.countDocumentSummaries(tc, st, kw, stFilter);
-            List<DocumentResponse> content = this.chunkRepository
-                    .findDocumentSummariesPage(tc, st, kw, stFilter, skip, size)
-                    .stream().map(this::toResponse).collect(Collectors.toList());
+        Pageable pageable = PageRequest.of(page, size);
+        Mono<Long> totalMono = documentInfoRepository.countSearch(tc, st, kw, stFilter).defaultIfEmpty(0L);
+        Mono<List<DocumentResponse>> rowsMono = documentInfoRepository.searchPage(tc, st, kw, stFilter, pageable)
+                .collectList().map(list -> list.stream().map(this::toResponseFromInfo).collect(Collectors.toList()));
+        return Mono.zip(totalMono, rowsMono).map(t -> {
+            long total = t.getT1();
             Map<String, Object> result = new HashMap<>();
-            result.put("content", content);
+            result.put("content", t.getT2());
             result.put("number", page);
             result.put("size", size);
             result.put("totalElements", total);
             int totalPages = size == 0 ? 0 : (int) ((total + size - 1) / size);
             result.put("totalPages", totalPages);
             return result;
-        }).subscribeOn(Schedulers.boundedElastic()).onErrorResume(e -> {
+        }).onErrorResume(e -> {
             log.error("分页查询文档列表失败: {}", e.getMessage(), e);
             Map<String, Object> empty = new HashMap<>();
             empty.put("content", List.of());
@@ -452,6 +504,27 @@ public class DocumentService {
             empty.put("totalPages", 0);
             return Mono.just(empty);
         });
+    }
+
+    /** DocumentInfo -> DocumentResponse 映射 */
+    private DocumentResponse toResponseFromInfo(DocumentInfo info) {
+        return DocumentResponse.builder()
+                .documentId(FileUtils.parseDocumentId(info.getDocumentId()))
+                .docCode(info.getDocCode())
+                .tenantCode(info.getTenantCode())
+                .systemType(info.getSystemType())
+                .enabled(info.getEnabled() != null && info.getEnabled())
+                .fileName(info.getFileName())
+                .title(info.getTitle() != null ? info.getTitle() : info.getFileName())
+                .description(info.getDescription())
+                .chunkCount(info.getChunkCount() != null ? info.getChunkCount() : 0)
+                .status(info.getStatus() != null ? info.getStatus() : "UNKNOWN")
+                .errorMessage(info.getErrorMessage())
+                .fileSize(info.getFileSize() != null ? info.getFileSize() : 0L)
+                .uploadTime(info.getCreatedTime())
+                .filePath(info.getFilePath())
+                .userId(info.getUserId())
+                .build();
     }
 
     /** DocumentSummary -> DocumentResponse 映射（与原 queryDocuments 一致） */
@@ -478,17 +551,75 @@ public class DocumentService {
      * 按租户统计文档数和分片数（轻量聚合查询，不返回明细）
      */
     public Mono<DocumentStatsResponse> getStats(DocumentRequest request) {
+        String tenantCode = (request != null && request.getTenantCode() != null
+                && !request.getTenantCode().isBlank() && !"0".equals(request.getTenantCode()))
+                ? request.getTenantCode() : "";
+        Mono<Long> docsMono = documentInfoRepository.countSuccessByTenant(tenantCode).defaultIfEmpty(0L);
+        Mono<Long> chunksMono = documentInfoRepository.sumChunksByTenant(tenantCode).defaultIfEmpty(0L);
+        return Mono.zip(docsMono, chunksMono)
+                .map(t -> DocumentStatsResponse.builder().docCount(t.getT1()).chunkCount(t.getT2()).build())
+                .onErrorResume(e -> {
+                    log.error("统计查询失败: {}", e.getMessage());
+                    return Mono.just(DocumentStatsResponse.builder().docCount(0L).chunkCount(0L).build());
+                });
+    }
+
+    /**
+     * 启动时：若 document_info 为空，从 Neo4j 聚合历史文档数据迁移到 MySQL。
+     */
+    /**
+     * 从 Neo4j 全量迁移文档元数据到 document_info（跳过已存在的 docCode）。
+     */
+    public Mono<Long> migrateFromNeo4j() {
         return Mono.fromCallable(() -> {
-            String tenantCode = request != null ? request.getTenantCode() : null;
-            DocumentStatsResponse stats = chunkRepository.countByTenant(tenantCode);
-            if (stats == null) {
-                stats = DocumentStatsResponse.builder().docCount(0L).chunkCount(0L).build();
+            log.info("开始从 Neo4j 迁移历史文档数据到 document_info...");
+            List<DocumentSummary> summaries = chunkRepository.findDocumentSummaries("0", "");
+            long n = 0;
+            for (DocumentSummary ds : summaries) {
+                try {
+                    if (ds.docCode() == null) continue;
+                    // 已存在则跳过（避免重复）
+                    Boolean exists = documentInfoRepository.existsByDocCode(ds.docCode()).block();
+                    if (Boolean.TRUE.equals(exists)) continue;
+                    DocumentInfo info = DocumentInfo.builder()
+                            .documentId(ds.documentId())
+                            .docCode(ds.docCode())
+                            .tenantCode(ds.tenantCode() != null ? ds.tenantCode() : "default")
+                            .systemType(ds.systemType() != null ? ds.systemType() : "default")
+                            .fileName(ds.fileName())
+                            .title(ds.title() != null ? ds.title() : ds.fileName())
+                            .description(ds.description())
+                            .fileSize(ds.fileSize() != null ? ds.fileSize() : 0L)
+                            .status(ds.status() != null ? ds.status() : "SUCCESS")
+                            .errorMessage(ds.errorMessage())
+                            .chunkCount(ds.chunkCount() != null ? ds.chunkCount().intValue() : 0)
+                            .enabled(ds.enabled() != null && ds.enabled())
+                            .userId(ds.userId())
+                            .createdTime(FileUtils.parseUploadTime(ds.uploadTime()))
+                            .build();
+                    documentInfoRepository.save(info).block();
+                    n++;
+                } catch (Exception e) {
+                    log.warn("迁移文档失败 docCode={}: {}", ds.docCode(), e.getMessage());
+                }
             }
-            return stats;
-        }).subscribeOn(Schedulers.boundedElastic()).onErrorResume(e -> {
-            log.error("统计查询失败: {}", e.getMessage());
-            return Mono.just(DocumentStatsResponse.builder().docCount(0L).chunkCount(0L).build());
-        });
+            log.info("历史文档迁移完成，共新增 {} 条", n);
+            return n;
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void migrateIfEmpty() {
+        try {
+            Long cnt = documentInfoRepository.countAll().block();
+            if (cnt != null && cnt > 0) {
+                log.info("document_info 已有 {} 条记录，跳过历史迁移", cnt);
+                return;
+            }
+            migrateFromNeo4j().block();
+        } catch (Exception e) {
+            log.warn("document_info 历史迁移失败: {}", e.getMessage());
+        }
     }
 
     /**

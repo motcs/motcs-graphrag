@@ -1,6 +1,8 @@
-package com.motcs.core.auth.keys;
+package com.motcs.core.auth.keys.usage;
 
 import com.motcs.commons.utils.Utils;
+import com.motcs.core.auth.keys.usage.summary.ApiKeyUsageSummaryRepository;
+import com.motcs.core.auth.keys.usage.summary.UsageOverviewRow;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -42,7 +44,7 @@ public class ApiKeyUsageService {
     @EventListener(ApplicationReadyEvent.class)
     public void initSummaryIfEmpty() {
         summaryRepository.countSummary().defaultIfEmpty(0L).flatMap(cnt -> {
-            if (cnt != null && cnt > 0) {
+            if (cnt > 0) {
                 return Mono.empty();
             }
             log.info("用量汇总表为空，开始从 api_key_usage 明细表重建...");
@@ -124,6 +126,17 @@ public class ApiKeyUsageService {
             result.put("totalPages", totalPages);
             return result;
         });
+    }
+
+    /**
+     * 手动重建汇总表：清空后从明细表全量聚合。
+     * 用于升级后把历史用量灌进汇总表，或数据不一致时修复。
+     */
+    public Mono<Long> rebuildSummary() {
+        log.info("手动触发用量汇总表重建...");
+        return summaryRepository.truncate()
+                .then(summaryRepository.rebuildFromDetail())
+                .doOnSuccess(n -> log.info("用量汇总表重建完成，共 {} 个 Key", n));
     }
 
     /**

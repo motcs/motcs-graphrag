@@ -1,4 +1,4 @@
-package com.motcs.core.auth.keys;
+package com.motcs.core.auth.keys.usage.summary;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 

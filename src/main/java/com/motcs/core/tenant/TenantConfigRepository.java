@@ -1,4 +1,4 @@
-package com.motcs.core.document;
+package com.motcs.core.tenant;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.r2dbc.repository.Query;

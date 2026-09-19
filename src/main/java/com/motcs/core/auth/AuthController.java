@@ -4,8 +4,8 @@ import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.utils.Utils;
 import com.motcs.core.auth.keys.ApiKey;
 import com.motcs.core.auth.keys.ApiKeyService;
-import com.motcs.core.auth.keys.ApiKeyUsage;
-import com.motcs.core.auth.keys.ApiKeyUsageService;
+import com.motcs.core.auth.keys.usage.ApiKeyUsage;
+import com.motcs.core.auth.keys.usage.ApiKeyUsageService;
 import com.motcs.core.auth.token.AuthenticationToken;
 import com.motcs.core.auth.token.TokenStore;
 import com.motcs.core.request.ApiKeyRequest;
@@ -183,6 +183,26 @@ public class AuthController {
     @Operation(summary = "用量监控总览（分页，按使用量降序，默认每页10条）")
     public Mono<ResponseEntity<Map<String, Object>>> apiKeyUsageOverview(Pageable pageable) {
         return this.apiKeyUsageService.overview(pageable).map(ResponseEntity::ok);
+    }
+
+    /**
+     * 手动重建用量汇总表：从 api_key_usage 明细表全量聚合到汇总表。
+     * 升级后首次使用时调用一次，把历史用量灌进来。
+     */
+    @PostMapping("/usage-summary/rebuild")
+    @Operation(summary = "重建用量汇总表（从明细表聚合历史数据）")
+    public Mono<ResponseEntity<Map<String, Object>>> rebuildUsageSummary() {
+        return this.apiKeyUsageService.rebuildSummary().map(n -> {
+            Map<String, Object> body = new HashMap<>();
+            body.put("success", true);
+            body.put("message", "重建完成，共 " + n + " 个 Key");
+            return ResponseEntity.ok(body);
+        }).onErrorResume(e -> {
+            Map<String, Object> body = new HashMap<>();
+            body.put("success", false);
+            body.put("message", "重建失败: " + e.getMessage());
+            return Mono.just(ResponseEntity.internalServerError().body(body));
+        });
     }
 
 }
