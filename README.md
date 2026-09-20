@@ -35,6 +35,9 @@
 - 多租户 + 多系统类型隔离；超管（租户 `0`）上传的文档对所有租户开放，用户仅可删除自己上传的文档
 - 文档统计接口（轻量聚合查询，百万级文档无压力）
 - 上传失败文档支持重新上传，表单自动反填
+- **业务编码 docCode 后端自动生成**：规则 `yyyyMMdd` + 文件类型首字母大写（docx→D、xlsx→X、ppt→P、txt→T，无扩展名→F）+ 3 位序号（例：`20260920D001`）；进程锁串行化"查询当天同类型最大编码 +1 与落库"，避免并发重复
+- **落盘改名与原文件名映射**：本地存储改名为 `docCode.扩展名`（界面始终显示原文件名）；`document_info.stored_file_name` 记录磁盘名，切分/图谱/向量/删除均使用存储名；历史数据启动时自动按 `file_path` 回填
+- **卡住自动重跑**：`PROCESSING` 超过 2 小时且未重跑过的文档，后台只清理向量库与图谱、按磁盘文件重新处理一次（`retry_count` 标记，仅自动重跑一次）；找不到源文件则标记失败并记录原因；`PROCESSING` 状态文档也可删除
 - **可搜索租户/系统类型下拉**：顶部全局、上传弹窗、URL 上传、文档管理筛选、API Key 生成的租户与系统类型均为下拉选择
     - 租户选项来自租户配置表（`tenant_config`，接口 `GET /documents/v1/tenants`），`0` 为超管全部租户
     - **租户下拉支持关键字模糊搜索**：输入租户名称关键字即时过滤（如输入"长安"只显示含"长安"的租户），后期租户配置多时无需逐条翻找；API Key 生成场景不含租户 `0`（不允许绑定超管全局租户）
@@ -235,7 +238,7 @@ services:
 
 | 变量名              | 默认值                                      | 说明                       |
 |---------------------|---------------------------------------------|----------------------------|
-| `FILE_UPLOAD_DIR`   | `./uploads`                                 | 文件上传目录               |
+| `FILE_UPLOAD_DIR`   | `./uploads`                                 | 文件上传目录（容器部署建议挂载到宿主机持久化，如 `/mnt/graphrag/uploads`） |
 | `FILE_MAX_SIZE`     | `52428800`                                  | 最大文件大小（50MB）       |
 | `SUPPORTED_FORMATS` | `pdf,doc,docx,xls,xlsx,ppt,pptx,txt,csv,md` | 支持的文件格式（逗号分隔） |
 
@@ -257,6 +260,11 @@ API Key 使用监控依赖一张 MySQL 表 `api_key_usage`（首次部署时自�
 - 记录调用方用户编码、会话 ID、使用的模型、调用时间
 - 管理端按 Key 查看汇总（调用次数 + token 总量）与每次对话明细（时间倒序分页）
 - Key 停用期间不产生新记录，历史记录保留
+
+文档元数据表 `document_info` 由实体自动建表，关键列：
+
+- `file_name`：原文件名（界面展示用）；`stored_file_name`：本地存储名（`docCode.扩展名`，切分/图谱/向量/删除使用），历史数据启动时按 `file_path` 自动回填
+- `retry_count`：卡住自动重跑标记（0 未重跑，1 已重跑一次），配合启动任务避免文档长期停留在处理中
 
 ---
 
@@ -386,7 +394,7 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 | 方法     | 路径                              | 权限   | 说明                                                                                               |
 |----------|-----------------------------------|--------|----------------------------------------------------------------------------------------------------|
-| `POST`   | `/documents/v1/upload`            | 仅登录 | 上传文档（multipart/form-data，字段：file/title/description/docCode/tenantCode/systemType/userId） |
+| `POST`   | `/documents/v1/upload`            | 仅登录 | 上传文档（multipart/form-data，字段：file/title/description/tenantCode/systemType/userId；`docCode` 由后端自动生成，前端无需传） |
 | `POST`   | `/documents/v1/upload/url`        | 仅登录 | 通过 URL 上传文档（Body：FileUploadRequest）                                                       |
 | `GET`    | `/documents/v1/list`              | 仅登录 | 查询文档列表（tenantCode + systemType；租户 0 查全部）                                             |
 | `DELETE` | `/documents/v1/docCode/{docCode}` | 仅登录 | 按 docCode 删除文档（级联删除分片/向量/实体/关系/文件）                                            |
