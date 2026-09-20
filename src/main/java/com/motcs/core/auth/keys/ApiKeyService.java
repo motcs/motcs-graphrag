@@ -68,6 +68,7 @@ public class ApiKeyService {
         String cacheKey = CACHE_KEY_PREFIX + hash;
         return redisTemplate.opsForValue().get(cacheKey).cast(ApiKey.class)
                 .switchIfEmpty(this.apiKeyRepository.findEnabledByKeyHash(hash)
+                        .switchIfEmpty(Mono.empty())
                         .filter(k -> Boolean.TRUE.equals(k.getEnabled()))
                         .flatMap(apiKey -> redisTemplate.opsForValue()
                                 .set(cacheKey, apiKey, CACHE_TTL).thenReturn(apiKey)));

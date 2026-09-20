@@ -2,11 +2,9 @@ package com.motcs.core.auth.keys;
 
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
-import com.motcs.core.knowledge.record.ChatSession;
 import io.swagger.v3.oas.annotations.Operation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -39,12 +37,12 @@ public class ApiKeyController {
 
     @GetMapping
     @Operation(summary = "会话列表")
-    public Mono<ResponseEntity<Page<ChatSession>>> listSessions(ServerWebExchange exchange,
-                                                                @RequestParam(value = "userId", required = false) String userId, Pageable pageable) {
+    public Mono<ResponseEntity<?>> listSessions(ServerWebExchange exchange,
+                                                @RequestParam(value = "userId", required = false) String userId, Pageable pageable) {
         return this.apiKeyService.resolveApiKey(exchange).flatMap(apiKey ->
                         this.graphRagService.getSessionsByApiKey(apiKey, userId, pageable)
-                                .map(ResponseEntity::ok))
-                .switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(null)));
+                                .<ResponseEntity<?>>map(ResponseEntity::ok))
+                .switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(UNAUTHORIZED_BODY)));
     }
 
     @GetMapping("/session")

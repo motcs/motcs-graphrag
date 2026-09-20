@@ -1006,3 +1006,10 @@ body {
         opacity: 0;
     }
 }
+
+/* 移动端隐藏列 */
+@media (max-width: 768px) {
+  .hide-mobile {
+    display: none !important;
+  }
+}

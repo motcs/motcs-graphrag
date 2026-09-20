@@ -681,16 +681,16 @@ async function loadUsageOverview(page) {
                 ? '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-emerald-500/15 text-emerald-400">启用</span>'
                 : '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>';
             tr.innerHTML = `
-                <td class="py-2.5 pr-3 font-mono text-xs text-gray-300">${escapeHtml(k.keyPrefix || k.prefix || 'sk-…')}…</td>
-                <td class="py-2.5 pr-3 text-xs text-gray-300">${escapeHtml(k.name || '-')}</td>
+                <td class="py-2.5 pr-3 font-mono text-xs text-gray-300 hide-mobile">${escapeHtml(k.keyPrefix || k.prefix || 'sk-…')}…</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-300 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '-')}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(k.systemType || '-')}</td>
                 <td class="py-2.5 pr-3">${enabledBadge}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-300">${k.totalCalls ?? 0}</td>
-                <td class="py-2.5 pr-3 text-right text-xs text-gray-400">${(k.promptTokens ?? 0).toLocaleString()}</td>
-                <td class="py-2.5 pr-3 text-right text-xs text-gray-400">${(k.completionTokens ?? 0).toLocaleString()}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.promptTokens ?? 0).toLocaleString()}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.completionTokens ?? 0).toLocaleString()}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-300 font-medium">${(k.totalTokens ?? 0).toLocaleString()}</td>
-                <td class="py-2.5 pr-3 text-xs text-gray-400">${k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未使用'}</td>
-                <td class="py-2.5 text-right">
+                <td class="py-2.5 pr-3 text-xs text-gray-400 hide-mobile">${k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未使用'}</td>
+                <td class="py-2.5 text-right hide-mobile">
                     <button onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')" class="text-xs px-2 py-1 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition">明细</button>
                 </td>`;
             tbody.appendChild(tr);
@@ -2838,15 +2838,14 @@ async function loadApiKeys(page) {
             const usageText = `${totalCalls} 次 / ${totalTokens.toLocaleString()} token`;
             const usageTitle = `输入 ${(k.promptTokens||0).toLocaleString()} · 输出 ${(k.completionTokens||0).toLocaleString()} token`;
             tr.innerHTML = `
-                <td class="py-2.5 pr-3">${escapeHtml(k.name || '')}</td>
-                <td class="py-2.5 pr-3 font-mono text-xs text-gray-400">${escapeHtml(k.keyPrefix || '')}</td>
+                <td class="py-2.5 pr-3 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '')}</td>
+                <td class="py-2.5 pr-3 font-mono text-xs text-gray-400 hide-mobile">${escapeHtml(k.keyPrefix || '')}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(k.systemType || '-')}</td>
-                <td class="py-2.5 pr-3">${k.enabled ? '<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">启用</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-400">停用</span>'}</td>
+                <td class="py-2.5 pr-3">${k.enabled ? '<span class="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400">启用</span>' : '<span class="text-xs px-2.5 py-1 rounded-full bg-red-500/10 text-red-400">停用</span>'}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400" title="${usageTitle}">${usageText}</td>
-                <td class="py-2.5 pr-3 text-xs text-gray-400">${k.createdTime ? formatTime(k.createdTime) : '-'}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400 hide-mobile">${k.createdTime ? formatTime(k.createdTime) : '-'}</td>
                 <td class="py-2.5 text-right whitespace-nowrap">
                     <button onclick="toggleApiKey(${k.id}, ${k.enabled})" class="text-xs px-2 py-1 rounded-lg ${k.enabled ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'} transition mr-1">${k.enabled ? '停用' : '启用'}</button>
-                    <button onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')" class="text-xs px-2 py-1 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition mr-1">用量</button>
                     <button onclick="deleteApiKey(${k.id})" class="text-xs px-2 py-1 rounded-lg text-red-400 hover:bg-red-500/10 transition">删除</button>
                 </td>`;
             tbody.appendChild(tr);
