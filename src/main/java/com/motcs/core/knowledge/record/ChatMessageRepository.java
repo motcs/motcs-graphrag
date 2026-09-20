@@ -60,17 +60,6 @@ public interface ChatMessageRepository extends ReactiveCrudRepository<ChatMessag
     // ============ API Key 维度（对话归属校验与检索） ============
 
     /**
-     * 按 API Key + 用户/租户/系统（可选）查询最近对话记录（倒序）
-     * 条件为空时不过滤：调用方需将 blank 转为 null 传入
-     */
-    @Query("SELECT * FROM chat_message WHERE api_key_id = :apiKeyId "
-            + "AND (:userId IS NULL OR :userId = '' OR user_id = :userId) "
-            + "AND (:tenantCode IS NULL OR :tenantCode = '' OR tenant_code = :tenantCode) "
-            + "AND (:systemType IS NULL OR :systemType = '' OR system_type = :systemType) "
-            + "ORDER BY create_time DESC LIMIT 500")
-    Flux<ChatMessage> findByApiKey(Long apiKeyId, String userId, String tenantCode, String systemType);
-
-    /**
      * 按会话ID + API Key 查询对话消息（正序，校验归属）
      */
     @Query("SELECT * FROM chat_message WHERE session_id = :sessionId AND api_key_id = :apiKeyId ORDER BY create_time")

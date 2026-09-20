@@ -87,10 +87,6 @@ public class GraphRagService extends DatabaseService {
      */
     private static final long REWRITE_TIMEOUT_MS = 800;
     /**
-     * 改写结果缓存（问题 → 查询词），重复问题不再重复调用 AI；简单防膨胀（>200 清空）
-     */
-    private final Map<String, List<String>> rewriteCache = new ConcurrentHashMap<>();
-    /**
      * 系统提示词（含多轮历史和知识库上下文）
      */
     private static final String SYSTEM_PROMPT = """
@@ -121,8 +117,10 @@ public class GraphRagService extends DatabaseService {
             【知识库上下文】
             {context}
             """;
-    @Value("${app.ai.provider:zhipu}")
-    private String provider;
+    /**
+     * 改写结果缓存（问题 → 查询词），重复问题不再重复调用 AI；简单防膨胀（>200 清空）
+     */
+    private final Map<String, List<String>> rewriteCache = new ConcurrentHashMap<>();
     private final ChatClient chatClient;
     private final Neo4jClient neo4jClient;
     private final VectorStore vectorStore;
@@ -132,6 +130,8 @@ public class GraphRagService extends DatabaseService {
     private final ChatMessageRepository chatMessageRepository;
     private final ChatSessionRepository chatSessionRepository;
     private final ChatSessionSummaryRepository summaryRepository;
+    @Value("${app.ai.provider:zhipu}")
+    private String provider;
 
     /**
      * GraphRAG 问答（含多轮上下文 + 来源返回）
@@ -143,7 +143,7 @@ public class GraphRagService extends DatabaseService {
      * @return QueryResult（来源列表 + 回答 token 流）
      */
     public Mono<QueryResult> graphRagQueryStream(GraphRagRequest ragQuery) {
-        log.info("收到GraphRAG查询: question={}, userId={}, sessionId={}, tenant={}, system={}",
+        log.debug("收到GraphRAG查询: question={}, userId={}, sessionId={}, tenant={}, system={}",
                 ragQuery.getQuestion(), ragQuery.getUserId(), ragQuery.getSessionId(),
                 ragQuery.getTenantCode(), ragQuery.getSystemType());
         Mono<String> context = buildHistoryContext(ragQuery.getSessionId());
@@ -172,12 +172,6 @@ public class GraphRagService extends DatabaseService {
             }
             return buildNoResultQueryResult(ragQuery, enriched.historyContext(), enriched.rewriteDisplay());
         }).doOnError(e -> log.error("GraphRAG查询出错: {}", e.getMessage(), e));
-    }
-
-    /**
-     * 检索上下文 + 改写展示词 内部封装（供两个分支共用）
-     */
-    private record Enriched(ContextResult ctx, String historyContext, String rewriteDisplay) {
     }
 
     /**
@@ -254,7 +248,7 @@ public class GraphRagService extends DatabaseService {
             // 改写词 + 原始问题兜底（去重），多查询提高召回
             List<String> merged = new ArrayList<>(queries);
             if (!merged.contains(question)) merged.add(question);
-            log.info("检索查询词优化: {} → {}", question, merged);
+            log.debug("检索查询词优化: {} → {}", question, merged);
             if (rewriteCache.size() > 200) rewriteCache.clear();
             rewriteCache.put(question, merged);
             return merged;
@@ -271,7 +265,7 @@ public class GraphRagService extends DatabaseService {
     private void applyModelOptions(ChatClient.ChatClientRequestSpec spec, String model) {
         if (StringUtils.hasLength(model)) {
             spec.options(OpenAiChatOptions.builder().model(model));
-            log.info("本次问答使用用户选择模型: {}", model);
+            log.debug("本次问答使用用户选择模型: {}", model);
         }
     }
 
@@ -341,7 +335,7 @@ public class GraphRagService extends DatabaseService {
 
         // 租户0（超管全局文档）不限系统类型；指定租户的文档按系统类型过滤
         String filterExpr = getFilterExpr(request);
-        log.info("搜索条件：{}", filterExpr);
+        log.debug("搜索条件：{}", filterExpr);
         // 多查询词逐一检索（改写词 + 原始问题），按 文档+分片 去重合并，提高召回
         List<Document> vectorDocs = new ArrayList<>();
         Set<String> seen = new HashSet<>();
@@ -360,7 +354,7 @@ public class GraphRagService extends DatabaseService {
         }
 
         if (vectorDocs.isEmpty()) {
-            log.info("向量检索未找到相关文档");
+            log.debug("向量检索未找到相关文档");
             return null;
         }
 
@@ -372,7 +366,7 @@ public class GraphRagService extends DatabaseService {
                 return t != null && request.getTenantCode().equals(String.valueOf(t)) ? 0 : 1;
             })).toList();
         }
-        log.info("向量检索找到 {} 个相关文档（查询词{}个，租户{}优先）", vectorDocs.size(), queries.size(), request.getTenantCode());
+        log.debug("向量检索找到 {} 个相关文档（查询词{}个，租户{}优先）", vectorDocs.size(), queries.size(), request.getTenantCode());
 
         // 2、提取知识库来源（供前端展示和点击查看原文）
         List<Map<String, Object>> sources = vectorDocs.stream().map(doc -> {
@@ -401,7 +395,7 @@ public class GraphRagService extends DatabaseService {
             if (!parentChunks.isEmpty()) {
                 coarseContext = parentChunks.stream().map(DocumentChunk::getContent)
                         .filter(Objects::nonNull).distinct().collect(Collectors.joining("\n---\n"));
-                log.info("联动 {} 个父级粗粒度切片补全上下文", parentChunks.size());
+                log.debug("联动 {} 个父级粗粒度切片补全上下文", parentChunks.size());
             }
         }
 
@@ -409,7 +403,7 @@ public class GraphRagService extends DatabaseService {
         List<String> chunkIds = vectorDocs.stream().map(Document::getId).toList();
         List<GraphRagResult> multiHopResults =
                 this.chunkRepository.multiHopRetrieve(chunkIds, request.getTenantCode(), request.getSystemType(), 30);
-        log.info("多跳图谱召回找到 {} 个关联文档块", multiHopResults.size());
+        log.debug("多跳图谱召回找到 {} 个关联文档块", multiHopResults.size());
 
         // 4、拼接上下文（细粒度检索 + 粗粒度推理补全 + 图谱多跳），限制总长度避免 token 超限
         String vectorContext = vectorDocs.stream().map(Document::getText)
@@ -538,7 +532,7 @@ public class GraphRagService extends DatabaseService {
                         "color", "#6366f1"));
             }
 
-            log.info("图谱数据查询完成: 节点={}, 边={}", nodes.size(), edges.size());
+            log.debug("图谱数据查询完成: 节点={}, 边={}", nodes.size(), edges.size());
             return Map.<String, Object>of("nodes", nodes, "edges", edges);
         }).subscribeOn(Schedulers.boundedElastic());
     }
@@ -550,7 +544,7 @@ public class GraphRagService extends DatabaseService {
      * 失败：删除已入库向量，占位分片标记 FAILED。
      */
     public Mono<DocumentResponse> insertKnowledgeDoc(DocumentUploadRequest request) {
-        log.info("开始处理文档入库: fileName={}, docCode={}", request.getFileName(), request.getDocCode());
+        log.debug("开始处理文档入库: fileName={}, docCode={}", request.getFileName(), request.getDocCode());
 
         return this.documentService.uploadDocument(request).flatMap(context -> {
             DocumentResponse response = context.getResponse();
@@ -563,7 +557,7 @@ public class GraphRagService extends DatabaseService {
             Mono<Object> fromRunnable = Mono.fromRunnable(() -> {
                 if (request.getDocCode() != null && !request.getDocCode().isBlank()) {
                     buildKnowledgeGraph(request.getDocCode());
-                    log.info("图谱构建完成: docCode={}", request.getDocCode());
+                    log.debug("图谱构建完成: docCode={}", request.getDocCode());
                 }
             });
             Mono<Object> other = Mono.fromRunnable(() -> this.documentService
@@ -574,7 +568,7 @@ public class GraphRagService extends DatabaseService {
                         this.documentService.failUpload(context, e.getMessage());
                         return Mono.empty();
                     }).subscribeOn(Schedulers.boundedElastic()).subscribe();
-            log.info("文档已提交异步处理: documentId={}, fileName={}, status=PROCESSING",
+            log.debug("文档已提交异步处理: documentId={}, fileName={}, status=PROCESSING",
                     response.getDocumentId(), response.getFileName());
             return Mono.just(response);
         });
@@ -604,7 +598,7 @@ public class GraphRagService extends DatabaseService {
         // （几千片的文档全量抽取既慢又容易 429，前 200 片已覆盖文档核心实体）
         final int MAX_CHUNKS_FOR_GRAPH = 200;
         if (fineChunks.size() > MAX_CHUNKS_FOR_GRAPH) {
-            log.info("docCode={} 分片数 {} 超过上限 {}, 仅对前 {} 片做实体抽取",
+            log.debug("docCode={} 分片数 {} 超过上限 {}, 仅对前 {} 片做实体抽取",
                     docCode, fineChunks.size(), MAX_CHUNKS_FOR_GRAPH, MAX_CHUNKS_FOR_GRAPH);
             fineChunks = fineChunks.subList(0, MAX_CHUNKS_FOR_GRAPH);
         }
@@ -617,7 +611,7 @@ public class GraphRagService extends DatabaseService {
             batches.add(fineChunks.subList(i, Math.min(i + batchSize, fineChunks.size())));
         }
 
-        log.info("开始为 docCode={} 构建图谱：细粒度分片 {} 个，分 {} 批（每批 {} 片，并发 2）",
+        log.debug("开始为 docCode={} 构建图谱：细粒度分片 {} 个，分 {} 批（每批 {} 片，并发 2）",
                 docCode, fineChunks.size(), batches.size(), batchSize);
 
         // 并发 2 路，批次间 1.5 秒延时，平滑请求速率
@@ -654,7 +648,7 @@ public class GraphRagService extends DatabaseService {
             executor.shutdown();
         }
 
-        log.info("图谱构建完成: docCode={}, 细粒度分片={}, 批次数={}", docCode, fineChunks.size(), batches.size());
+        log.debug("图谱构建完成: docCode={}, 细粒度分片={}, 批次数={}", docCode, fineChunks.size(), batches.size());
     }
 
     /**
@@ -804,7 +798,7 @@ public class GraphRagService extends DatabaseService {
 
                 // 不足5条，直接返回原始对话
                 if (totalCount <= HISTORY_KEEP_RECENT) {
-                    log.info("加载多轮历史 {} 条（未触发摘要）", totalCount);
+                    log.debug("加载多轮历史 {} 条（未触发摘要）", totalCount);
                     return Mono.just(recentText);
                 }
                 Mono<ChatSessionSummary> summaryMono = this.summaryRepository.findBySessionId(sessionId)
@@ -835,14 +829,14 @@ public class GraphRagService extends DatabaseService {
                             }
                             String newSummary = summarizeHistory(olderText);
                             saveSummary(sessionId, newSummary, totalCount);
-                            log.info("异步生成会话摘要完成: sessionId={}, 老对话{}条, 总{}条", sessionId, olderCount, totalCount);
+                            log.debug("异步生成会话摘要完成: sessionId={}, 老对话{}条, 总{}条", sessionId, olderCount, totalCount);
                         }).subscribeOn(Schedulers.boundedElastic()).subscribe();
                         // 本次使用旧摘要（没有则只用最近5条原始对话）
                         summary = oldSummary;
-                        log.info("会话摘要待更新，本次使用旧摘要: sessionId={}, 总{}条", sessionId, totalCount);
+                        log.debug("会话摘要待更新，本次使用旧摘要: sessionId={}, 总{}条", sessionId, totalCount);
                     } else {
                         summary = summaryRecord.getSummary();
-                        log.info("复用会话摘要: sessionId={}, 总{}条", sessionId, totalCount);
+                        log.debug("复用会话摘要: sessionId={}, 总{}条", sessionId, totalCount);
                     }
 
                     if (summary.isBlank()) return Mono.just(recentText);
@@ -916,13 +910,13 @@ public class GraphRagService extends DatabaseService {
                             .apiKeyId(apiKeyId).createTime(LocalDateTime.now()).build();
                     return this.chatMessageRepository.save(record).publishOn(Schedulers.boundedElastic()).doOnSuccess(r -> {
                         if (!ObjectUtils.isEmpty(r)) {
-                            log.info("对话记录已保存: id={}, userId={}, sessionId={}, question={}", r.getId(), request.getUserId(), request.getSessionId(),
+                            log.debug("对话记录已保存: id={}, userId={}, sessionId={}, question={}", r.getId(), request.getUserId(), request.getSessionId(),
                                     request.getQuestion().length() > 50 ? request.getQuestion().substring(0, 50) + "..." : request.getQuestion());
                             // 同步更新 chat_session 主表
                             upsertChatSession(request, apiKeyId, existingTitle).subscribe();
                             // 首次问答完成且尚无标题时，异步生成会话主题
                             if (!StringUtils.hasLength(existingTitle)) {
-                                generateSessionTitleAsync(request.getSessionId(), request.getQuestion(), request.getAnswer());
+                                generateSessionTitleAsync(request);
                             }
                         }
                     });
@@ -950,33 +944,33 @@ public class GraphRagService extends DatabaseService {
     /**
      * 异步生成会话主题（首次问答后调用，生成后更新该会话所有记录的title，固定不变）
      */
-    private void generateSessionTitleAsync(String sessionId, String firstQuestion, String firstAnswer) {
+    private void generateSessionTitleAsync(GraphRagRequest request) {
         Mono.fromRunnable(() -> {
             try {
-                log.info("开始生成对话的主题！");
+                log.debug("开始生成对话的主题！");
                 // 计数检查（异步线程内block安全）：第一次问答完成后即生成标题
-                Long count = this.chatMessageRepository.countBySessionId(sessionId).blockOptional().orElse(0L);
+                Long count = this.chatMessageRepository.countBySessionId(request.getSessionId()).blockOptional().orElse(0L);
                 if (count > 1) {
                     return;
                 }
                 // 再次确认尚无标题
-                ChatMessage latest = this.chatMessageRepository.findRecentBySessionId(sessionId, 1, 0).next().block();
+                ChatMessage latest = this.chatMessageRepository.findRecentBySessionId(request.getSessionId(), 1, 0).next().block();
                 if (!ObjectUtils.isEmpty(latest) && !ObjectUtils.isEmpty(latest.getTitle())) {
                     return;
                 }
                 String title = this.chatClient.prompt()
                         .system("你是对话主题生成助手，只返回主题名称，不要任何解释、引号或标点，不超过15个字。")
-                        .user("请根据以下对话生成一个简洁的主题名称：\n用户：%s\n助手：%s".formatted(firstQuestion, firstAnswer))
+                        .user("请根据以下对话生成一个简洁的主题名称：\n用户：%s\n助手：%s".formatted(request.getQuestion(), request.getAnswer()))
                         .call().content();
                 if (StringUtils.hasLength(title)) {
                     title = title.trim().replaceAll("[\"'`]", "")
                             .replaceAll("\\s+", " ");
                     if (title.length() > 30) title = title.substring(0, 30);
-                    this.chatMessageRepository.updateTitleBySessionId(title, sessionId).block();
-                    log.info("会话主题已生成并更新: sessionId={}, title={}", sessionId, title);
+                    this.chatMessageRepository.updateTitleBySessionId(title, request.getSessionId()).block();
+                    log.debug("会话主题已生成并更新: sessionId={}, title={}", request.getSessionId(), title);
                 }
             } catch (Exception e) {
-                log.warn("生成会话主题失败: sessionId={}, {}", sessionId, e.getMessage());
+                log.warn("生成会话主题失败: sessionId={}, {}", request.getSessionId(), e.getMessage());
             }
         }).subscribeOn(Schedulers.boundedElastic()).subscribe();
     }
@@ -984,13 +978,9 @@ public class GraphRagService extends DatabaseService {
     /**
      * 按用户查询最近对话记录
      */
-    public Mono<List<ChatMessage>> getConversations(String userId, String tenantCode,
-                                                    String systemType) {
-        return this.chatMessageRepository.findByUser(userId, tenantCode, systemType)
-                .collectList();
+    public Mono<List<ChatMessage>> getConversations(String userId, String tenantCode, String systemType) {
+        return this.chatMessageRepository.findByUser(userId, tenantCode, systemType).collectList();
     }
-
-    // ==================== 对话历史摘要压缩 ====================
 
     /**
      * 按会话ID分页查询对话
@@ -1000,6 +990,8 @@ public class GraphRagService extends DatabaseService {
         String sql = "SELECT * FROM chat_message WHERE session_id = :sessionId" + ContextUtil.applyPage(pageable);
         return super.queryWith(sql, Map.of("sessionId", sessionId), ChatMessage.class).collectList();
     }
+
+    // ==================== 对话历史摘要压缩 ====================
 
     /**
      * 查询用户的会话列表（取每个会话最后一条记录的title作为标题，按最后活跃时间倒序）
@@ -1032,7 +1024,8 @@ public class GraphRagService extends DatabaseService {
      */
     public Mono<Long> syncChatSessions() {
         return this.chatMessageRepository.findAllSessionGroups()
-                .filterWhen(msg -> this.chatSessionRepository.findBySessionId(msg.getSessionId()).hasElement().map(e -> !e))
+                .filterWhen(msg -> this.chatSessionRepository
+                        .findBySessionId(msg.getSessionId()).hasElement().map(e -> !e))
                 .map(msg -> ChatSession.builder().sessionId(msg.getSessionId())
                         .title(msg.getTitle()).userId(msg.getUserId()).apiKeyId(msg.getApiKeyId())
                         .tenantCode(msg.getTenantCode()).systemType(msg.getSystemType())
@@ -1053,14 +1046,14 @@ public class GraphRagService extends DatabaseService {
                 .map(tuple2 -> new PageImpl<>(tuple2.getT1(), pageable, tuple2.getT2()));
     }
 
-    // ==================== 对话记录 ====================
-
     /**
      * 按会话ID + API Key 查询对话消息（校验归属：仅该 Key 创建的消息）
      */
     public Mono<List<ChatMessage>> getConversationsBySessionAndApiKey(String sessionId, Long apiKeyId) {
-        return chatMessageRepository.findBySessionIdAndApiKey(sessionId, apiKeyId).collectList();
+        return this.chatMessageRepository.findBySessionIdAndApiKey(sessionId, apiKeyId).collectList();
     }
+
+    // ==================== 对话记录 ====================
 
     /**
      * 删除单个会话（仅当该会话存在属于该 Key 的消息才删除；删除后若会话无剩余消息，同步清理摘要）
@@ -1068,12 +1061,12 @@ public class GraphRagService extends DatabaseService {
      * @return true=已删除；false=该会话不属于此 API Key，未做任何改动
      */
     public Mono<Boolean> deleteSessionByApiKey(String sessionId, Long apiKeyId) {
-        return chatMessageRepository.countBySessionIdAndApiKey(sessionId, apiKeyId).flatMap(count -> {
+        return this.chatMessageRepository.countBySessionIdAndApiKey(sessionId, apiKeyId).flatMap(count -> {
             if (count == 0) {
                 return Mono.just(false);
             }
-            return chatMessageRepository.deleteBySessionIdAndApiKey(sessionId, apiKeyId)
-                    .then(chatMessageRepository.countBySessionId(sessionId))
+            return this.chatMessageRepository.deleteBySessionIdAndApiKey(sessionId, apiKeyId)
+                    .then(this.chatMessageRepository.countBySessionId(sessionId))
                     .flatMap(remain -> remain == 0 ? summaryRepository
                             .deleteBySessionId(sessionId) : Mono.empty())
                     .thenReturn(true);
@@ -1088,46 +1081,8 @@ public class GraphRagService extends DatabaseService {
             return Mono.just(0);
         }
         return Flux.fromIterable(sessionIds)
-                .flatMap(id -> deleteSessionByApiKey(id, apiKeyId))
+                .flatMap(id -> this.deleteSessionByApiKey(id, apiKeyId))
                 .filter(Boolean::booleanValue).count().map(Long::intValue);
-    }
-
-    /**
-     * 会话列表聚合：取每个会话最后一条记录的 title（空则用首条问题兜底），按最后活跃时间倒序
-     */
-    private List<Map<String, Object>> aggregateSessions(List<ChatMessage> records, int offset, int limit) {
-        // findByUser 是 DESC，lastBySession 取最近一条（含title），同时记录首条问题作兜底
-        Map<String, ChatMessage> lastBySession = new LinkedHashMap<>();
-        Map<String, String> firstQuestionBySession = new HashMap<>();
-        Map<String, Boolean> seen = new HashMap<>();
-        // 正序遍历找每个session的首条问题
-        for (int i = records.size() - 1; i >= 0; i--) {
-            ChatMessage r = records.get(i);
-            if (!seen.containsKey(r.getSessionId())) {
-                seen.put(r.getSessionId(), true);
-                firstQuestionBySession.put(r.getSessionId(), r.getQuestion());
-            }
-        }
-        for (ChatMessage r : records) {
-            if (!lastBySession.containsKey(r.getSessionId())) {
-                lastBySession.put(r.getSessionId(), r);
-            }
-        }
-        return lastBySession.entrySet().stream().skip(offset).limit(limit).map(e -> {
-            ChatMessage r = e.getValue();
-            String title = r.getTitle();
-            if (ObjectUtils.isEmpty(title)) {
-                title = firstQuestionBySession.get(r.getSessionId());
-            }
-            Map<String, Object> m = new HashMap<>();
-            m.put("id", r.getId());
-            m.put("sessionId", r.getSessionId());
-            m.put("title", title);
-            m.put("question", title);
-            m.put("createTime", r.getCreateTime());
-            m.put("userId", r.getUserId());
-            return m;
-        }).collect(Collectors.toList());
     }
 
     /**
@@ -1137,17 +1092,17 @@ public class GraphRagService extends DatabaseService {
         if (ObjectUtils.isEmpty(title)) {
             return Mono.just(0);
         }
-        return chatMessageRepository.updateTitleBySessionId(title.trim(), sessionId)
-                .doOnSuccess(cnt -> log.info("会话标题已更新: sessionId={}, title={}, 影响行数={}", sessionId, title, cnt));
+        return this.chatMessageRepository.updateTitleBySessionId(title.trim(), sessionId)
+                .doOnSuccess(cnt -> log.debug("会话标题已更新: sessionId={}, title={}, 影响行数={}", sessionId, title, cnt));
     }
 
     /**
      * 删除单个会话（该会话下所有对话记录 + 摘要）
      */
     public Mono<Void> deleteSession(String sessionId) {
-        return chatMessageRepository.deleteBySessionId(sessionId)
-                .then(summaryRepository.deleteBySessionId(sessionId))
-                .doOnSuccess(_ -> log.info("已删除会话及摘要: sessionId={}", sessionId));
+        return this.chatMessageRepository.deleteBySessionId(sessionId)
+                .then(this.summaryRepository.deleteBySessionId(sessionId))
+                .doOnSuccess(_ -> log.debug("已删除会话及摘要: sessionId={}", sessionId));
     }
 
     /**
@@ -1156,9 +1111,15 @@ public class GraphRagService extends DatabaseService {
     public Mono<Void> deleteSessions(List<String> sessionIds) {
         if (ObjectUtils.isEmpty(sessionIds)) return Mono.empty();
         return Flux.fromIterable(sessionIds)
-                .flatMap(id -> chatMessageRepository.deleteBySessionId(id)
-                        .then(summaryRepository.deleteBySessionId(id)))
-                .then().doOnSuccess(_ -> log.info("已批量删除 {} 个会话及摘要", sessionIds.size()));
+                .flatMap(id -> this.chatMessageRepository.deleteBySessionId(id)
+                        .then(this.summaryRepository.deleteBySessionId(id)))
+                .then().doOnSuccess(_ -> log.debug("已批量删除 {} 个会话及摘要", sessionIds.size()));
+    }
+
+    /**
+     * 检索上下文 + 改写展示词 内部封装（供两个分支共用）
+     */
+    private record Enriched(ContextResult ctx, String historyContext, String rewriteDisplay) {
     }
 
     /**

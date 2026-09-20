@@ -1,11 +1,9 @@
 package com.motcs.core.document.info;
 
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.r2dbc.repository.Modifying;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
@@ -22,38 +20,6 @@ public interface DocumentInfoRepository extends ReactiveCrudRepository<DocumentI
     Mono<Boolean> existsByDocCode(String docCode);
 
     Mono<Void> deleteByDocCode(String docCode);
-
-    /**
-     * 管理端分页查询：租户/系统筛选 + 文件名标题关键字 + 状态筛选 + 按上传时间降序。
-     * tenantCode 空/'0' 表示全部；systemType 空表示全部；status 空/'all' 表示全部。
-     */
-    @Query("""
-            SELECT * FROM document_info
-            WHERE (:tenantCode = '' OR tenant_code = :tenantCode)
-              AND (:systemType = '' OR system_type = :systemType)
-              AND (:status = '' OR status = :status)
-              AND (:keyword = '' OR file_name LIKE CONCAT('%', :keyword, '%')
-                   OR title LIKE CONCAT('%', :keyword, '%'))
-            ORDER BY created_time DESC, id DESC
-            """)
-    Flux<DocumentInfo> searchPage(@Param("tenantCode") String tenantCode,
-                                 @Param("systemType") String systemType,
-                                 @Param("keyword") String keyword,
-                                 @Param("status") String status,
-                                 Pageable pageable);
-
-    @Query("""
-            SELECT COUNT(*) FROM document_info
-            WHERE (:tenantCode = '' OR tenant_code = :tenantCode)
-              AND (:systemType = '' OR system_type = :systemType)
-              AND (:status = '' OR status = :status)
-              AND (:keyword = '' OR file_name LIKE CONCAT('%', :keyword, '%')
-                   OR title LIKE CONCAT('%', :keyword, '%'))
-            """)
-    Mono<Long> countSearch(@Param("tenantCode") String tenantCode,
-                            @Param("systemType") String systemType,
-                            @Param("keyword") String keyword,
-                            @Param("status") String status);
 
     /**
      * 处理成功：更新状态为 SUCCESS、分片数、启用标志。
@@ -83,4 +49,5 @@ public interface DocumentInfoRepository extends ReactiveCrudRepository<DocumentI
      */
     @Query("SELECT COUNT(*) FROM document_info")
     Mono<Long> countAll();
+
 }

@@ -182,7 +182,7 @@ public class DocumentController {
         if (ObjectUtils.isEmpty(userId)) {
             return Mono.error(RestServerException.withMsg("用户编码（userId）不能为空"));
         }
-        log.info("收到文档上传请求: fileName={}, docCode={}, tenantCode={}, systemType={}, userId={}",
+        log.debug("收到文档上传请求: fileName={}, docCode={}, tenantCode={}, systemType={}, userId={}",
                 file.filename(), docCode, tenantCode, systemType, userId);
 
         return file.content().collectList().map(buffers -> {
@@ -212,14 +212,14 @@ public class DocumentController {
         if (ObjectUtils.isEmpty(uploadRequest.getUserId())) {
             return Mono.error(RestServerException.withMsg("用户编码（userId）不能为空"));
         }
-        log.info("收到URL上传请求参数:{}", uploadRequest);
+        log.debug("收到URL上传请求参数:{}", uploadRequest);
         String fileName = Utils.extractFileNameFromUrl(uploadRequest.getUrl());
         String contentType = Utils.filesProbeContentType(fileName);
         Mono<byte[]> bodyToMono = webClientBuilder.build()
                 .get().uri(uploadRequest.getUrl())
                 .retrieve().bodyToMono(byte[].class);
         return bodyToMono.flatMap(fileBytes -> {
-            log.info("远程文件下载成功: fileName={}, size={}", fileName, fileBytes.length);
+            log.debug("远程文件下载成功: fileName={}, size={}", fileName, fileBytes.length);
             MultipartFile multipartFile = new ByteArrayMultipartFile("file", fileName, contentType, fileBytes);
             return buildAndUpload(multipartFile, uploadRequest.getTitle(),
                     uploadRequest.getDescription(), uploadRequest.getDocCode(),
@@ -346,7 +346,7 @@ public class DocumentController {
     public Mono<ResponseEntity<Map<String, Object>>> updateSessionTitle(
             @PathVariable("sessionId") String sessionId, @RequestBody SessionRequest request) {
         String title = !ObjectUtils.isEmpty(request) ? request.getTitle() : "未命名对话";
-        log.info("收到更新会话标题请求: sessionId={}, title={}", sessionId, title);
+        log.debug("收到更新会话标题请求: sessionId={}, title={}", sessionId, title);
         return graphRagService.updateSessionTitle(sessionId, title).map(cnt -> {
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -363,7 +363,7 @@ public class DocumentController {
      */
     @DeleteMapping("/conversations/session/{sessionId}")
     public Mono<ResponseEntity<Map<String, Object>>> deleteSession(@PathVariable("sessionId") String sessionId) {
-        log.info("收到删除会话请求: sessionId={}", sessionId);
+        log.debug("收到删除会话请求: sessionId={}", sessionId);
         return graphRagService.deleteSession(sessionId).then(Mono.fromCallable(() -> {
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -380,7 +380,7 @@ public class DocumentController {
     @DeleteMapping("/conversations/batch")
     public Mono<ResponseEntity<Map<String, Object>>> deleteSessionsBatch(@RequestBody SessionRequest request) {
         List<String> sessionIds = !ObjectUtils.isEmpty(request) ? request.getSessionIds() : List.of();
-        log.info("收到批量删除会话请求: count={}", sessionIds.size());
+        log.debug("收到批量删除会话请求: count={}", sessionIds.size());
         return this.graphRagService.deleteSessions(sessionIds).then(Mono.fromCallable(() -> {
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -405,7 +405,7 @@ public class DocumentController {
      */
     @DeleteMapping("/docCode/{docCode}")
     public Mono<ResponseEntity<Map<String, Object>>> deleteDocument(@PathVariable("docCode") String docCode) {
-        log.info("收到文档删除请求: docCode={}", docCode);
+        log.debug("收到文档删除请求: docCode={}", docCode);
         return this.documentService.deleteByDocCode(docCode).then(Mono.fromCallable(() -> {
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -414,36 +414,6 @@ public class DocumentController {
             return ResponseEntity.ok(result);
         }));
     }
-
-    /**
-     * 手动触发：从 Neo4j 迁移历史文档元数据到 document_info 表。
-     * POST /documents/v1/migrate-documents
-     */
-    @PostMapping("/migrate-documents")
-    public Mono<ResponseEntity<Map<String, Object>>> migrateDocuments() {
-        return this.documentService.migrateFromNeo4j().map(n -> {
-            Map<String, Object> body = new HashMap<>();
-            body.put("success", true);
-            body.put("message", "迁移完成，新增 " + n + " 条文档记录");
-            return ResponseEntity.ok(body);
-        });
-    }
-
-    /**
-     * 手动同步聊天记录到 chat_session 主表
-     * POST /documents/v1/sync
-     */
-    @PostMapping("/sync")
-    public Mono<ResponseEntity<Map<String, Object>>> syncChatSessions() {
-        return graphRagService.syncChatSessions().map(count -> {
-            Map<String, Object> body = new HashMap<>();
-            body.put("success", true);
-            body.put("message", "同步完成，共同步 " + count + " 个会话");
-            body.put("synced", count);
-            return ResponseEntity.ok(body);
-        });
-    }
-
 
     /**
      * 编辑文档：更换上传的文件（同 docCode）。
@@ -456,7 +426,7 @@ public class DocumentController {
             @RequestPart("file") FilePart file,
             @RequestPart(value = "title", required = false) String title,
             @RequestPart(value = "description", required = false) String description) {
-        log.info("收到更换文档文件请求: docCode={}, fileName={}", docCode, file.filename());
+        log.debug("收到更换文档文件请求: docCode={}, fileName={}", docCode, file.filename());
         return documentInfoRepository.findByDocCode(docCode)
                 .switchIfEmpty(Mono.error(RestServerException.withMsg("文档不存在: " + docCode)))
                 .flatMap(info -> file.content().collectList().map(buffers -> {
@@ -496,9 +466,38 @@ public class DocumentController {
             @RequestParam(value = "tenantCode", required = false) String tenantCode,
             @RequestParam(value = "systemType", required = false) String systemType,
             @RequestParam(value = "limit", defaultValue = "200") int limit) {
-        log.info("收到图谱数据请求: tenantCode={}, systemType={}, limit={}", tenantCode, systemType, limit);
+        log.debug("收到图谱数据请求: tenantCode={}, systemType={}, limit={}", tenantCode, systemType, limit);
         return this.graphRagService.getGraphData(tenantCode, systemType, limit)
                 .map(ResponseEntity::ok);
+    }
+
+    /**
+     * 手动触发：从 Neo4j 迁移历史文档元数据到 document_info 表。
+     * POST /documents/v1/migrate-documents
+     */
+    @PostMapping("/migrate-documents")
+    public Mono<ResponseEntity<Map<String, Object>>> migrateDocuments() {
+        return this.documentService.migrateFromNeo4j().map(n -> {
+            Map<String, Object> body = new HashMap<>();
+            body.put("success", true);
+            body.put("message", "迁移完成，新增 " + n + " 条文档记录");
+            return ResponseEntity.ok(body);
+        });
+    }
+
+    /**
+     * 手动同步聊天记录到 chat_session 主表
+     * POST /documents/v1/sync
+     */
+    @PostMapping("/sync")
+    public Mono<ResponseEntity<Map<String, Object>>> syncChatSessions() {
+        return graphRagService.syncChatSessions().map(count -> {
+            Map<String, Object> body = new HashMap<>();
+            body.put("success", true);
+            body.put("message", "同步完成，共同步 " + count + " 个会话");
+            body.put("synced", count);
+            return ResponseEntity.ok(body);
+        });
     }
 
     /**
@@ -518,7 +517,7 @@ public class DocumentController {
                 log.warn("文档上传失败: {}", response.getErrorMessage());
                 return ResponseEntity.badRequest().body(response);
             }
-            log.info("文档已提交处理: documentId={}, docCode={}, fileName={}, status={}",
+            log.debug("文档已提交处理: documentId={}, docCode={}, fileName={}, status={}",
                     response.getDocumentId(), response.getDocCode(), response.getFileName(), response.getStatus());
             return ResponseEntity.ok(response);
         });

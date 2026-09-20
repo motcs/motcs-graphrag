@@ -1,7 +1,5 @@
 package com.motcs.core.auth.token;
 
-import org.springframework.web.server.WebSession;
-
 import java.io.Serializable;
 
 /**
@@ -12,11 +10,6 @@ public record AuthenticationToken(String token, Long expires, Long lastAccessTim
 
     public static AuthenticationToken of(String token, Long expires, Long lastAccessTime) {
         return new AuthenticationToken(token, expires, lastAccessTime);
-    }
-
-    public static AuthenticationToken withSession(WebSession session) {
-        return AuthenticationToken.of(session.getId(), session.getMaxIdleTime().getSeconds(),
-                session.getLastAccessTime().getEpochSecond());
     }
 
 }

@@ -75,7 +75,7 @@ public class DocumentService extends DatabaseService {
             }
 
             String filePath = FileUtils.saveFile(file, uploadDir, request.getTenantCode());
-            log.info("文件已保存到: {}", filePath);
+            log.debug("文件已保存到: {}", filePath);
 
             // 创建占位分片（PROCESSING），文档列表可见但不参与搜索
             String documentId = UUID.randomUUID().toString();
@@ -145,7 +145,7 @@ public class DocumentService extends DatabaseService {
                 String markdownContent;
                 try {
                     markdownContent = anyDocConverter.convertToMarkdown(request.getFileName(), file.getBytes());
-                    log.info("文档转换成功，原长度: {}, Markdown长度: {}", originalContent.length(), markdownContent.length());
+                    log.debug("文档转换成功，原长度: {}, Markdown长度: {}", originalContent.length(), markdownContent.length());
                 } catch (Exception e) {
                     log.warn("文档转换失败，使用原始内容: {}", e.getMessage());
                     markdownContent = anyDocConverter.convertTextToMarkdown(originalContent);
@@ -166,7 +166,7 @@ public class DocumentService extends DatabaseService {
                         .filter(c -> "FINE".equals(c.getChunkType())).toList();
                 if (fineChunks.isEmpty()) throw new RuntimeException("文档切分失败：未生成可检索的细粒度分片");
                 int coarseCount = allChunks.size() - fineChunks.size();
-                log.info("企业级切分完成：细粒度 {} 片，粗粒度 {} 片", fineChunks.size(), coarseCount);
+                log.debug("企业级切分完成：细粒度 {} 片，粗粒度 {} 片", fineChunks.size(), coarseCount);
 
                 // 3. 构建向量库 Document（仅细粒度切片入库，用于检索召回）
                 List<Document> documents = new ArrayList<>();
@@ -201,7 +201,7 @@ public class DocumentService extends DatabaseService {
                 // 4. 向量入库（仅细粒度）
                 this.vectorStore.add(documents);
                 context.setChunkIds(documents.stream().map(Document::getId).toList());
-                log.info("文档已成功添加到向量库，共 {} 个细粒度片段", documents.size());
+                log.debug("文档已成功添加到向量库，共 {} 个细粒度片段", documents.size());
 
                 // 5. 删除占位分片
                 this.chunkRepository.deleteById(context.getPlaceholderId());
@@ -211,7 +211,7 @@ public class DocumentService extends DatabaseService {
                         request.getFileName(), request.getTenantCode(), request.getSystemType(),
                         request.getUserId());
 
-                log.info("文档处理完成: documentId={}, fileName={}, 细粒度={}, 粗粒度={}",
+                log.debug("文档处理完成: documentId={}, fileName={}, 细粒度={}, 粗粒度={}",
                         documentId, request.getFileName(), fineChunks.size(), coarseCount);
                 // 更新 MySQL 文档元数据为 SUCCESS
                 try {
@@ -238,11 +238,11 @@ public class DocumentService extends DatabaseService {
         try {
             if (context.getChunkIds() != null && !context.getChunkIds().isEmpty()) {
                 vectorStore.delete(context.getChunkIds());
-                log.info("已清理失败文档的 {} 条向量", context.getChunkIds().size());
+                log.debug("已清理失败文档的 {} 条向量", context.getChunkIds().size());
             }
             if (context.getDocumentId() != null) {
                 chunkRepository.updateStatusByDocumentId(context.getDocumentId(), "FAILED", errorMessage);
-                log.info("已标记 documentId={} 为 FAILED: {}", context.getDocumentId(), errorMessage);
+                log.debug("已标记 documentId={} 为 FAILED: {}", context.getDocumentId(), errorMessage);
             }
             // 同步更新 MySQL 文档元数据为 FAILED
             try {
@@ -264,7 +264,7 @@ public class DocumentService extends DatabaseService {
     public void markDocumentSuccess(String documentId) {
         if (documentId != null) {
             this.chunkRepository.updateStatusByDocumentId(documentId, "SUCCESS", null);
-            log.info("文档处理完成，已标记 documentId={} 为 SUCCESS", documentId);
+            log.debug("文档处理完成，已标记 documentId={} 为 SUCCESS", documentId);
         }
     }
 
@@ -281,7 +281,7 @@ public class DocumentService extends DatabaseService {
             List<String> chunkIds = this.chunkRepository.findChunkIdsByDocCode(docCode);
             if (!chunkIds.isEmpty()) this.vectorStore.delete(chunkIds);
             this.chunkRepository.deleteChunksByDocCode(docCode);
-            log.info("重新上传前已清理 docCode={} 的旧数据（{} 个分片）", docCode, chunkIds.size());
+            log.debug("重新上传前已清理 docCode={} 的旧数据（{} 个分片）", docCode, chunkIds.size());
         } catch (Exception e) {
             log.warn("重新上传前清理旧数据失败: {}", e.getMessage());
         }
@@ -300,7 +300,7 @@ public class DocumentService extends DatabaseService {
             // 0. 删除 MySQL 文档元数据记录
             try {
                 documentInfoRepository.deleteByDocCode(docCode).block();
-                log.info("已删除 document_info 记录: docCode={}", docCode);
+                log.debug("已删除 document_info 记录: docCode={}", docCode);
             } catch (Exception e) {
                 log.warn("删除 document_info 记录失败: {}", e.getMessage());
             }
@@ -325,17 +325,17 @@ public class DocumentService extends DatabaseService {
                 List<Long> entityIds = exclusive.stream()
                         .map(KnowledgeEntity::getId).filter(Objects::nonNull).toList();
                 chunkRepository.deleteEntitiesByIds(entityIds);
-                log.info("已删除 {} 个独占知识点", entityIds.size());
+                log.debug("已删除 {} 个独占知识点", entityIds.size());
             }
 
             // 3. 删除分片（DETACH DELETE 清除剩余 MENTIONS 关系）
             chunkRepository.deleteChunksByDocCode(docCode);
-            log.info("已删除 docCode={} 的 {} 个分片", docCode, chunkIds.size());
+            log.debug("已删除 docCode={} 的 {} 个分片", docCode, chunkIds.size());
 
             // 4. 从向量库删除
             try {
                 vectorStore.delete(chunkIds);
-                log.info("已从向量库删除 {} 条向量", chunkIds.size());
+                log.debug("已从向量库删除 {} 条向量", chunkIds.size());
             } catch (Exception e) {
                 log.warn("从向量库删除失败: {}", e.getMessage());
             }
@@ -345,7 +345,7 @@ public class DocumentService extends DatabaseService {
                 Path filePath = Paths.get(uploadDir, "T" + tenantCode, fileName);
                 try {
                     Files.deleteIfExists(filePath);
-                    log.info("已删除原始文件: {}", filePath);
+                    log.debug("已删除原始文件: {}", filePath);
                 } catch (Exception e) {
                     log.warn("删除原始文件失败: {}", e.getMessage());
                 }
@@ -393,7 +393,7 @@ public class DocumentService extends DatabaseService {
                 offset += batch.size();
                 if (batch.size() < batchSize) break;
             }
-            log.info("异步标记完成: docCode={}, 共更新 {} 条对话记录", docCode, totalUpdated);
+            log.debug("异步标记完成: docCode={}, 共更新 {} 条对话记录", docCode, totalUpdated);
         }).subscribeOn(Schedulers.boundedElastic()).subscribe();
     }
 
@@ -442,7 +442,7 @@ public class DocumentService extends DatabaseService {
         if (!coarseChunks.isEmpty()) {
             this.chunkRepository.saveAll(coarseChunks);
         }
-        log.info("已同步图谱：细粒度更新 {} 个节点属性，粗粒度新建 {} 个节点", fineUpdated, coarseChunks.size());
+        log.debug("已同步图谱：细粒度更新 {} 个节点属性，粗粒度新建 {} 个节点", fineUpdated, coarseChunks.size());
     }
 
     /**
@@ -486,7 +486,7 @@ public class DocumentService extends DatabaseService {
      */
     public Mono<Long> migrateFromNeo4j() {
         return Mono.fromCallable(() -> {
-            log.info("开始从 Neo4j 迁移历史文档数据到 document_info...");
+            log.debug("开始从 Neo4j 迁移历史文档数据到 document_info...");
             List<DocumentSummary> summaries = chunkRepository.findDocumentSummaries("0", "");
             long n = 0;
             for (DocumentSummary ds : summaries) {
@@ -517,7 +517,7 @@ public class DocumentService extends DatabaseService {
                     log.warn("迁移文档失败 docCode={}: {}", ds.docCode(), e.getMessage());
                 }
             }
-            log.info("历史文档迁移完成，共新增 {} 条", n);
+            log.debug("历史文档迁移完成，共新增 {} 条", n);
             return n;
         }).subscribeOn(Schedulers.boundedElastic());
     }
@@ -527,7 +527,7 @@ public class DocumentService extends DatabaseService {
         try {
             Long cnt = documentInfoRepository.countAll().block();
             if (cnt != null && cnt > 0) {
-                log.info("document_info 已有 {} 条记录，跳过历史迁移", cnt);
+                log.debug("document_info 已有 {} 条记录，跳过历史迁移", cnt);
                 return;
             }
             migrateFromNeo4j().block();

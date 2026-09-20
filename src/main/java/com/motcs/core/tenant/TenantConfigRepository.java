@@ -26,9 +26,7 @@ public interface TenantConfigRepository extends ReactiveCrudRepository<TenantCon
     /**
      * 管理端分页总数（与 searchPage 同条件）
      */
-    @Query("""
-            SELECT COUNT(*) FROM tenant_config
-            WHERE (:keyword IS NULL OR :keyword = '' OR tenant_name LIKE CONCAT('%', :keyword, '%'))
-            """)
+    @Query("SELECT COUNT(*) FROM tenant_config WHERE (:keyword IS NULL OR :keyword = '' OR tenant_name LIKE CONCAT('%', :keyword, '%'))")
     Mono<Long> countSearch(String keyword);
+
 }

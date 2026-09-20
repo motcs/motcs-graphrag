@@ -65,7 +65,7 @@ public class EnterpriseChunker {
 
         // 1. 解析文档结构：按标题分节
         List<Section> sections = parseSections(markdownContent);
-        log.info("文档结构解析完成，共 {} 个章节", sections.size());
+        log.debug("文档结构解析完成，共 {} 个章节", sections.size());
 
         List<Chunk> allFineChunks = new ArrayList<>();
         List<Chunk> allCoarseChunks = new ArrayList<>();
@@ -86,7 +86,7 @@ public class EnterpriseChunker {
         linkChunks(allFineChunks);
         linkChunks(allCoarseChunks);
 
-        log.info("企业级切分完成：细粒度 {} 片，粗粒度 {} 片",
+        log.debug("企业级切分完成：细粒度 {} 片，粗粒度 {} 片",
                 allFineChunks.size(), allCoarseChunks.size());
 
         // 细粒度在前（用于向量检索），粗粒度在后（用于推理补全）

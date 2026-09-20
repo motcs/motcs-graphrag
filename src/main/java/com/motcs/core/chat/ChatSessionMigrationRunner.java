@@ -1,4 +1,4 @@
-package com.motcs.config;
+package com.motcs.core.chat;
 
 import com.motcs.core.knowledge.graph.GraphRagService;
 import lombok.RequiredArgsConstructor;
@@ -26,12 +26,12 @@ public class ChatSessionMigrationRunner implements ApplicationRunner {
     public void run(@NonNull ApplicationArguments args) {
         this.graphRagService.hasAnySession().flatMap(has -> {
             if (has) {
-                log.info("chat_session 主表已有数据，跳过自动迁移");
+                log.debug("chat_session 主表已有数据，跳过自动迁移");
                 return Mono.empty();
             }
-            log.info("chat_session 主表为空，开始自动迁移老聊天记录...");
+            log.debug("chat_session 主表为空，开始自动迁移老聊天记录...");
             return this.graphRagService.syncChatSessions()
-                    .doOnSuccess(count -> log.info("老聊天记录迁移完成，共同步 {} 个会话", count));
+                    .doOnSuccess(count -> log.debug("老聊天记录迁移完成，共同步 {} 个会话", count));
         }).doOnError(e -> log.error("老聊天记录迁移失败: {}", e.getMessage(), e)).subscribe();
     }
 

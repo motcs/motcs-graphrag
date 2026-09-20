@@ -52,7 +52,7 @@ public class AnyDocConverterUtil {
         String fileName = filePath.getFileName().toString();
         String fileExtension = Utils.getFileExtension(fileName).toLowerCase();
 
-        log.info("开始转换文件为Markdown: fileName={}, extension={}", fileName, fileExtension);
+        log.debug("开始转换文件为Markdown: fileName={}, extension={}", fileName, fileExtension);
 
         return switch (fileExtension) {
             case "pdf" -> convertPdfToMarkdown(filePath);

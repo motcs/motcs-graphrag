@@ -79,4 +79,5 @@ public class DocumentInfo implements Serializable {
 
     @Column("updated_time")
     private LocalDateTime updatedTime;
+
 }

@@ -27,17 +27,12 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
      */
     @Modifying
     @Query("""
-            INSERT INTO api_key_usage_summary
-              (api_key_id, total_calls, prompt_tokens, completion_tokens, total_tokens, last_used_at, updated_time)
-            VALUES
-              (:apiKeyId, 1, :promptTokens, :completionTokens, :totalTokens, :now, :now)
-            ON DUPLICATE KEY UPDATE
-              total_calls      = total_calls + 1,
-              prompt_tokens    = prompt_tokens + :promptTokens,
-              completion_tokens = completion_tokens + :completionTokens,
-              total_tokens     = total_tokens + :totalTokens,
-              last_used_at     = CASE WHEN :now > last_used_at OR last_used_at IS NULL THEN :now ELSE last_used_at END,
-              updated_time     = :now
+            INSERT INTO api_key_usage_summary(api_key_id, total_calls, prompt_tokens,
+             completion_tokens, total_tokens, last_used_at, updated_time)
+             VALUES (:apiKeyId, 1, :promptTokens, :completionTokens, :totalTokens, :now, :now)
+             ON DUPLICATE KEY UPDATE total_calls = total_calls + 1, prompt_tokens = prompt_tokens + :promptTokens,
+             completion_tokens = completion_tokens + :completionTokens, total_tokens = total_tokens + :totalTokens,
+             last_used_at = IF(:now > last_used_at OR last_used_at IS NULL, :now, last_used_at), updated_time = :now
             """)
     Mono<Long> incrementUsage(Long apiKeyId, long promptTokens, long completionTokens, long totalTokens, LocalDateTime now);
 
@@ -55,7 +50,7 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
                    COALESCE(SUM(prompt_tokens), 0)    AS prompt_tokens,
                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                    COALESCE(SUM(total_tokens), 0)     AS total_tokens
-            FROM api_key_usage_summary
+             FROM api_key_usage_summary where api_key_id in (select id from api_key)
             """)
     Mono<UsageOverviewRow> globalTotals();
 
@@ -75,17 +70,11 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
 
     @Modifying
     @Query("""
-            INSERT INTO api_key_usage_summary
-              (api_key_id, total_calls, prompt_tokens, completion_tokens, total_tokens, last_used_at, updated_time)
-            SELECT api_key_id,
-                   COUNT(*),
-                   COALESCE(SUM(prompt_tokens), 0),
-                   COALESCE(SUM(completion_tokens), 0),
-                   COALESCE(SUM(total_tokens), 0),
-                   MAX(created_time),
-                   NOW()
-            FROM api_key_usage
-            GROUP BY api_key_id
+            INSERT INTO api_key_usage_summary(api_key_id, total_calls, prompt_tokens,
+             completion_tokens, total_tokens, last_used_at, updated_time) SELECT api_key_id, COUNT(*),
+             COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0),
+             COALESCE(SUM(total_tokens), 0), MAX(created_time), NOW() FROM api_key_usage
+             where api_key_id in (select id from api_key) GROUP BY api_key_id
             """)
     Mono<Long> rebuildFromDetail();
 }
