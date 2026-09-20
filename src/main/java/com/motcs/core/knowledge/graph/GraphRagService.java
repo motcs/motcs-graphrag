@@ -341,7 +341,7 @@ public class GraphRagService extends DatabaseService {
 
         // 租户0（超管全局文档）不限系统类型；指定租户的文档按系统类型过滤
         String filterExpr = getFilterExpr(request);
-        log.info("搜搜条件：{}", filterExpr);
+        log.info("搜索条件：{}", filterExpr);
         // 多查询词逐一检索（改写词 + 原始问题），按 文档+分片 去重合并，提高召回
         List<Document> vectorDocs = new ArrayList<>();
         Set<String> seen = new HashSet<>();
