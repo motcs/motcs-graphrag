@@ -565,9 +565,8 @@ public class DocumentService extends DatabaseService {
                 && !"0".equals(request.getTenantCode())) ? request.getTenantCode() : "";
         Mono<Long> docsMono = documentInfoRepository.countSuccessByTenant(tenantCode).defaultIfEmpty(0L);
         Mono<Long> chunksMono = documentInfoRepository.sumChunksByTenant(tenantCode).defaultIfEmpty(0L);
-        return Mono.zip(docsMono, chunksMono)
-                .map(t -> DocumentStatsResponse.builder()
-                        .docCount(t.getT1()).chunkCount(t.getT2()).build())
+        return Mono.zip(docsMono, chunksMono).map(t ->
+                        DocumentStatsResponse.builder().docCount(t.getT1()).chunkCount(t.getT2()).build())
                 .onErrorResume(e -> {
                     log.error("统计查询失败: {}", e.getMessage());
                     return Mono.just(DocumentStatsResponse.builder().docCount(0L).chunkCount(0L).build());
