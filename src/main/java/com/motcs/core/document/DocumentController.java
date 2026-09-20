@@ -4,16 +4,19 @@ import com.motcs.commons.ContextUtil;
 import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.utils.ByteArrayMultipartFile;
 import com.motcs.commons.utils.Utils;
+import com.motcs.core.document.info.DocumentInfo;
 import com.motcs.core.document.info.DocumentInfoRepository;
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
 import com.motcs.core.knowledge.record.ChatMessage;
+import com.motcs.core.knowledge.record.ChatSession;
 import com.motcs.core.request.FileUploadRequest;
 import com.motcs.core.request.SessionRequest;
 import com.motcs.core.tenant.TenantConfig;
-import com.motcs.core.tenant.TenantConfigRepository;
+import com.motcs.core.tenant.TenantConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -52,7 +55,7 @@ public class DocumentController {
     private final DocumentService documentService;
     private final GraphRagService graphRagService;
     private final WebClient.Builder webClientBuilder;
-    private final TenantConfigRepository tenantConfigRepository;
+    private final TenantConfigService tenantConfigService;
     private final DocumentInfoRepository documentInfoRepository;
 
     /**
@@ -61,7 +64,7 @@ public class DocumentController {
      */
     @GetMapping("/tenants")
     public Mono<ResponseEntity<Flux<TenantConfig>>> listTenants() {
-        Flux<TenantConfig> configFlux = this.tenantConfigRepository.findByEnabledTrueOrderByIdAsc();
+        Flux<TenantConfig> configFlux = this.tenantConfigService.findByEnabledTrueOrderByIdAsc();
         TenantConfig config = new TenantConfig();
         config.setTenantCode("0");
         config.setTenantName("全部租户");
@@ -80,8 +83,9 @@ public class DocumentController {
             @RequestParam(value = "keyword", required = false) String keyword,
             Pageable pageable) {
         String kw = ObjectUtils.isEmpty(keyword) ? "" : keyword.trim();
-        Mono<Long> totalMono = this.tenantConfigRepository.countSearch(kw).defaultIfEmpty(0L);
-        return Mono.zip(totalMono, this.tenantConfigRepository.searchPage(kw, pageable).collectList())
+        Mono<Long> totalMono = this.tenantConfigService.countSearch(kw).defaultIfEmpty(0L);
+        Mono<List<TenantConfig>> listMono = this.tenantConfigService.search(keyword, pageable);
+        return Mono.zip(totalMono, listMono)
                 .map(t -> {
                     long total = t.getT1();
                     Map<String, Object> result = new HashMap<>();
@@ -111,7 +115,7 @@ public class DocumentController {
         if ("0".equals(body.getTenantCode())) {
             return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户 0 为系统保留项，不能添加")));
         }
-        Mono<TenantConfig> configMono = this.tenantConfigRepository.findByTenantCode(body.getTenantCode());
+        Mono<TenantConfig> configMono = this.tenantConfigService.findByTenantCode(body.getTenantCode());
         Mono<ResponseEntity<Map<String, Object>>> responseEntityMono = configMono.flatMap(_ ->
                 Mono.just(ResponseEntity.badRequest().body(Map.of("success", false,
                         "message", "租户编码已存在: " + body.getTenantCode()))));
@@ -121,7 +125,7 @@ public class DocumentController {
                     .tenantCode(body.getTenantCode())
                     .tenantName(body.getTenantName()).enabled(true)
                     .createdTime(LocalDateTime.now()).build();
-            return this.tenantConfigRepository.save(tenantConfig).flatMap(saved -> {
+            return this.tenantConfigService.save(tenantConfig).flatMap(saved -> {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", true);
                 result.put("id", saved.getId());
@@ -137,12 +141,12 @@ public class DocumentController {
      */
     @DeleteMapping("/tenants/{id}")
     public Mono<ResponseEntity<Map<String, Object>>> deleteTenant(@PathVariable("id") Long id) {
-        return this.tenantConfigRepository.existsById(id).flatMap(exists -> {
+        return this.tenantConfigService.existsById(id).flatMap(exists -> {
             if (!exists) {
                 return Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND)
                         .body(Map.of("success", false, "message", "租户不存在或已被删除")));
             }
-            return this.tenantConfigRepository.deleteById(id).then(Mono.fromCallable(() -> {
+            return this.tenantConfigService.deleteById(id).then(Mono.fromCallable(() -> {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", true);
                 result.put("id", id);
@@ -304,11 +308,8 @@ public class DocumentController {
     public Mono<ResponseEntity<List<ChatMessage>>> getConversations(
             @RequestParam("userId") String userId,
             @RequestParam(value = "tenantCode", required = false) String tenantCode,
-            @RequestParam(value = "systemType", required = false) String systemType, Pageable pageable) {
-        log.info("收到对话记录查询: userId={}, tenant={}, system={}, page={}, size={}",
-                userId, tenantCode, systemType, pageable.getPageNumber(), pageable.getPageSize());
-        return graphRagService.getConversations(userId, tenantCode, systemType, pageable.getPageSize())
-                .map(ResponseEntity::ok);
+            @RequestParam(value = "systemType", required = false) String systemType) {
+        return graphRagService.getConversations(userId, tenantCode, systemType).map(ResponseEntity::ok);
     }
 
     /**
@@ -318,11 +319,8 @@ public class DocumentController {
      */
     @GetMapping("/conversations/session")
     public Mono<ResponseEntity<List<ChatMessage>>> getConversationsBySession(
-            @RequestParam("sessionId") String sessionId,
-            @RequestParam(value = "order", defaultValue = "desc") String order, Pageable pageable) {
-        int limit = pageable.getPageSize();
-        int offset = (int) pageable.getOffset();
-        return graphRagService.getConversationsBySession(sessionId, limit, offset, order)
+            @RequestParam("sessionId") String sessionId, Pageable pageable) {
+        return graphRagService.getConversationsBySession(sessionId, pageable)
                 .map(ResponseEntity::ok);
     }
 
@@ -331,11 +329,11 @@ public class DocumentController {
      * GET /documents/v1/sessions
      */
     @GetMapping("/sessions")
-    public Mono<ResponseEntity<List<Map<String, Object>>>> getSessions(
+    public Mono<ResponseEntity<Page<ChatSession>>> getSessions(
             @RequestParam("userId") String userId,
             @RequestParam(value = "tenantCode", required = false) String tenantCode,
             @RequestParam(value = "systemType", required = false) String systemType, Pageable pageable) {
-        return graphRagService.getSessions(userId, tenantCode, systemType, pageable.getPageSize())
+        return graphRagService.getSessions(userId, tenantCode, systemType, pageable)
                 .map(ResponseEntity::ok);
     }
 
@@ -397,16 +395,8 @@ public class DocumentController {
      * 支持租户/系统筛选 + 文件名标题关键字 + 状态筛选 + 分页（默认每页10条，按上传时间降序）
      */
     @GetMapping("/list")
-    public Mono<ResponseEntity<Map<String, Object>>> listDocuments(
-            DocumentRequest request,
-            @RequestParam(value = "keyword", required = false) String keyword,
-            @RequestParam(value = "status", required = false) String status,
-            @RequestParam(value = "page", defaultValue = "0") int page,
-            @RequestParam(value = "size", defaultValue = "10") int size) {
-        log.info("收到文档分页查询请求: tenantCode={}, systemType={}, keyword={}, status={}, page={}, size={}",
-                request.getTenantCode(), request.getSystemType(), keyword, status, page, size);
-        return this.documentService.queryDocumentsPage(request.getTenantCode(), request.getSystemType(),
-                keyword, status, page, size).map(ResponseEntity::ok);
+    public Mono<ResponseEntity<Page<DocumentInfo>>> listDocuments(DocumentRequest request, Pageable pageable) {
+        return this.documentService.queryDocumentsPage(request, pageable).map(ResponseEntity::ok);
     }
 
     /**

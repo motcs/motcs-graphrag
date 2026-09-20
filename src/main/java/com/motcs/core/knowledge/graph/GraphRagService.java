@@ -1,7 +1,9 @@
 package com.motcs.core.knowledge.graph;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.motcs.commons.ContextUtil;
 import com.motcs.commons.annotation.RestServerException;
+import com.motcs.commons.base.DatabaseService;
 import com.motcs.commons.utils.Utils;
 import com.motcs.core.auth.keys.ApiKey;
 import com.motcs.core.document.DocumentResponse;
@@ -11,10 +13,7 @@ import com.motcs.core.knowledge.KnowledgeEntity;
 import com.motcs.core.knowledge.KnowledgeEntityRepository;
 import com.motcs.core.knowledge.chunk.DocumentChunk;
 import com.motcs.core.knowledge.chunk.DocumentChunkRepository;
-import com.motcs.core.knowledge.record.ChatMessage;
-import com.motcs.core.knowledge.record.ChatMessageRepository;
-import com.motcs.core.knowledge.record.ChatSessionSummary;
-import com.motcs.core.knowledge.record.ChatSessionSummaryRepository;
+import com.motcs.core.knowledge.record.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.jspecify.annotations.NonNull;
@@ -26,6 +25,8 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Service;
@@ -53,7 +54,7 @@ import java.util.stream.Stream;
 @Log4j2
 @Service
 @RequiredArgsConstructor
-public class GraphRagService {
+public class GraphRagService extends DatabaseService {
 
     /**
      * 摘要时保留最近N轮原始对话
@@ -129,6 +130,7 @@ public class GraphRagService {
     private final DocumentChunkRepository chunkRepository;
     private final KnowledgeEntityRepository entityRepository;
     private final ChatMessageRepository chatMessageRepository;
+    private final ChatSessionRepository chatSessionRepository;
     private final ChatSessionSummaryRepository summaryRepository;
 
     /**
@@ -446,7 +448,6 @@ public class GraphRagService {
      *
      * @param tenantCode 租户编码（可选，为空则不过滤）
      * @param systemType 系统类型（可选，为空则不过滤）
-     * @param limit      最大返回的关系条数
      * @return {nodes: [...], edges: [...]}
      */
     public Mono<Map<String, Object>> getGraphData(String tenantCode, String systemType, int limit) {
@@ -913,10 +914,12 @@ public class GraphRagService {
                             .reasoning(request.getReasoning()).sources(request.getSources())
                             .tenantCode(request.getTenantCode()).systemType(request.getSystemType())
                             .apiKeyId(apiKeyId).createTime(LocalDateTime.now()).build();
-                    return this.chatMessageRepository.save(record).doOnSuccess(r -> {
+                    return this.chatMessageRepository.save(record).publishOn(Schedulers.boundedElastic()).doOnSuccess(r -> {
                         if (!ObjectUtils.isEmpty(r)) {
                             log.info("对话记录已保存: id={}, userId={}, sessionId={}, question={}", r.getId(), request.getUserId(), request.getSessionId(),
                                     request.getQuestion().length() > 50 ? request.getQuestion().substring(0, 50) + "..." : request.getQuestion());
+                            // 同步更新 chat_session 主表
+                            upsertChatSession(request, apiKeyId, existingTitle).subscribe();
                             // 首次问答完成且尚无标题时，异步生成会话主题
                             if (!StringUtils.hasLength(existingTitle)) {
                                 generateSessionTitleAsync(request.getSessionId(), request.getQuestion(), request.getAnswer());
@@ -924,6 +927,24 @@ public class GraphRagService {
                         }
                     });
                 }).then();
+    }
+
+    /**
+     * 新增或更新 chat_session 主表记录
+     */
+    private Mono<Void> upsertChatSession(GraphRagRequest request, Long apiKeyId, String title) {
+        return this.chatSessionRepository.findBySessionId(request.getSessionId())
+                .switchIfEmpty(Mono.defer(() -> {
+                    ChatSession session = ChatSession.builder().sessionId(request.getSessionId())
+                            .title(title).userId(request.getUserId()).apiKeyId(apiKeyId)
+                            .tenantCode(request.getTenantCode()).systemType(request.getSystemType())
+                            .createTime(LocalDateTime.now()).updateTime(LocalDateTime.now()).build();
+                    return Mono.just(session);
+                })).flatMap(existing -> {
+                    existing.setTitle(title);
+                    existing.setUpdateTime(LocalDateTime.now());
+                    return this.chatSessionRepository.save(existing).then();
+                });
     }
 
     /**
@@ -964,8 +985,8 @@ public class GraphRagService {
      * 按用户查询最近对话记录
      */
     public Mono<List<ChatMessage>> getConversations(String userId, String tenantCode,
-                                                    String systemType, int limit) {
-        return this.chatMessageRepository.findByUser(userId, tenantCode, systemType, limit)
+                                                    String systemType) {
+        return this.chatMessageRepository.findByUser(userId, tenantCode, systemType)
                 .collectList();
     }
 
@@ -975,29 +996,53 @@ public class GraphRagService {
      * 按会话ID分页查询对话
      * order=desc（默认，倒序）；order=asc（正序，导出用）
      */
-    public Mono<List<ChatMessage>> getConversationsBySession(String sessionId, int limit, int offset, String order) {
-        if ("asc".equalsIgnoreCase(order)) {
-            return this.chatMessageRepository.findBySessionIdAsc(sessionId, limit, offset).collectList();
-        }
-        return this.chatMessageRepository.findRecentBySessionId(sessionId, limit, offset).collectList();
+    public Mono<List<ChatMessage>> getConversationsBySession(String sessionId, Pageable pageable) {
+        String sql = "SELECT * FROM chat_message WHERE session_id = :sessionId" + ContextUtil.applyPage(pageable);
+        return super.queryWith(sql, Map.of("sessionId", sessionId), ChatMessage.class).collectList();
     }
 
     /**
      * 查询用户的会话列表（取每个会话最后一条记录的title作为标题，按最后活跃时间倒序）
      */
-    public Mono<List<Map<String, Object>>> getSessions(String userId, String tenantCode,
-                                                       String systemType, int limit) {
-        return this.chatMessageRepository.findByUser(userId, tenantCode, systemType, 500)
-                .collectList().map(records -> aggregateSessions(records, limit));
+    public Mono<Page<ChatSession>> getSessions(String userId, String tenantCode, String systemType, Pageable pageable) {
+        String builder = """
+                SELECT * FROM chat_session WHERE user_id = :userId
+                 AND (:tenantCode IS NULL OR tenant_code = :tenantCode)
+                 AND (:systemType IS NULL OR system_type = :systemType)
+                """ + ContextUtil.applyPage(pageable);
+
+        Map<String, Object> params = Map.of("userId", userId, "tenantCode", tenantCode, "systemType", systemType);
+        Flux<ChatSession> listMono = super.queryWith(builder, params, ChatSession.class);
+        Mono<Long> countMono = this.chatSessionRepository.countSessions(userId, tenantCode, systemType);
+        return Mono.zip(listMono.collectList(), countMono)
+                .map(tuple2 -> new PageImpl<>(tuple2.getT1(), pageable, tuple2.getT2()));
+    }
+
+    /**
+     * 同步老的聊天记录到 chat_session 主表
+     * 从 chat_message 按 session_id 分组，取每个会话最新一条记录的元信息
+     */
+    public Mono<Long> syncChatSessions() {
+        Mono<Long> longMono = this.chatMessageRepository.findAllSessionGroups()
+                .map(msg -> ChatSession.builder().sessionId(msg.getSessionId())
+                        .title(msg.getTitle()).userId(msg.getUserId()).apiKeyId(msg.getApiKeyId())
+                        .tenantCode(msg.getTenantCode()).systemType(msg.getSystemType())
+                        .createTime(msg.getCreateTime()).updateTime(msg.getCreateTime()).build())
+                .flatMap(this.chatSessionRepository::save).count();
+        return this.chatSessionRepository.deleteAll().then(longMono);
     }
 
     /**
      * 按 API Key 查询会话列表（该 Key 创建的对话，可按用户/租户/系统过滤，条件为空不过滤）
      */
-    public Mono<List<Map<String, Object>>> getSessionsByApiKey(ApiKey apiKey, String userId, Pageable pageable) {
-        return this.chatMessageRepository.findByApiKey(apiKey.getId(), Utils.blankToNull(userId),
-                        Utils.blankToNull(apiKey.getTenantCode()), Utils.blankToNull(apiKey.getSystemType()))
-                .collectList().map(records -> aggregateSessions(records, pageable.getPageSize()));
+    public Mono<Page<ChatSession>> getSessionsByApiKey(ApiKey apiKey, String userId, Pageable pageable) {
+        String uid = Utils.blankToNull(userId);
+        String tc = Utils.blankToNull(apiKey.getTenantCode());
+        String st = Utils.blankToNull(apiKey.getSystemType());
+        Flux<ChatSession> listMono = this.chatSessionRepository.findSessionsByApiKey(apiKey.getId(), uid, tc, st, pageable);
+        Mono<Long> countMono = this.chatSessionRepository.countSessionsByApiKey(apiKey.getId(), uid, tc, st);
+        return Mono.zip(listMono.collectList(), countMono)
+                .map(tuple2 -> new PageImpl<>(tuple2.getT1(), pageable, tuple2.getT2()));
     }
 
     // ==================== 对话记录 ====================
@@ -1042,7 +1087,7 @@ public class GraphRagService {
     /**
      * 会话列表聚合：取每个会话最后一条记录的 title（空则用首条问题兜底），按最后活跃时间倒序
      */
-    private List<Map<String, Object>> aggregateSessions(List<ChatMessage> records, int limit) {
+    private List<Map<String, Object>> aggregateSessions(List<ChatMessage> records, int offset, int limit) {
         // findByUser 是 DESC，lastBySession 取最近一条（含title），同时记录首条问题作兜底
         Map<String, ChatMessage> lastBySession = new LinkedHashMap<>();
         Map<String, String> firstQuestionBySession = new HashMap<>();
@@ -1060,7 +1105,7 @@ public class GraphRagService {
                 lastBySession.put(r.getSessionId(), r);
             }
         }
-        return lastBySession.entrySet().stream().limit(limit).map(e -> {
+        return lastBySession.entrySet().stream().skip(offset).limit(limit).map(e -> {
             ChatMessage r = e.getValue();
             String title = r.getTitle();
             if (ObjectUtils.isEmpty(title)) {

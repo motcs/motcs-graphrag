@@ -5,13 +5,16 @@ import com.motcs.commons.utils.Utils;
 import com.motcs.core.auth.keys.ApiKey;
 import com.motcs.core.auth.keys.ApiKeyService;
 import com.motcs.core.auth.keys.usage.ApiKeyUsage;
+import com.motcs.core.auth.keys.usage.ApiKeyUsageRequest;
 import com.motcs.core.auth.keys.usage.ApiKeyUsageService;
+import com.motcs.core.auth.keys.usage.summary.UsageOverviewRow;
 import com.motcs.core.auth.token.AuthenticationToken;
 import com.motcs.core.auth.token.TokenStore;
 import com.motcs.core.request.ApiKeyRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -21,7 +24,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.util.ObjectUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ServerWebExchange;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
@@ -96,7 +98,7 @@ public class AuthController {
 
     @GetMapping("/api-keys")
     @Operation(summary = "Key 列表分页（含累计用量，按创建时间降序；默认每页10条）")
-    public Mono<ResponseEntity<Map<String, Object>>> listApiKeys(Pageable pageable) {
+    public Mono<ResponseEntity<Page<UsageOverviewRow>>> listApiKeys(Pageable pageable) {
         return this.apiKeyUsageService.listApiKeysPage(pageable).map(ResponseEntity::ok);
     }
 
@@ -171,8 +173,11 @@ public class AuthController {
      */
     @GetMapping("/api-keys/{id}/usage")
     @Operation(summary = "Key 使用明细（每次对话的 token 消耗，分页）")
-    public Mono<ResponseEntity<Flux<ApiKeyUsage>>> apiKeyUsageList(@PathVariable Long id, Pageable pageable) {
-        return Mono.just(ResponseEntity.ok(this.apiKeyUsageService.list(id, pageable)));
+    public Mono<ResponseEntity<Page<ApiKeyUsage>>> apiKeyUsageList(@PathVariable Long id, Pageable pageable) {
+        ApiKeyUsageRequest request = new ApiKeyUsageRequest();
+        request.setApiKeyId(id);
+        Mono<Page<ApiKeyUsage>> list = this.apiKeyUsageService.list(request, pageable);
+        return list.map(ResponseEntity::ok);
     }
 
     /**

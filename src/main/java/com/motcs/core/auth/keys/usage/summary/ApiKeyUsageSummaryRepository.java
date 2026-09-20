@@ -1,10 +1,8 @@
 package com.motcs.core.auth.keys.usage.summary;
 
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.r2dbc.repository.Modifying;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
@@ -42,50 +40,6 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
               updated_time     = :now
             """)
     Mono<Long> incrementUsage(Long apiKeyId, long promptTokens, long completionTokens, long totalTokens, LocalDateTime now);
-
-    /**
-     * 监控总览分页：api_key LEFT JOIN 汇总表，按 total_tokens 降序。
-     * 从未使用的 Key 用量为 0，排在已使用 Key 之后。
-     */
-    @Query("""
-            SELECT k.id            AS id,
-                   k.name          AS name,
-                   k.key_prefix    AS key_prefix,
-                   k.tenant_code   AS tenant_code,
-                   k.system_type   AS system_type,
-                   k.enabled       AS enabled,
-                   COALESCE(s.total_calls, 0)      AS total_calls,
-                   COALESCE(s.prompt_tokens, 0)    AS prompt_tokens,
-                   COALESCE(s.completion_tokens, 0) AS completion_tokens,
-                   COALESCE(s.total_tokens, 0)     AS total_tokens,
-                   s.last_used_at  AS last_used_at
-            FROM api_key k
-            LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id
-            ORDER BY COALESCE(s.total_tokens, 0) DESC, k.id ASC
-            """)
-    Flux<UsageOverviewRow> findOverview(Pageable pageable);
-
-    /**
-     * API Key 管理列表分页：api_key LEFT JOIN 汇总表带用量，按创建时间降序。
-     */
-    @Query("""
-            SELECT k.id            AS id,
-                   k.name          AS name,
-                   k.key_prefix    AS key_prefix,
-                   k.tenant_code   AS tenant_code,
-                   k.system_type   AS system_type,
-                   k.enabled       AS enabled,
-                   COALESCE(s.total_calls, 0)      AS total_calls,
-                   COALESCE(s.prompt_tokens, 0)    AS prompt_tokens,
-                   COALESCE(s.completion_tokens, 0) AS completion_tokens,
-                   COALESCE(s.total_tokens, 0)     AS total_tokens,
-                   s.last_used_at  AS last_used_at,
-                   k.created_time  AS created_time
-            FROM api_key k
-            LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id
-            ORDER BY k.created_time DESC, k.id DESC
-            """)
-    Flux<UsageOverviewRow> findApiKeyList(Pageable pageable);
 
     /**
      * Key 总数（监控总览分页总数）

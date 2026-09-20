@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
  * Motcs 知识图谱前端 - 主逻辑
  * ============================================================ */
 
@@ -132,6 +132,9 @@ const state = {
     selectedFiles: [],
     graphNetwork: null,
     history: [],
+    historyPage: 0,
+    historyLoading: false,
+    historyHasMore: true,
     sessionId: null,
     currentTitle: '',
     currentSources: [],
@@ -551,12 +554,18 @@ function renderLightMarkdown(md) {
 
 function syncLabels() {
     const el = $('currentSessionId');
-    if (state.sessionId) {
-        el.textContent = state.currentTitle || (state.sessionId.slice(0, 16) + '...');
-        el.title = state.sessionId;
-    } else {
-        el.textContent = '未开始';
-        el.title = '';
+    const elMobile = $('currentSessionIdMobile');
+    const displayText = state.sessionId
+        ? (state.currentTitle || (state.sessionId.slice(0, 16) + '...'))
+        : '未开始';
+    const displayTitle = state.sessionId ? state.sessionId : '';
+    if (el) {
+        el.textContent = displayText;
+        el.title = displayTitle;
+    }
+    if (elMobile) {
+        elMobile.textContent = displayText;
+        elMobile.title = displayTitle;
     }
 }
 
@@ -760,6 +769,13 @@ const WELCOME_CONFIG = {
         capabilities: ['📄 统战工作问答', '📋 数字平台文件检索', '🔁 多轮对话（结合上下文）'],
         coverage: '范围：统战工作 · 数字平台 · 党外人士 · 政策文件',
         suggestions: ['数智统战平台包含哪些功能？', '统战工作的主要职责是什么？', '党外人士管理有哪些要求？']
+    },
+    mass: {
+        title: '您好，我是AI小智，群众服务知识库智能助手',
+        subtitle: '已接入群众服务文档知识库，支持：',
+        capabilities: ['📄 群众咨询问答', '📋 民生政策文件检索', '🔁 多轮对话（结合上下文）'],
+        coverage: '范围：群众诉求 · 民生服务 · 政策咨询 · 办事指南',
+        suggestions: ['群众诉求怎么反映？', '民生政策有哪些？', '办事指南怎么查询？']
     }
 };
 
@@ -984,6 +1000,8 @@ async function askQuestion() {
 
     if (!state.sessionId) {
         state.sessionId = genSessionId();
+        // 新对话：自动把第一个问题作为标题
+        state.currentTitle = question.length > 20 ? question.slice(0, 20) + '...' : question;
         syncLabels();
     }
     const mySessionId = state.sessionId;
@@ -1291,21 +1309,44 @@ $('sourceModal').addEventListener('click', e => {
 });
 
 /* ---------- 提问历史（按会话分组） ---------- */
-async function loadHistory() {
+async function loadHistory(reset = true) {
+    if (state.historyLoading) return;
+    if (reset) {
+        state.historyPage = 0;
+        state.historyHasMore = true;
+        state.history = [];
+    }
+    if (!state.historyHasMore) return;
+    state.historyLoading = true;
     try {
         const params = new URLSearchParams();
         params.append('userId', getUser());
         params.append('tenantCode', getTenant());
         params.append('systemType', getSystem());
-        params.append('page', '0');
-        params.append('size', '20');
+        params.append('page', String(state.historyPage));
+        params.append('size', '10');
+        params.append('sort', 'createTime,desc');
         const res = await fetch(`${API_BASE}/sessions?${params.toString()}`);
         if (res.ok) {
-            state.history = await res.json();
+            const data = await res.json();
+            const list = data.content || [];
+            state.history = state.history.concat(list);
+            state.historyHasMore = (data.number || 0) < (data.totalPages || 0) - 1;
+            state.historyPage++;
             renderHistory();
+            // 刷新当前会话标题（后端可能已异步生成新标题）
+            if (state.sessionId) {
+                const current = list.find(s => s.sessionId === state.sessionId || s.id === state.sessionId);
+                if (current && current.title && current.title !== state.currentTitle) {
+                    state.currentTitle = current.title;
+                    syncLabels();
+                }
+            }
         }
     } catch (err) {
         console.warn('加载会话列表失败:', err.message);
+    } finally {
+        state.historyLoading = false;
     }
 }
 
@@ -1322,8 +1363,8 @@ function renderHistory() {
         list.innerHTML = '<p class="text-xs text-gray-600 px-2 py-1">暂无历史</p>';
         return;
     }
-    // 只显示最近 5 条
-    const recent = state.history.slice(0, 5);
+    // 渲染全部已加载的会话（滚动到底部自动加载更多）
+    const recent = state.history;
     list.innerHTML = recent.map((s, i) => {
         const selected = state.historySelected.has(s.sessionId);
         const displayName = s.title || s.question || '新对话';
@@ -1351,6 +1392,11 @@ function renderHistory() {
             `}
         </div>`;
     }).join('');
+
+    // 没有更多时底部提示
+    if (!state.historyHasMore && state.history.length > 0) {
+        list.insertAdjacentHTML('beforeend', '<div class="text-center text-xs text-gray-600 py-2">没有更多啦</div>');
+    }
 
     // 点击加载会话（非批量模式）
     if (!state.historyBatchMode) {
@@ -2513,12 +2559,198 @@ $('docFilterSystem').addEventListener('change', () => loadDocuments());
 
 /* ---------- 初始化 ---------- */
 function init() {
+    // 移动端：汉堡菜单切换侧边栏
+    const menuToggle = $('menuToggle');
+    const sideNav = $('sideNav');
+    const navOverlay = $('navOverlay');
+    if (menuToggle && sideNav && navOverlay) {
+        const openNav = () => {
+            sideNav.classList.remove('-translate-x-full');
+            navOverlay.classList.remove('hidden');
+        };
+        const closeNav = () => {
+            sideNav.classList.add('-translate-x-full');
+            navOverlay.classList.add('hidden');
+        };
+        menuToggle.addEventListener('click', openNav);
+        navOverlay.addEventListener('click', closeNav);
+        // 点击导航项后自动关闭侧边栏（移动端）
+        sideNav.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (window.innerWidth < 768) closeNav();
+            });
+        });
+        // 新对话按钮也关闭
+        const newChatBtn = $('newChatBtn');
+        if (newChatBtn) newChatBtn.addEventListener('click', () => {
+            if (window.innerWidth < 768) closeNav();
+        });
+    }
+
+    // 小屏个人中心浮层
+    const userMenuBtn = $('userMenuBtn');
+    const userMenuPanel = $('userMenuPanel');
+    if (userMenuBtn && userMenuPanel) {
+        userMenuBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            userMenuPanel.classList.toggle('hidden');
+        });
+        // 点击浮层外部关闭
+        document.addEventListener('click', (e) => {
+            if (!userMenuPanel.classList.contains('hidden') &&
+                !userMenuPanel.contains(e.target) &&
+                e.target !== userMenuBtn) {
+                userMenuPanel.classList.add('hidden');
+            }
+        });
+    }
+
+    // 小屏模型选择与大屏同步（初始化 + 双向）
+    const modelSelect = $('modelSelect');
+    const modelSelectMobile = $('modelSelectMobile');
+    if (modelSelect && modelSelectMobile) {
+        modelSelectMobile.value = modelSelect.value;
+        modelSelect.addEventListener('change', () => { modelSelectMobile.value = modelSelect.value; });
+        modelSelectMobile.addEventListener('change', () => { modelSelect.value = modelSelectMobile.value; });
+    }
+
+    // AI提供商标签 + 会话ID 同步到小屏（实时监听变化）
+    const syncMobileLabels = () => {
+        const provider = $('aiProviderLabel');
+        const providerMobile = $('aiProviderLabelMobile');
+        if (provider && providerMobile) providerMobile.textContent = provider.textContent;
+        const sid = $('currentSessionId');
+        const sidMobile = $('currentSessionIdMobile');
+        if (sid && sidMobile) sidMobile.textContent = sid.textContent;
+    };
+    // 初始同步
+    setTimeout(syncMobileLabels, 500);
+    // 监听 currentSessionId 变化（对话开始后才赋值）
+    const sidEl = $('currentSessionId');
+    if (sidEl && typeof MutationObserver !== 'undefined') {
+        const observer = new MutationObserver(() => syncMobileLabels());
+        observer.observe(sidEl, { childList: true, characterData: true, subtree: true });
+    }
+
+    // 小屏系统下拉与大屏同步
+    const syncMobileSystem = () => {
+        const sys = $('globalSystem');
+        const sysMobile = $('globalSystemMobile');
+        if (!sys || !sysMobile) return;
+        // 清空重新填充
+        sysMobile.innerHTML = '';
+        sys.querySelectorAll('option').forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.textContent;
+            sysMobile.appendChild(opt);
+        });
+        sysMobile.value = sys.value;
+        // 双向同步
+        sysMobile.onchange = () => {
+            sys.value = sysMobile.value;
+            sys.dispatchEvent(new Event('change'));
+        };
+        sys.onchange = () => {
+            sysMobile.value = sys.value;
+        };
+    };
+    // 延迟初始化
+    setTimeout(syncMobileSystem, 500);
+    // 监听大屏第一次 change，重新同步选项
+    let sysSynced = false;
+    const sysEl = $('globalSystem');
+    if (sysEl) {
+        sysEl.addEventListener('change', () => {
+            if (!sysSynced) {
+                sysSynced = true;
+                syncMobileSystem();
+            }
+        });
+    }
+
+    // 小屏用户信息同步
+    const syncMobileUser = () => {
+        const user = $('globalUser');
+        const userMobile = $('globalUserMobile');
+        if (user && userMobile) userMobile.textContent = user.value || user.textContent || '';
+    };
+    setTimeout(syncMobileUser, 300);
+
+    // 小屏服务状态同步
+    const syncMobileHealth = () => {
+        const dot = $('healthDot');
+        const dotMobile = $('healthDotMobile');
+        if (dot && dotMobile) {
+            dotMobile.className = dot.className;
+        }
+        const text = $('healthText');
+        const textMobile = $('healthTextMobile');
+        if (text && textMobile) textMobile.textContent = text.textContent;
+    };
+    setTimeout(syncMobileHealth, 1000);
+
+    // 小屏租户下拉同步
+    const syncMobileTenant = () => {
+        const tenant = $('globalTenant');
+        const wrap = $('tenantSelectMobileWrap');
+        if (tenant && wrap) {
+            // 清空 wrap
+            wrap.innerHTML = '';
+            // 创建小屏 select
+            const mobileSel = document.createElement('select');
+            mobileSel.id = 'globalTenantMobile';
+            mobileSel.className = 'w-full px-2 py-1.5 text-xs bg-dark-850 border border-white/10 rounded-lg text-gray-300';
+            // 复制大屏选项
+            tenant.querySelectorAll('option').forEach(o => {
+                const opt = document.createElement('option');
+                opt.value = o.value; opt.textContent = o.textContent;
+                mobileSel.appendChild(opt);
+            });
+            // 初始值
+            mobileSel.value = tenant.value;
+            wrap.appendChild(mobileSel);
+            // 双向同步
+            mobileSel.addEventListener('change', () => {
+                tenant.value = mobileSel.value;
+                tenant.dispatchEvent(new Event('change'));
+            });
+            tenant.addEventListener('change', () => {
+                mobileSel.value = tenant.value;
+            });
+        }
+    };
+    // 延迟执行（等大屏租户列表加载完）
+    setTimeout(syncMobileTenant, 1000);
+    // 大屏租户加载完后重新同步（监听 globalTenant 的 change）
+    let tenantSynced = false;
+    const origTenantChange = () => {
+        if (!tenantSynced) {
+            tenantSynced = true;
+            syncMobileTenant();
+        }
+    };
+    $('globalTenant')?.addEventListener('change', origTenantChange);
+
+    // 小屏退出按钮
+    const logoutBtnMobile = $('logoutBtnMobile');
+    if (logoutBtnMobile) logoutBtnMobile.addEventListener('click', () => {
+        const btn = $('logoutBtn'); if (btn) btn.click();
+    });
+
     initTenantSystemSelects();
     checkAuth();
     loadAiProvider();
     initMarkdown();
     syncLabels();
     loadHistory();
+
+    // 历史会话列表滚动到底部自动加载更多
+    $('historyList').parentElement.addEventListener('scroll', () => {
+        const el = $('historyList');
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50) {
+            loadHistory(false);
+        }
+    });
     checkHealth();
     updateStats();
     setInterval(checkHealth, 30000);
@@ -2559,8 +2791,23 @@ async function loadAiProvider() {
             if (m === info.defaultModel) opt.selected = true;
             sel.appendChild(opt);
         });
+        // 同步填充小屏模型下拉
+        const selMobile = $('modelSelectMobile');
+        if (selMobile) {
+            selMobile.innerHTML = '';
+            info.models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                if (m === info.defaultModel) opt.selected = true;
+                selMobile.appendChild(opt);
+            });
+        }
         const pv = info.name || info.provider || '';
-        if (pv && $('aiProviderLabel')) $('aiProviderLabel').textContent = pv;
+        if (pv) {
+            if ($('aiProviderLabel')) $('aiProviderLabel').textContent = pv;
+            if ($('aiProviderLabelMobile')) $('aiProviderLabelMobile').textContent = pv;
+        }
     } catch (e) {
         // 接口不可用时保留 HTML 默认选项（deepseek 三模型）
     }
@@ -2646,12 +2893,21 @@ async function toggleApiKey(id, currentEnabled) {
 
 /** 查看 Key 用量明细弹窗 */
 async function showApiKeyUsage(id, name) {
+    state.apiKeyUsageId = id;
+    state.apiKeyUsagePage = 0;
     $('apiKeyUsageTitle').textContent = '用量明细' + (name ? ' — ' + name : '');
     $('apiKeyUsageSub').textContent = 'Key #' + id + ' · 加载中…';
+    $('apiKeyUsageModal').classList.remove('hidden');
+    await loadApiKeyUsagePage(0);
+}
+
+/** 加载 Key 用量明细分页 */
+async function loadApiKeyUsagePage(page) {
+    const id = state.apiKeyUsageId;
+    if (!id) return;
     const tbody = $('apiKeyUsageList');
     tbody.innerHTML = '';
     $('apiKeyUsageEmpty').classList.add('hidden');
-    $('apiKeyUsageModal').classList.remove('hidden');
     try {
         // 汇总：调用次数 + 总 token（显示在弹窗头部）
         const sRes = await fetch(`${AUTH_BASE}/api-keys/${id}/usage-summary`);
@@ -2661,10 +2917,12 @@ async function showApiKeyUsage(id, name) {
                 `Key #${id} · 累计 ${s.totalCalls || 0} 次调用 / ${(s.totalTokens || 0).toLocaleString()} token` +
                 `（输入 ${(s.promptTokens || 0).toLocaleString()} · 输出 ${(s.completionTokens || 0).toLocaleString()}）`;
         }
-        const res = await fetch(`${AUTH_BASE}/api-keys/${id}/usage?page=0&size=50&sort=createdTime,desc`);
+        const res = await fetch(`${AUTH_BASE}/api-keys/${id}/usage?page=${page}&size=10&sort=createdTime,desc`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        const list = await res.json();
-        if (!list || list.length === 0) { $('apiKeyUsageEmpty').classList.remove('hidden'); return; }
+        const data = await res.json();
+        state.apiKeyUsagePage = data.number || 0;
+        const list = data.content || [];
+        if (list.length === 0) { $('apiKeyUsageEmpty').classList.remove('hidden'); }
         list.forEach(u => {
             const tr = document.createElement('tr');
             tr.className = 'border-b border-white/5';
@@ -2678,6 +2936,11 @@ async function showApiKeyUsage(id, name) {
                 <td class="py-2.5 text-right text-xs text-gray-300 font-medium">${u.totalTokens || 0}</td>`;
             tbody.appendChild(tr);
         });
+        // 分页按钮
+        const totalPages = data.totalPages || 0;
+        $('apiKeyUsagePageInfo').textContent = `第 ${state.apiKeyUsagePage + 1} / ${totalPages} 页 · 共 ${data.totalElements || 0} 条`;
+        $('apiKeyUsagePrev').disabled = state.apiKeyUsagePage <= 0;
+        $('apiKeyUsageNext').disabled = state.apiKeyUsagePage >= totalPages - 1;
     } catch (e) {
         showToast('加载用量明细失败', 'error');
     }

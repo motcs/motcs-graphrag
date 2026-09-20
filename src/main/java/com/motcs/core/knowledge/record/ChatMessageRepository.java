@@ -14,8 +14,11 @@ public interface ChatMessageRepository extends ReactiveCrudRepository<ChatMessag
     /**
      * 按用户+租户+系统查询最近对话记录
      */
-    @Query("SELECT * FROM chat_message WHERE user_id = :userId AND tenant_code = :tenantCode AND system_type = :systemType ORDER BY create_time DESC LIMIT :limit")
-    Flux<ChatMessage> findByUser(String userId, String tenantCode, String systemType, int limit);
+    @Query("SELECT * FROM chat_message WHERE user_id = :userId AND tenant_code = :tenantCode AND system_type = :systemType ORDER BY create_time DESC")
+    Flux<ChatMessage> findByUser(String userId, String tenantCode, String systemType);
+
+    @Query("SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY create_time DESC) AS rn FROM chat_message) t WHERE t.rn = 1;")
+    Flux<ChatMessage> findAllSessionGroups();
 
     /**
      * 按会话ID查询对话历史（多轮上下文用，按时间正序）
@@ -28,12 +31,6 @@ public interface ChatMessageRepository extends ReactiveCrudRepository<ChatMessag
      */
     @Query("SELECT * FROM chat_message WHERE session_id = :sessionId ORDER BY create_time DESC LIMIT :limit OFFSET :offset")
     Flux<ChatMessage> findRecentBySessionId(String sessionId, int limit, int offset);
-
-    /**
-     * 按会话ID正序分页查询（导出用，按时间正序）
-     */
-    @Query("SELECT * FROM chat_message WHERE session_id = :sessionId ORDER BY create_time LIMIT :limit OFFSET :offset")
-    Flux<ChatMessage> findBySessionIdAsc(String sessionId, int limit, int offset);
 
     /**
      * 统计会话下的对话总数

@@ -3,16 +3,17 @@ package com.motcs.core.auth.keys;
 import com.motcs.commons.utils.Utils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
 import org.springframework.web.server.ServerWebExchange;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 
@@ -22,6 +23,7 @@ import java.util.HexFormat;
  * - Key 形如 sk-...（前缀 + 40 位随机，去掉易混淆字符 0O1lI）
  * - 数据库只存 SHA-256 哈希与前缀掩码，明文只在生成时返回一次
  * - 鉴权时对请求携带的 Key 做同样哈希后比对
+ * - resolveApiKey 走 Redis 缓存，避免每次查库
  *
  * @author <a href="https://github.com/motcs">motcs</a>
  * @since 2026-09-09 星期三
@@ -34,7 +36,11 @@ public class ApiKeyService {
     private static final char[] ALPHABET =
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".toCharArray();
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final String CACHE_KEY_PREFIX = "motcs:apikey:";
+    private static final Duration CACHE_TTL = Duration.ofHours(2);
+
     private final ApiKeyRepository apiKeyRepository;
+    private final ReactiveRedisTemplate<String, Object> redisTemplate;
     @Value("${app.auth.api.key.length:40}")
     private Integer apiKeyLen;
 
@@ -51,15 +57,20 @@ public class ApiKeyService {
     /**
      * 从请求头解析并校验 API Key（与 SecurityConfiguration.extractApiKey 同一规则）：
      * Authorization: Bearer sk-... 或 X-API-Key: sk-...；无效/缺失返回 empty
-     * 查询启用状态的 Key 实体（认证过滤用：把实体放入认证信息，供对话归属记录/校验）
+     * 走 Redis 缓存：key = motcs:apikey:{sha256}，TTL 2 小时
      */
     public Mono<ApiKey> resolveApiKey(ServerWebExchange exchange) {
         String key = Utils.extractApiKey(exchange);
         if (key == null || key.isBlank()) {
             return Mono.empty();
         }
-        return this.apiKeyRepository.findEnabledByKeyHash(sha256(key.trim()))
-                .filter(k -> Boolean.TRUE.equals(k.getEnabled()));
+        String hash = sha256(key.trim());
+        String cacheKey = CACHE_KEY_PREFIX + hash;
+        return redisTemplate.opsForValue().get(cacheKey).cast(ApiKey.class)
+                .switchIfEmpty(this.apiKeyRepository.findEnabledByKeyHash(hash)
+                        .filter(k -> Boolean.TRUE.equals(k.getEnabled()))
+                        .flatMap(apiKey -> redisTemplate.opsForValue()
+                                .set(cacheKey, apiKey, CACHE_TTL).thenReturn(apiKey)));
     }
 
     /**
@@ -90,19 +101,18 @@ public class ApiKeyService {
     }
 
     /**
-     * 全部 Key（列表展示，不含哈希与明文）
+     * 删除 Key：同时清理 Redis 缓存
      */
-    public Flux<ApiKey> list() {
-        return apiKeyRepository.findAll();
-    }
-
     public Mono<Void> delete(Long id) {
-        return apiKeyRepository.deleteById(id);
+        return apiKeyRepository.findById(id).flatMap(apiKey -> {
+            String cacheKey = CACHE_KEY_PREFIX + apiKey.getKeyHash();
+            return redisTemplate.delete(cacheKey)
+                    .then(apiKeyRepository.deleteById(id));
+        }).then();
     }
 
     /**
-     * 启用/停用 Key：关闭后该 Key 临时失效（findEnabledByKeyHash 查不到 → 请求 401），
-     * 重新开启后立即恢复。返回更新后的实体；不存在返回 empty。
+     * 启用/停用 Key：关闭后该 Key 临时失效，同时清理缓存；重新开启后立即恢复（重新查库缓存）
      */
     public Mono<ApiKey> setEnabled(Long id, Boolean enabled) {
         if (id == null || enabled == null) {
@@ -110,7 +120,10 @@ public class ApiKeyService {
         }
         return apiKeyRepository.findById(id).flatMap(existing -> {
             existing.setEnabled(enabled);
-            return apiKeyRepository.save(existing);
+            // 状态变更时清理缓存
+            String cacheKey = CACHE_KEY_PREFIX + existing.getKeyHash();
+            return redisTemplate.delete(cacheKey)
+                    .then(apiKeyRepository.save(existing));
         });
     }
 

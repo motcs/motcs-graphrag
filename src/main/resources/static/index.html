@@ -26,57 +26,100 @@
 
 <!-- 顶部导航栏 -->
 <header id="appHeader" class="bg-dark-900/80 backdrop-blur border-b border-white/5 sticky top-0 z-50">
-    <div class="max-w-[1600px] mx-auto px-6 h-16 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center">
-                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="max-w-[1600px] mx-auto px-3 md:px-6 h-16 flex items-center justify-between gap-2">
+        <!-- 左侧：汉堡 + 标题 -->
+        <div class="flex items-center gap-2 md:gap-3 min-w-0">
+            <button id="menuToggle" class="md:hidden p-2 rounded-lg hover:bg-white/5 transition shrink-0" title="菜单">
+                <svg class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+            <div class="w-8 h-8 md:w-9 md:h-9 rounded-lg bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center shrink-0">
+                <svg class="w-4 md:w-5 h-4 md:h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <circle cx="12" cy="5" r="2.5" stroke-width="2"/>
                     <circle cx="5" cy="19" r="2.5" stroke-width="2"/>
                     <circle cx="19" cy="19" r="2.5" stroke-width="2"/>
                     <path d="M12 7.5v4M10.5 13L6.5 17M13.5 13l4 4" stroke-width="2" stroke-linecap="round"/>
                 </svg>
             </div>
-            <div>
-                <h1 class="text-lg font-bold tracking-wide">Motcs 知识图谱</h1>
-                <p class="text-xs text-gray-400 -mt-0.5">GraphRAG 多跳智能搜索</p>
+            <div class="min-w-0">
+                <h1 class="text-base md:text-lg font-bold tracking-wide truncate">Motcs 知识图谱</h1>
+                <p class="text-xs text-gray-400 -mt-0.5 hidden md:block">GraphRAG 多跳智能搜索</p>
             </div>
         </div>
-        <div class="flex items-center gap-4">
-            <div class="flex items-center gap-2">
+        <!-- 右侧：控件（大屏直接显示，小屏收成个人中心） -->
+        <div class="flex items-center gap-2 md:gap-4 shrink-0">
+            <!-- 大屏直接显示的控件 -->
+            <div class="hidden lg:flex items-center gap-2">
                 <label class="text-xs text-gray-400">用户</label>
                 <input id="globalUser" type="text" value="xxhzj" readonly title="登录账号，不可修改"
                     class="w-24 px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg cursor-not-allowed opacity-60">
             </div>
-            <div class="flex items-center gap-2">
+            <div class="hidden sm:flex items-center gap-2">
                 <label class="text-xs text-gray-400">租户</label>
-                <!-- 租户可搜索下拉：原生 select 作为数据源与提交值载体（隐藏），搜索 UI 由 initSearchableSelect 动态渲染 -->
                 <select id="globalTenant" title="租户下拉内容来自后端租户配置表（GET /documents/v1/tenants），0 为超管全部租户，支持关键字搜索" class="hidden">
                     <option value="0">全部租户</option>
                 </select>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="hidden md:flex items-center gap-1.5">
                 <label class="text-xs text-gray-400">系统</label>
                 <select id="globalSystem" title="系统类型下拉内容来自 js/config.js（MOTCS_CONFIG.systems），部署可改"
                     class="w-28 px-3 py-1.5 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
                     <option value="other">其他</option>
                 </select>
             </div>
-            <div id="healthBadge" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-dark-850 border border-white/10">
+            <div id="healthBadge" class="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-dark-850 border border-white/10">
                 <span class="w-2 h-2 rounded-full bg-gray-500" id="healthDot"></span>
                 <span class="text-xs text-gray-400" id="healthText">检测中</span>
             </div>
-            <button id="logoutBtn" title="退出登录" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-850 hover:bg-white/5 border border-white/10 text-xs text-gray-300 transition">
+            <button id="logoutBtn" title="退出登录" class="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-850 hover:bg-white/5 border border-white/10 text-xs text-gray-300 transition">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
                 退出
+            </button>
+
+            <!-- 小屏个人中心按钮 -->
+            <button id="userMenuBtn" class="md:hidden p-2 rounded-lg hover:bg-white/5 transition" title="个人中心">
+                <svg class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
             </button>
         </div>
     </div>
 </header>
 
-<div id="appMain" class="max-w-[1400px] mx-auto px-4 py-6 flex gap-5">
+<!-- 小屏个人中心浮层 -->
+<div id="userMenuPanel" class="hidden md:hidden fixed top-16 right-2 z-50 w-72 bg-dark-900 border border-white/10 rounded-xl shadow-xl overflow-hidden">
+    <!-- 服务状态 -->
+    <div class="flex items-center gap-2 px-4 py-2.5 bg-dark-850/80 border-b border-white/5">
+        <span class="w-2 h-2 rounded-full bg-gray-500" id="healthDotMobile"></span>
+        <span class="text-xs text-gray-400">服务状态</span>
+        <span class="text-xs text-gray-300 ml-auto" id="healthTextMobile">检测中</span>
+    </div>
+    <!-- 用户信息 -->
+    <div class="px-4 py-3 space-y-3">
+        <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-400 w-12">用户</label>
+            <span class="flex-1 text-sm text-gray-200 font-medium" id="globalUserMobile">xxhzj</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-400 w-12">租户</label>
+            <div class="flex-1" id="tenantSelectMobileWrap"></div>
+        </div>
+        <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-400 w-12">系统</label>
+            <select id="globalSystemMobile" class="flex-1 px-2 py-1.5 text-xs bg-dark-850 border border-white/10 rounded-lg text-gray-300">
+                <option value="other">其他</option>
+            </select>
+        </div>
+        <button id="logoutBtnMobile" class="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-dark-850 hover:bg-white/5 border border-white/10 text-xs text-gray-300 transition mt-2">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+            退出登录
+        </button>
+    </div>
+</div>
+
+<div id="navOverlay" class="fixed inset-0 bg-black/60 z-40 hidden md:hidden"></div>
+
+<div id="appMain" class="max-w-[1400px] mx-auto px-3 md:px-4 py-4 md:py-6 flex flex-col md:flex-row gap-5">
 
     <!-- 左侧导航 -->
-    <nav class="w-[336px] shrink-0">
+    <nav id="sideNav" class="fixed md:static inset-y-0 left-0 z-50 w-[300px] md:w-[336px] shrink-0 transform -translate-x-full md:translate-x-0 transition-transform duration-200 ease-out md:transform-none md:transition-none">
         <div class="bg-dark-900/60 rounded-2xl border border-white/5 p-3 sticky top-24 flex flex-col max-h-[calc(100vh-120px)]">
             <!-- 新对话按钮 -->
             <button id="newChatBtn" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition mb-3">
@@ -163,12 +206,18 @@
             <div class="chat-input-area shrink-0 px-4 pb-4 pt-2">
                 <div class="max-w-[64rem] mx-auto">
                     <div class="bg-dark-900/80 rounded-2xl border border-white/10 focus-within:border-primary-500/50 transition shadow-lg">
+                        <!-- 小屏：提供商+会话在输入框上方 -->
+                        <div class="md:hidden flex items-center justify-between px-3 pt-2 pb-1 text-xs text-gray-500">
+                            <span id="aiProviderLabelMobile" class="px-2 py-0.5 rounded-md bg-primary-600/10 text-primary-300 border border-primary-500/20 text-[10px]">检测中…</span>
+                            <span class="text-[10px] whitespace-nowrap">会话: <span id="currentSessionIdMobile" class="text-primary-400 font-mono">未开始</span></span>
+                        </div>
                         <textarea id="questionInput" rows="1" placeholder="输入你的问题，Ctrl+Enter 发送"
                             class="w-full px-4 py-3 text-sm bg-transparent border-none resize-none focus:outline-none placeholder-gray-500 text-gray-200 max-h-32"></textarea>
-                        <div class="flex items-center justify-between px-3 pb-2">
-                            <div class="flex items-center gap-3 text-xs text-gray-500">
+                        <div class="flex items-center justify-between px-3 pb-2 gap-2">
+                            <!-- 大屏：模型选择 + 发送按钮 -->
+                            <div class="hidden md:flex items-center gap-3 text-xs text-gray-500">
                                 <label class="flex items-center gap-1.5 text-gray-400">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                                    <svg class="w-3.5 h-3.5" fill="none stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
                                     模型
                                 </label>
                                 <select id="modelSelect" title="选择AI模型"
@@ -180,7 +229,11 @@
                                 <span id="aiProviderLabel" class="px-2 py-1 rounded-md bg-primary-600/10 text-primary-300 border border-primary-500/20" title="当前启用的 AI 平台">检测中…</span>
                                 <span>会话: <span id="currentSessionId" class="text-primary-400 font-mono">未开始</span></span>
                             </div>
-                            <button id="askBtn" class="w-8 h-8 rounded-lg bg-primary-600 hover:bg-primary-500 flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed">
+                            <!-- 小屏：模型下拉 + 发送按钮一行 -->
+                            <select id="modelSelectMobile" title="选择AI模型"
+                                class="md:hidden flex-1 px-2 py-1.5 text-xs bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition text-gray-300">
+                            </select>
+                            <button id="askBtn" class="w-8 h-8 shrink-0 rounded-lg bg-primary-600 hover:bg-primary-500 flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed">
                                 <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
                             </button>
                         </div>
@@ -211,7 +264,7 @@
                             <div id="dropZone" class="border-2 border-dashed border-white/10 rounded-xl p-10 text-center cursor-pointer hover:border-primary-500/50 hover:bg-primary-500/5 transition">
                                 <svg class="w-12 h-12 mx-auto text-gray-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                                 <p class="text-sm text-gray-300">点击或拖拽文件到此处</p>
-                                <p class="text-xs text-gray-500 mt-1">最大 50MB，支持 pdf/doc/docx/xls/xlsx/ppt/pptx/txt/csv/md</p>
+                                <p class="text-xs text-gray-500 mt-1 leading-relaxed">最大 50MB<br>支持 pdf / doc / docx / xls / xlsx / ppt / pptx / txt / csv / md</p>
                                 <input type="file" id="fileInput" class="hidden" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md">
                             </div>
                             <div id="selectedFile" class="hidden mt-3 p-3 bg-dark-850 rounded-lg flex items-center gap-3">
@@ -273,19 +326,19 @@
         <section id="tab-documents" class="tab-panel hidden">
             <div class="mb-5 flex items-center justify-between">
                 <div>
-                    <h2 class="text-2xl font-bold">文档管理</h2>
-                    <p class="text-sm text-gray-400 mt-1">查看已入库的文档列表及分片信息</p>
+                    <h2 class="text-xl md:text-2xl font-bold">文档管理</h2>
+                    <p class="text-xs md:text-sm text-gray-400 mt-1">查看已入库的文档列表及分片信息</p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button id="fabUpload" class="px-4 py-2 text-sm bg-gradient-to-r from-primary-500 to-purple-600 hover:from-primary-400 hover:to-purple-500 rounded-lg text-white font-medium transition flex items-center gap-2 shadow-lg shadow-primary-500/20" title="上传文档">
+                    <button id="fabUpload" class="px-3 py-1.5 md:px-4 md:py-2 text-xs md:text-sm bg-gradient-to-r from-primary-500 to-purple-600 hover:from-primary-400 hover:to-purple-500 rounded-lg text-white font-medium transition flex items-center gap-1.5 md:gap-2 shadow-lg shadow-primary-500/20" title="上传文档">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
                         上传文档
                     </button>
-                    <button id="refreshDocs" class="px-4 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg hover:border-primary-500 transition flex items-center gap-2">
+                    <button id="refreshDocs" class="px-3 py-1.5 md:px-4 md:py-2 text-xs md:text-sm bg-dark-850 border border-white/10 rounded-lg hover:border-primary-500 transition flex items-center gap-1.5 md:gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                     刷新
                 </button>
-                <button id="migrateDocsBtn" class="px-4 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg hover:border-primary-500 transition flex items-center gap-2">
+                <button id="migrateDocsBtn" class="px-3 py-1.5 md:px-4 md:py-2 text-xs md:text-sm bg-dark-850 border border-white/10 rounded-lg hover:border-primary-500 transition flex items-center gap-1.5 md:gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10m0 0l-3-3m3 3l3-3M20 17V7m0 0l-3 3m3-3l3 3"/></svg>
                     同步历史文档
                 </button>
@@ -321,7 +374,7 @@
             </div>
 
             <div id="docsList" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-            <div id="docsPagination" class="mt-4 flex items-center justify-between text-xs text-gray-400"></div>
+            <div id="docsPagination" class="mt-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-400"></div>
         </section>
 
         <!-- ===== 租户管理 ===== -->
@@ -563,6 +616,13 @@
                     </table>
                     <div id="apiKeyUsageEmpty" class="text-center text-gray-500 text-sm py-6 hidden">暂无调用记录</div>
                 </div>
+                <div id="apiKeyUsagePagination" class="px-5 py-3 border-t border-white/5 flex items-center justify-between text-xs text-gray-400">
+                    <span id="apiKeyUsagePageInfo"></span>
+                    <div class="flex gap-2">
+                        <button id="apiKeyUsagePrev" onclick="loadApiKeyUsagePage(state.apiKeyUsagePage - 1)" class="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 transition disabled:opacity-30 disabled:cursor-not-allowed">上一页</button>
+                        <button id="apiKeyUsageNext" onclick="loadApiKeyUsagePage(state.apiKeyUsagePage + 1)" class="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 transition disabled:opacity-30 disabled:cursor-not-allowed">下一页</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -645,7 +705,7 @@
                     <div>
                         <label class="text-xs text-gray-400 mb-1.5 block">新文件 <span class="text-red-400">*</span></label>
                         <input type="file" id="reuploadFile" class="w-full text-sm text-gray-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary-600 file:text-white file:text-sm file:cursor-pointer hover:file:bg-primary-500">
-                        <p class="text-xs text-gray-500 mt-1">支持 pdf/doc/docx/txt/md/ppt/pptx/xls/xlsx/html，最大 50MB</p>
+                        <p class="text-xs text-gray-500 mt-1 leading-relaxed">最大 50MB<br>支持 pdf / doc / docx / xls / xlsx / ppt / pptx / txt / csv / md</p>
                     </div>
                     <button id="reuploadSubmit" class="w-full py-2.5 bg-primary-600 hover:bg-primary-500 rounded-lg text-sm font-medium transition disabled:opacity-40">确认上传</button>
                 </div>

@@ -114,11 +114,11 @@ create table tenant_config
 CREATE TABLE IF NOT EXISTS api_key_usage_summary
 (
     id                BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
-    api_key_id        BIGINT NOT NULL COMMENT 'API Key 主键ID（唯一）',
-    total_calls       BIGINT DEFAULT 0 COMMENT '累计调用次数',
-    prompt_tokens     BIGINT DEFAULT 0 COMMENT '累计输入 token',
-    completion_tokens BIGINT DEFAULT 0 COMMENT '累计输出 token',
-    total_tokens      BIGINT DEFAULT 0 COMMENT '累计总 token',
+    api_key_id        BIGINT   NOT NULL COMMENT 'API Key 主键ID（唯一）',
+    total_calls       BIGINT   DEFAULT 0 COMMENT '累计调用次数',
+    prompt_tokens     BIGINT   DEFAULT 0 COMMENT '累计输入 token',
+    completion_tokens BIGINT   DEFAULT 0 COMMENT '累计输出 token',
+    total_tokens      BIGINT   DEFAULT 0 COMMENT '累计总 token',
     last_used_at      DATETIME NULL COMMENT '最近调用时间',
     updated_time      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_summary_api_key (api_key_id),
@@ -158,3 +158,20 @@ CREATE TABLE IF NOT EXISTS document_info
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='文档元数据表';
 
+CREATE TABLE IF NOT EXISTS chat_session
+(
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    user_id     VARCHAR(64) NOT NULL COMMENT '用户编码',
+    session_id  VARCHAR(64) NOT NULL COMMENT '会话ID（多轮对话分组）',
+    title       VARCHAR(200) COMMENT '会话标题（每条记录冗余存储，取最后一条即可）',
+    api_key_id  BIGINT COMMENT '创建该对话的API Key ID（空=登录用户创建）',
+    tenant_code VARCHAR(64) COMMENT '租户编码',
+    system_type VARCHAR(64) COMMENT '系统类型',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '最后活跃时间',
+    INDEX idx_user_tenant_system (user_id, tenant_code, system_type),
+    INDEX idx_user_tenant_system_api_key_id (user_id, tenant_code, system_type, api_key_id),
+    INDEX idx_session_id (session_id),
+    INDEX idx_api_key_id (api_key_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='对话会话';

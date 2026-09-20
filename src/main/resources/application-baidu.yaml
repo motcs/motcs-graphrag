@@ -35,6 +35,12 @@ logging:
 server.port: ${SERVER_PORT:8080}
 
 spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
   neo4j:
     uri: ${NEO4J_URI:bolt://127.0.0.1:7687}
     authentication:

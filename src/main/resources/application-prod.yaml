@@ -13,6 +13,12 @@ spring:
       username: ${NEO4J_AUTH_USERNAME:neo4j}
       password: ${NEO4J_AUTH_PASSWORD:sx2011++}
 
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
   r2dbc:
     url: r2dbc:mysql://${app.r2dbc.url}?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
     username: ${app.r2dbc.username}

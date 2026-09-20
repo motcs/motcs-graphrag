@@ -16,6 +16,7 @@ window.MOTCS_CONFIG = {
         {code: 'cppcc', label: '政协'},
         {code: 'party', label: '党建'},
         {code: 'msw', label: '社会工作部'},
-        {code: 'digital', label: '数智统战'}
+        {code: 'digital', label: '数智统战'},
+        {code: 'mass', label: '群众'}
     ]
 };

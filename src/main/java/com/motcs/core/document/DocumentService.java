@@ -1,9 +1,8 @@
 package com.motcs.core.document;
 
-import com.motcs.commons.utils.AnyDocConverterUtil;
-import com.motcs.commons.utils.EnterpriseChunker;
-import com.motcs.commons.utils.FileUtils;
-import com.motcs.commons.utils.Utils;
+import com.motcs.commons.ContextUtil;
+import com.motcs.commons.base.DatabaseService;
+import com.motcs.commons.utils.*;
 import com.motcs.core.document.info.DocumentInfo;
 import com.motcs.core.document.info.DocumentInfoRepository;
 import com.motcs.core.knowledge.KnowledgeEntity;
@@ -16,22 +15,23 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.util.ObjectUtils;
+import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.util.StringUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * 文档管理服务
@@ -43,7 +43,7 @@ import java.util.stream.Collectors;
 @Log4j2
 @Service
 @RequiredArgsConstructor
-public class DocumentService {
+public class DocumentService extends DatabaseService {
 
     private final VectorStore vectorStore;
     private final EnterpriseChunker enterpriseChunker;
@@ -274,7 +274,10 @@ public class DocumentService {
     private void deleteByDocCodeSync(String docCode) {
         try {
             // 先删 MySQL 元数据记录（doc_code 唯一键，否则新插入会冲突）
-            try { documentInfoRepository.deleteByDocCode(docCode).block(); } catch (Exception ignore) {}
+            try {
+                documentInfoRepository.deleteByDocCode(docCode).block();
+            } catch (Exception ignore) {
+            }
             List<String> chunkIds = this.chunkRepository.findChunkIdsByDocCode(docCode);
             if (!chunkIds.isEmpty()) this.vectorStore.delete(chunkIds);
             this.chunkRepository.deleteChunksByDocCode(docCode);
@@ -443,121 +446,33 @@ public class DocumentService {
     }
 
     /**
-     * 查询文档列表（响应式），支持按租户隔离
-     *
-     * @param tenantCode 租户编码，为空则查询全部
-     * @param systemType 系统类型，为空则不过滤
-     * @return 文档响应列表 Mono
+     * 分页查询文档列表（数据库层面分页）
      */
-    public Mono<List<DocumentResponse>> queryDocuments(String tenantCode, String systemType) {
-        return Mono.fromCallable(() -> {
-            List<DocumentSummary> summaries = this.chunkRepository.findDocumentSummaries(
-                    tenantCode != null && !tenantCode.isBlank() ? tenantCode : "default",
-                    systemType != null && !systemType.isBlank() ? systemType : "default"
-            );
-            return summaries.stream().map(s -> toResponse(s)).collect(Collectors.toList());
-        }).subscribeOn(Schedulers.boundedElastic()).onErrorResume(e -> {
-            log.error("查询文档列表失败: {}", e.getMessage(), e);
-            return Mono.just(List.of());
-        });
-    }
+    public Mono<Page<DocumentInfo>> queryDocumentsPage(DocumentRequest request, Pageable pageable) {
+        ParameterSql parameterSql = request.buildDocWhereSql();
+        // 查询当前页数据
+        String searchSql = "SELECT * FROM document_info" + parameterSql.whereSql() + ContextUtil.applyPage(pageable);
+        Mono<List<DocumentInfo>> searchMono = this.queryWith(searchSql, parameterSql.params(),
+                DocumentInfo.class).collectList();
+        // 查询总数
+        String countSql = "SELECT COUNT(*) FROM document_info" + parameterSql.whereSql();
+        Mono<Long> countMono = this.countWith(countSql, parameterSql.params()).defaultIfEmpty(0L);
 
-    /**
-     * 查询文档分页列表（管理表格用）：支持租户/系统筛选 + 文件名标题关键字 + 状态筛选 + 分页。
-     *
-     * @param tenantCode 租户编码（空/'0' 表示全部）
-     * @param systemType 系统类型（空表示全部）
-     * @param keyword    文件名/标题模糊关键字
-     * @param status     文档状态精确过滤（all/空 表示全部）
-     * @param page       页码（从0开始）
-     * @param size       每页条数
-     * @return 分页结果（content + totalElements + totalPages + number + size）
-     */
-    public Mono<Map<String, Object>> queryDocumentsPage(String tenantCode, String systemType,
-                                                        String keyword, String status,
-                                                        int page, int size) {
-        String tc = tenantCode != null && !tenantCode.isBlank() && !"0".equals(tenantCode) ? tenantCode : "";
-        String st = systemType != null && !systemType.isBlank() ? systemType : "";
-        String kw = keyword != null ? keyword.trim() : "";
-        String stFilter = (status == null || status.isBlank() || "all".equalsIgnoreCase(status)) ? "" : status;
-        Pageable pageable = PageRequest.of(page, size);
-        Mono<Long> totalMono = documentInfoRepository.countSearch(tc, st, kw, stFilter).defaultIfEmpty(0L);
-        Mono<List<DocumentResponse>> rowsMono = documentInfoRepository.searchPage(tc, st, kw, stFilter, pageable)
-                .collectList().map(list -> list.stream().map(this::toResponseFromInfo).collect(Collectors.toList()));
-        return Mono.zip(totalMono, rowsMono).map(t -> {
-            long total = t.getT1();
-            Map<String, Object> result = new HashMap<>();
-            result.put("content", t.getT2());
-            result.put("number", page);
-            result.put("size", size);
-            result.put("totalElements", total);
-            int totalPages = size == 0 ? 0 : (int) ((total + size - 1) / size);
-            result.put("totalPages", totalPages);
-            return result;
-        }).onErrorResume(e -> {
-            log.error("分页查询文档列表失败: {}", e.getMessage(), e);
-            Map<String, Object> empty = new HashMap<>();
-            empty.put("content", List.of());
-            empty.put("number", page);
-            empty.put("size", size);
-            empty.put("totalElements", 0L);
-            empty.put("totalPages", 0);
-            return Mono.just(empty);
-        });
-    }
-
-    /** DocumentInfo -> DocumentResponse 映射 */
-    private DocumentResponse toResponseFromInfo(DocumentInfo info) {
-        return DocumentResponse.builder()
-                .documentId(FileUtils.parseDocumentId(info.getDocumentId()))
-                .docCode(info.getDocCode())
-                .tenantCode(info.getTenantCode())
-                .systemType(info.getSystemType())
-                .enabled(info.getEnabled() != null && info.getEnabled())
-                .fileName(info.getFileName())
-                .title(info.getTitle() != null ? info.getTitle() : info.getFileName())
-                .description(info.getDescription())
-                .chunkCount(info.getChunkCount() != null ? info.getChunkCount() : 0)
-                .status(info.getStatus() != null ? info.getStatus() : "UNKNOWN")
-                .errorMessage(info.getErrorMessage())
-                .fileSize(info.getFileSize() != null ? info.getFileSize() : 0L)
-                .uploadTime(info.getCreatedTime())
-                .filePath(info.getFilePath())
-                .userId(info.getUserId())
-                .build();
-    }
-
-    /** DocumentSummary -> DocumentResponse 映射（与原 queryDocuments 一致） */
-    private DocumentResponse toResponse(DocumentSummary s) {
-        return DocumentResponse.builder()
-                .documentId(FileUtils.parseDocumentId(s.documentId()))
-                .docCode(s.docCode())
-                .tenantCode(s.tenantCode())
-                .systemType(s.systemType())
-                .enabled(s.enabled() == null || s.enabled())
-                .fileName(s.fileName())
-                .title(s.title() != null ? s.title() : s.fileName())
-                .description(s.description())
-                .chunkCount(s.chunkCount() != null ? s.chunkCount().intValue() : 0)
-                .status(s.status() != null ? s.status() : "UNKNOWN")
-                .errorMessage(s.errorMessage())
-                .fileSize(s.fileSize() != null ? s.fileSize() : 0L)
-                .uploadTime(FileUtils.parseUploadTime(s.uploadTime()))
-                .userId(s.userId())
-                .build();
+        return Mono.zip(searchMono, countMono).map(tuple2 ->
+                new PageImpl<>(tuple2.getT1(), pageable, tuple2.getT2()));
     }
 
     /**
      * 按租户统计文档数和分片数（轻量聚合查询，不返回明细）
      */
     public Mono<DocumentStatsResponse> getStats(DocumentRequest request) {
-        String tenantCode = (request != null && request.getTenantCode() != null
-                && !request.getTenantCode().isBlank() && !"0".equals(request.getTenantCode()))
-                ? request.getTenantCode() : "";
+        String tenantCode = (!ObjectUtils.isEmpty(request) && !ObjectUtils.isEmpty(request.getTenantCode())
+                && !"0".equals(request.getTenantCode())) ? request.getTenantCode() : "";
         Mono<Long> docsMono = documentInfoRepository.countSuccessByTenant(tenantCode).defaultIfEmpty(0L);
         Mono<Long> chunksMono = documentInfoRepository.sumChunksByTenant(tenantCode).defaultIfEmpty(0L);
         return Mono.zip(docsMono, chunksMono)
-                .map(t -> DocumentStatsResponse.builder().docCount(t.getT1()).chunkCount(t.getT2()).build())
+                .map(t -> DocumentStatsResponse.builder()
+                        .docCount(t.getT1()).chunkCount(t.getT2()).build())
                 .onErrorResume(e -> {
                     log.error("统计查询失败: {}", e.getMessage());
                     return Mono.just(DocumentStatsResponse.builder().docCount(0L).chunkCount(0L).build());
@@ -566,8 +481,7 @@ public class DocumentService {
 
     /**
      * 启动时：若 document_info 为空，从 Neo4j 聚合历史文档数据迁移到 MySQL。
-     */
-    /**
+     * <p>
      * 从 Neo4j 全量迁移文档元数据到 document_info（跳过已存在的 docCode）。
      */
     public Mono<Long> migrateFromNeo4j() {
