@@ -13,7 +13,7 @@
 ### 智能问答
 
 - 多轮对话，基于 `sessionId` 自动关联上下文
-- **模型可选**：对话框下方下拉框切换 `deepseek-v3.2` / `deepseek-v3.2-think` / `deepseek-v4-flash-0731`
+- **模型可选**：对话框下方下拉框切换 `deepseek-v4-flash-0731` / `glm-5.3-flash` / `ernie-4.5-turbo-128k`
   （下拉选项由后端 `GET /ai/v1/provider` 按当前启用的 AI 平台动态下发，避免选到不存在的模型）
 - SSE 流式输出（JSON 事件：session / sources / reasoning / content），AI 回答实时渲染 Markdown
 - 向量检索 + Neo4j 多跳图谱召回，双路融合
@@ -214,13 +214,13 @@ services:
 |--------------------------|------------------------------------------------------------|-----------------------------------------------|
 | `AI_BASE_URL`            | `https://qianfan.baidubce.com/v2`                          | 千帆 OpenAI 兼容接口地址                      |
 | `AI_API_KEY`             | -                                                          | 千帆 API Key（`bce-v3/...`）                  |
-| `AI_CHAT_MODEL`          | `deepseek-v3.2-think`                                      | 对话模型（三个可选，见[模型选择](#模型选择)） |
+| `AI_CHAT_MODEL`          | `glm-5.3-flash`                                      | 对话模型（三个可选，见[模型选择](#模型选择)） |
 | `AI_CHAT_TEMPERATURE`    | `0.1`                                                      | 对话温度                                      |
 | `AI_TIMEOUT`             | `300s`                                                     | AI 接口超时（思考模型建议保持 5 分钟）        |
 | `AI_EMBEDDING_MODEL`     | `bge-large-zh`                                             | 向量模型（1024 维，中文）                     |
 | `AI_EMBEDDING_DIMENSION` | `1024`                                                     | 向量维度（必须与向量模型一致）                |
 | `AI_PROVIDER`            | `baidu`                                                    | 当前 AI 平台标识（前端据此渲染模型下拉）      |
-| `AI_CHAT_MODELS`         | `deepseek-v3.2,deepseek-v3.2-think,deepseek-v4-flash-0731` | 可选模型列表（逗号分隔）                      |
+| `AI_CHAT_MODELS`         | `deepseek-v4-flash-0731,glm-5.3-flash,deepseek-v4-flash-0731` | 可选模型列表（逗号分隔）                      |
 
 > 千帆向量模型 `bge-large-zh` 为 **1024 维**，单次提交约 **16 条**文本上限。若从智谱
 > `embedding-3`（2048 维）迁移，需重建向量索引（见[向量库配置](#向量库配置)）。
@@ -411,7 +411,7 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 | `POST` | `/documents/v1/query` | **仅超管登录** | GraphRAG 问答（SSE 流式，参数：question/userId/sessionId/tenantCode/systemType/model 可选）                                    |
 | `POST` | `/keys/v1/chat`       | **仅 API Key** | API Key 专属问答（SSE 流式，参数：question/userId/sessionId 可选/model 可选；租户/系统由 Key 绑定值自动赋值，历史按 Key 隔离） |
 
-`model` 可选值：`deepseek-v3.2` / `deepseek-v3.2-think` / `deepseek-v4-flash-0731`（不传则用配置默认模型）。
+`model` 可选值：`deepseek-v4-flash-0731` / `glm-5.3-flash` / `ernie-4.5-turbo-128k`（不传则用配置默认模型）。
 
 **SSE 响应顺序（JSON 事件，`type` 字段区分）：**
 
@@ -470,13 +470,13 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
 
 ## 模型选择
 
-AI 对话接口支持在 `deepseek-v3.2`、`deepseek-v3.2-think`、`deepseek-v4-flash-0731` 三个模型间切换：
+AI 对话接口支持在 `deepseek-v4-flash-0731`、`glm-5.3-flash`、`ernie-4.5-turbo-128k` 三个模型间切换：
 
 | 模型                     | 特点                           | 默认                        |
 |--------------------------|--------------------------------|-----------------------------|
-| `deepseek-v3.2`          | 通用对话，响应快，性价比高     | 前端下拉默认                |
-| `deepseek-v3.2-think`    | 深度思考模式，适合复杂推理问题 | 配置默认（`AI_CHAT_MODEL`） |
-| `deepseek-v4-flash-0731` | 轻量快速版                     | -                           |
+| `deepseek-v4-flash-0731`          | 通用对话，响应快，性价比高     | 前端下拉默认                |
+| `glm-5.3-flash`    | 深度思考模式，适合复杂推理问题 | 配置默认（`AI_CHAT_MODEL`） |
+| `ernie-4.5-turbo-128k` | 轻量快速版                     | -                           |
 
 - **前端**：对话输入框下方下拉框直接切换，下拉选项来自 `GET /ai/v1/provider`（按当前启用的 AI 平台下发，避免选到不存在的模型），随请求提交
   `model` 参数
@@ -570,8 +570,8 @@ A: 模型未在千帆控制台开通（免费模型也需手动开通）。到�
 `AI_API_KEY` 为 `bce-v3/...` 开头的千帆 Key。
 
 **Q: 图谱构建报 `TimeoutException`，实体抽取超时**
-A: 批量图谱构建的超时预算已与 `AI_TIMEOUT` 对齐（每批最多 300 秒）。思考模型（`deepseek-v3.2-think`）响应较慢属正常；
-若单次超过 5 分钟仍超时，检查千帆 API 负载或换用 `deepseek-v3.2`。
+A: 批量图谱构建的超时预算已与 `AI_TIMEOUT` 对齐（每批最多 300 秒）。思考模型（`glm-5.3-flash`）响应较慢属正常；
+若单次超过 5 分钟仍超时，检查千帆 API 负载或换用 `deepseek-v4-flash-0731`。
 
 **Q: 访问接口返回 401 / 浏览器弹出 Basic Auth 登录框**
 A: 未登录或登录已过期。系统已配置自定义 JSON 401 入口（不会弹浏览器原生框），请在管理界面重新登录；接口调用请携带
@@ -702,7 +702,7 @@ motcs-graphrag/
 
 | 项目                                                      | 用途                                                                  |
 |-----------------------------------------------------------|-----------------------------------------------------------------------|
-| [百度千帆 (Baidu Qianfan)](https://qianfan.baidubce.com/) | deepseek-v3.2 系列对话模型 + bge-large-zh 向量模型（OpenAI 兼容接口） |
+| [百度千帆 (Baidu Qianfan)](https://qianfan.baidubce.com/) | deepseek-v4-flash-0731 系列对话模型 + bge-large-zh 向量模型（OpenAI 兼容接口） |
 | [智谱 AI (Zhipu AI)](https://open.bigmodel.cn/)           | 兼容备选（GLM 系列 + embedding，OpenAI 兼容接口）                     |
 
 ### 前端
