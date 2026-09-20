@@ -154,7 +154,7 @@
             </button>
 
             <!-- 历史对话 -->
-            <div class="mt-4 pt-3 border-t border-white/5 flex-1 overflow-y-auto min-h-0">
+            <div class="mt-4 pt-3 border-t border-white/5 flex-1 min-h-0 flex flex-col">
                 <div class="text-xs text-gray-500 mb-2 px-2 flex items-center justify-between">
                     <span>历史对话</span>
                     <div class="flex items-center gap-2">
@@ -173,7 +173,7 @@
                     </label>
                     <button id="historyBatchDelete" class="text-xs text-red-400 hover:text-red-300 disabled:text-gray-600 disabled:cursor-not-allowed" disabled>删除选中</button>
                 </div>
-                <div id="historyList" class="space-y-1"></div>
+                <div id="historyList" class="space-y-1 overflow-y-auto min-h-0 flex-1"></div>
             </div>
 
             <!-- 快捷统计 -->
@@ -687,7 +687,7 @@
 </div>
 
 <script src="js/config.js?v=1"></script>
-<script src="js/app.js?v=125"></script>
+<script src="js/app.js?v=129"></script>
 
         <!-- 替换文档弹窗 -->
         <div id="reuploadModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

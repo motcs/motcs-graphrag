@@ -999,6 +999,7 @@ public class GraphRagService extends DatabaseService {
                             .replaceAll("\\s+", " ");
                     if (title.length() > 30) title = title.substring(0, 30);
                     this.chatMessageRepository.updateTitleBySessionId(title, request.getSessionId()).block();
+                    this.chatSessionRepository.updateTitleBySessionId(title, request.getSessionId()).block();
                     log.debug("会话主题已生成并更新: sessionId={}, title={}", request.getSessionId(), title);
                 }
             } catch (Exception e) {
@@ -1095,12 +1096,11 @@ public class GraphRagService extends DatabaseService {
     public Mono<Boolean> deleteSessionByApiKey(String sessionId, Long apiKeyId) {
         return this.chatMessageRepository.countBySessionIdAndApiKey(sessionId, apiKeyId).flatMap(count -> {
             if (count == 0) {
-                return Mono.just(false);
+                return Mono.error(RestServerException.withMsg("当前密钥下没有这个对话的权限！"));
             }
-            return this.chatMessageRepository.deleteBySessionIdAndApiKey(sessionId, apiKeyId)
-                    .then(this.chatMessageRepository.countBySessionId(sessionId))
-                    .flatMap(remain -> remain == 0 ? summaryRepository
-                            .deleteBySessionId(sessionId) : Mono.empty())
+            return this.chatMessageRepository.deleteBySessionId(sessionId)
+                    .then(this.chatSessionRepository.deleteBySessionId(sessionId))
+                    .then(summaryRepository.deleteBySessionId(sessionId))
                     .thenReturn(true);
         });
     }
@@ -1125,6 +1125,7 @@ public class GraphRagService extends DatabaseService {
             return Mono.just(0);
         }
         return this.chatMessageRepository.updateTitleBySessionId(title.trim(), sessionId)
+                .then(this.chatSessionRepository.updateTitleBySessionId(title.trim(), sessionId))
                 .doOnSuccess(cnt -> log.debug("会话标题已更新: sessionId={}, title={}, 影响行数={}", sessionId, title, cnt));
     }
 
@@ -1134,6 +1135,7 @@ public class GraphRagService extends DatabaseService {
     public Mono<Void> deleteSession(String sessionId) {
         return this.chatMessageRepository.deleteBySessionId(sessionId)
                 .then(this.summaryRepository.deleteBySessionId(sessionId))
+                .then(this.chatSessionRepository.deleteBySessionId(sessionId))
                 .doOnSuccess(_ -> log.debug("已删除会话及摘要: sessionId={}", sessionId));
     }
 
@@ -1142,9 +1144,9 @@ public class GraphRagService extends DatabaseService {
      */
     public Mono<Void> deleteSessions(List<String> sessionIds) {
         if (ObjectUtils.isEmpty(sessionIds)) return Mono.empty();
-        return Flux.fromIterable(sessionIds)
-                .flatMap(id -> this.chatMessageRepository.deleteBySessionId(id)
-                        .then(this.summaryRepository.deleteBySessionId(id)))
+        return Flux.fromIterable(sessionIds).flatMap(id -> this.chatMessageRepository.deleteBySessionId(id)
+                        .then(this.summaryRepository.deleteBySessionId(id))
+                        .then(this.chatSessionRepository.deleteBySessionId(id)))
                 .then().doOnSuccess(_ -> log.debug("已批量删除 {} 个会话及摘要", sessionIds.size()));
     }
 

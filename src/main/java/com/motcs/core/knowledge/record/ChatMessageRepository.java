@@ -71,10 +71,4 @@ public interface ChatMessageRepository extends ReactiveCrudRepository<ChatMessag
     @Query("SELECT COUNT(*) FROM chat_message WHERE session_id = :sessionId AND api_key_id = :apiKeyId")
     Mono<Long> countBySessionIdAndApiKey(String sessionId, Long apiKeyId);
 
-    /**
-     * 按会话ID + API Key 删除对话记录（仅删除属于该 Key 的消息）
-     */
-    @Query("DELETE FROM chat_message WHERE session_id = :sessionId AND api_key_id = :apiKeyId")
-    Mono<Integer> deleteBySessionIdAndApiKey(String sessionId, Long apiKeyId);
-
 }

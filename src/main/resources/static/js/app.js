@@ -1291,7 +1291,7 @@ $('historyManageBtn').addEventListener('click', () => {
     renderHistory();
 });
 $('historySelectAll').addEventListener('change', (e) => {
-    const recent = (state.history || []).slice(0, 5);
+    const recent = (state.history || []);
     if (e.target.checked) {
         recent.forEach(s => state.historySelected.add(s.sessionId));
     } else {
@@ -1337,6 +1337,7 @@ async function loadHistory(reset = true) {
         state.historyPage = 0;
         state.historyHasMore = true;
         state.history = [];
+        state.historyTotal = 0;
     }
     if (!state.historyHasMore) return;
     state.historyLoading = true;
@@ -1354,8 +1355,15 @@ async function loadHistory(reset = true) {
             const list = data.content || [];
             state.history = state.history.concat(list);
             state.historyHasMore = (data.number || 0) < (data.totalPages || 0) - 1;
+            state.historyTotal = data.totalElements || 0;
             state.historyPage++;
             renderHistory();
+            // 若未填满滚动区且还有更多，继续加载下一页，避免无滚动条无法下拉
+            const histScroller = $('historyList');
+            if (state.historyHasMore && histScroller.scrollHeight <= histScroller.clientHeight + 50) {
+                state.historyLoading = false;
+                loadHistory(false);
+            }
             // 刷新当前会话标题（后端可能已异步生成新标题）
             if (state.sessionId) {
                 const current = list.find(s => s.sessionId === state.sessionId || s.id === state.sessionId);
@@ -1374,7 +1382,7 @@ async function loadHistory(reset = true) {
 
 function renderHistory() {
     const list = $('historyList');
-    const count = state.history ? state.history.length : 0;
+    const count = (typeof state.historyTotal === 'number' && state.historyTotal > 0) ? state.historyTotal : (state.history ? state.history.length : 0);
     $('historyCount').textContent = count;
 
     // 批量管理栏显隐
@@ -1504,7 +1512,7 @@ function updateBatchDeleteBtn() {
     btn.disabled = state.historySelected.size === 0;
     btn.textContent = `删除选中(${state.historySelected.size})`;
     // 全选状态
-    const recent = (state.history || []).slice(0, 5);
+    const recent = (state.history || []);
     const allSelected = recent.length > 0 && recent.every(s => state.historySelected.has(s.sessionId));
     $('historySelectAll').checked = allSelected;
 }
@@ -2870,10 +2878,10 @@ function init() {
     syncLabels();
     loadHistory();
 
-    // 历史会话列表滚动到底部自动加载更多
-    $('historyList').parentElement.addEventListener('scroll', () => {
-        const el = $('historyList');
-        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50) {
+    // 历史会话列表滚动到底部自动加载更多（滚动容器为 historyList 的父元素）
+    const historyScroller = $('historyList');
+    historyScroller.addEventListener('scroll', () => {
+        if (historyScroller.scrollTop + historyScroller.clientHeight >= historyScroller.scrollHeight - 50) {
             loadHistory(false);
         }
     });

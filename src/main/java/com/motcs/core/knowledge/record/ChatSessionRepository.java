@@ -16,6 +16,12 @@ public interface ChatSessionRepository extends ReactiveCrudRepository<ChatSessio
 
     Mono<ChatSession> findBySessionId(String sessionId);
 
+    @Query("DELETE FROM chat_session WHERE session_id = :sessionId")
+    Mono<Void> deleteBySessionId(String sessionId);
+
+    @Query("UPDATE chat_session SET title = :title WHERE session_id = :sessionId")
+    Mono<Integer> updateTitleBySessionId(String title, String sessionId);
+
     /**
      * 统计用户+租户+系统的会话总数
      */
