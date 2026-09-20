@@ -266,7 +266,9 @@ public class DocumentService extends DatabaseService {
                 log.debug("文档已成功添加到向量库，共 {} 个细粒度片段", documents.size());
 
                 // 5. 删除占位分片
-                this.chunkRepository.deleteById(context.getPlaceholderId());
+                if (context.getPlaceholderId() != null) {
+                    this.chunkRepository.deleteById(context.getPlaceholderId());
+                }
 
                 // 6. 保存所有分片到图谱（细粒度 + 粗粒度）
                 saveChunksToGraph(allChunks, documents, documentId, request.getDocCode(),
@@ -417,6 +419,37 @@ public class DocumentService extends DatabaseService {
             markSourcesDeletedAsync(docCode);
 
             return null;
+        }).subscribeOn(Schedulers.boundedElastic()).then();
+    }
+
+    /**
+     * Reprocess-only cleanup: remove old vectors and graph chunks/entities for the docCode,
+     * but DO NOT delete the source file and DO NOT remove the document_info row.
+     */
+    public Mono<Void> cleanVectorsAndGraphOnly(String docCode) {
+        return Mono.fromRunnable(() -> {
+            List<String> chunkIds = chunkRepository.findChunkIdsByDocCode(docCode);
+            if (chunkIds.isEmpty()) {
+                log.debug("reprocess cleanup: no old chunks for docCode={}", docCode);
+                return;
+            }
+            try {
+                List<KnowledgeEntity> exclusive = chunkRepository.findExclusiveEntitiesByDocCode(docCode);
+                if (!exclusive.isEmpty()) {
+                    List<Long> entityIds = exclusive.stream()
+                            .map(KnowledgeEntity::getId).filter(Objects::nonNull).toList();
+                    chunkRepository.deleteEntitiesByIds(entityIds);
+                }
+            } catch (Exception e) {
+                log.warn("reprocess cleanup exclusive entities failed: {}", e.getMessage());
+            }
+            chunkRepository.deleteChunksByDocCode(docCode);
+            try {
+                vectorStore.delete(chunkIds);
+            } catch (Exception e) {
+                log.warn("reprocess cleanup vectors failed: {}", e.getMessage());
+            }
+            log.debug("reprocess cleanup done for docCode={}, removed {} chunks", docCode, chunkIds.size());
         }).subscribeOn(Schedulers.boundedElastic()).then();
     }
 

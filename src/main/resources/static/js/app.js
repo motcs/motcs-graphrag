@@ -2235,7 +2235,7 @@ async function loadDocuments(page) {
 
         state.docsCache = docs;
         list.innerHTML = docs.map((doc) => {
-            const canDelete = (doc.status === 'SUCCESS' || doc.status === 'FAILED')
+            const canDelete = (doc.status === 'SUCCESS' || doc.status === 'FAILED' || doc.status === 'PROCESSING')
                 && doc.userId && doc.userId === getUser();
             const canRetry = doc.status === 'FAILED' && doc.userId && doc.userId === getUser();
             const uploaderLabel = doc.userId ? `上传者: ${escapeHtml(doc.userId)}` : '上传者: 未知';

@@ -575,6 +575,38 @@ public class GraphRagService extends DatabaseService {
     }
 
     /**
+     * Reprocess a stuck PROCESSING doc: clean vectors+graph only (keep source file and
+     * document_info row), then re-run conversion/chunk/vector/graph from the on-disk file.
+     */
+    public Mono<DocumentResponse> reprocessKnowledgeDoc(DocumentUploadRequest request, String documentId) {
+        String docCode = request.getDocCode();
+        return this.documentService.cleanVectorsAndGraphOnly(docCode).then(Mono.fromCallable(() -> {
+            DocumentService.UploadContext context = new DocumentService.UploadContext();
+            context.setDocumentId(documentId);
+            DocumentResponse resp = DocumentResponse.builder()
+                    .documentId(com.motcs.commons.utils.FileUtils.parseDocumentId(documentId)).docCode(docCode)
+                    .tenantCode(request.getTenantCode()).systemType(request.getSystemType())
+                    .fileName(request.getFileName()).status("PROCESSING")
+                    .title(request.getTitle()).description(request.getDescription())
+                    .userId(request.getUserId()).build();
+            context.setResponse(resp);
+            return context;
+        })).flatMap(context -> {
+            this.documentService.processDocumentAsync(request, context)
+                    .then(Mono.fromRunnable(() -> {
+                        buildKnowledgeGraph(docCode);
+                        this.documentService.markDocumentSuccess(documentId);
+                    }))
+                    .onErrorResume(e -> {
+                        log.error("reprocess document failed: {}", e.getMessage(), e);
+                        this.documentService.failUpload(context, e.getMessage());
+                        return Mono.empty();
+                    }).subscribeOn(Schedulers.boundedElastic()).subscribe();
+            return Mono.just(context.getResponse());
+        });
+    }
+
+    /**
      * 对指定 docCode 的所有分片做实体抽取，并建立 MENTIONS 关系
      * 优化：批量合并抽取（3个分片合并一次AI调用），降低并发，批次间延时，避免 429
      */

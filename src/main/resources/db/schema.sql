@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS document_info
     user_id          VARCHAR(64)  DEFAULT NULL COMMENT '上传者',
     created_time     DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '上传时间',
     updated_time     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    retry_count      INT          DEFAULT 0 COMMENT 'retry once when stuck',
     UNIQUE KEY uk_doc_code (doc_code),
     UNIQUE KEY uk_document_id (document_id),
     KEY idx_doc_tenant_system (tenant_code, system_type),
@@ -158,6 +159,9 @@ CREATE TABLE IF NOT EXISTS document_info
     KEY idx_doc_created (created_time)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='文档元数据表';
+
+alter table document_info
+    add retry_count INT DEFAULT 0 COMMENT 'retry once when stuck';
 
 CREATE TABLE IF NOT EXISTS chat_session
 (

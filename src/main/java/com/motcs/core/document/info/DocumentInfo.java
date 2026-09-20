@@ -83,4 +83,7 @@ public class DocumentInfo implements Serializable {
     @Column("updated_time")
     private LocalDateTime updatedTime;
 
+    @Column("retry_count")
+    private Integer retryCount;
+
 }

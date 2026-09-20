@@ -4,6 +4,8 @@ import org.springframework.data.r2dbc.repository.Modifying;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
+import java.time.LocalDateTime;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
@@ -55,5 +57,18 @@ public interface DocumentInfoRepository extends ReactiveCrudRepository<DocumentI
      */
     @Query("SELECT COUNT(*) FROM document_info")
     Mono<Long> countAll();
+
+    /**
+     * Stuck PROCESSING docs: older than threshold and never auto-retried.
+     */
+    @Query("SELECT * FROM document_info WHERE status='PROCESSING' AND created_time < :threshold AND (retry_count IS NULL OR retry_count = 0)")
+    Flux<DocumentInfo> findStuckProcessing(@Param("threshold") LocalDateTime threshold);
+
+    /**
+     * Mark as auto-retried once to avoid repeat retries.
+     */
+    @Modifying
+    @Query("UPDATE document_info SET retry_count=1, updated_time=NOW() WHERE doc_code=:docCode")
+    Mono<Long> markRetried(@Param("docCode") String docCode);
 
 }
