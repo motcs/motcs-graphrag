@@ -1263,6 +1263,18 @@ document.addEventListener('keydown', e => {
 });
 
 // 历史对话管理
+$('syncChatBtn').addEventListener('click', async () => {
+    const btn = $('syncChatBtn');
+    btn.disabled = true;
+    try {
+        const res = await fetch(API_BASE + '/sync', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        showToast(data.message || (res.ok ? '同步完成' : '同步失败'), res.ok ? 'success' : 'error');
+        loadHistory();
+    } catch (e) { showToast('同步失败: ' + e.message, 'error'); }
+    finally { btn.disabled = false; }
+});
+
 $('historyManageBtn').addEventListener('click', () => {
     state.historyBatchMode = !state.historyBatchMode;
     state.historySelected.clear();

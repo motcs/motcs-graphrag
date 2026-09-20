@@ -7,6 +7,7 @@ import org.jspecify.annotations.NonNull;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Mono;
 
 /**
  * 启动时自动迁移老数据到 chat_session 主表
@@ -23,11 +24,15 @@ public class ChatSessionMigrationRunner implements ApplicationRunner {
 
     @Override
     public void run(@NonNull ApplicationArguments args) {
-        log.info("开始自动迁移老聊天记录到 chat_session 主表...");
-        this.graphRagService.syncChatSessions()
-                .doOnSuccess((Long count) -> log.info("老聊天记录迁移完成，共同步 {} 个会话", count))
-                .doOnError(e -> log.error("老聊天记录迁移失败: {}", e.getMessage(), e))
-                .subscribe();
+        this.graphRagService.hasAnySession().flatMap(has -> {
+            if (has) {
+                log.info("chat_session 主表已有数据，跳过自动迁移");
+                return Mono.empty();
+            }
+            log.info("chat_session 主表为空，开始自动迁移老聊天记录...");
+            return this.graphRagService.syncChatSessions()
+                    .doOnSuccess(count -> log.info("老聊天记录迁移完成，共同步 {} 个会话", count));
+        }).doOnError(e -> log.error("老聊天记录迁移失败: {}", e.getMessage(), e)).subscribe();
     }
 
 }

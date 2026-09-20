@@ -430,6 +430,22 @@ public class DocumentController {
     }
 
     /**
+     * 手动同步聊天记录到 chat_session 主表
+     * POST /documents/v1/sync
+     */
+    @PostMapping("/sync")
+    public Mono<ResponseEntity<Map<String, Object>>> syncChatSessions() {
+        return graphRagService.syncChatSessions().map(count -> {
+            Map<String, Object> body = new HashMap<>();
+            body.put("success", true);
+            body.put("message", "同步完成，共同步 " + count + " 个会话");
+            body.put("synced", count);
+            return ResponseEntity.ok(body);
+        });
+    }
+
+
+    /**
      * 编辑文档：更换上传的文件（同 docCode）。
      * 先删除老数据（Neo4j 分片/向量/原始文件/MySQL 记录），再上传新文件。
      * PUT /documents/v1/{docCode}/file  Content-Type: multipart/form-data

@@ -1019,17 +1019,25 @@ public class GraphRagService extends DatabaseService {
     }
 
     /**
+     * 判断 chat_session 主表是否有数据
+     */
+    public Mono<Boolean> hasAnySession() {
+        return this.chatSessionRepository.count().map(count -> count > 0);
+    }
+
+    /**
      * 同步老的聊天记录到 chat_session 主表
      * 从 chat_message 按 session_id 分组，取每个会话最新一条记录的元信息
+     * 已存在的会话跳过，不重复迁移
      */
     public Mono<Long> syncChatSessions() {
-        Mono<Long> longMono = this.chatMessageRepository.findAllSessionGroups()
+        return this.chatMessageRepository.findAllSessionGroups()
+                .filterWhen(msg -> this.chatSessionRepository.findBySessionId(msg.getSessionId()).hasElement().map(e -> !e))
                 .map(msg -> ChatSession.builder().sessionId(msg.getSessionId())
                         .title(msg.getTitle()).userId(msg.getUserId()).apiKeyId(msg.getApiKeyId())
                         .tenantCode(msg.getTenantCode()).systemType(msg.getSystemType())
                         .createTime(msg.getCreateTime()).updateTime(msg.getCreateTime()).build())
                 .flatMap(this.chatSessionRepository::save).count();
-        return this.chatSessionRepository.deleteAll().then(longMono);
     }
 
     /**
