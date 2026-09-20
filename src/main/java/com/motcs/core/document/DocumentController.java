@@ -410,20 +410,6 @@ public class DocumentController {
     }
 
     /**
-     * 校验业务编码(docCode)是否已存在（上传弹框前端实时校验用，仅查询不落库）。
-     * GET /documents/v1/docCode/exists?docCode=xxx
-     * 返回 {"exists": true/false, "docCode": "xxx"}
-     */
-    @GetMapping("/docCode/exists")
-    public Mono<ResponseEntity<Map<String, Object>>> checkDocCodeExists(@RequestParam("docCode") String docCode) {
-        String code = ObjectUtils.isEmpty(docCode) ? "" : docCode.trim();
-        if (code.isEmpty()) {
-            return Mono.just(ResponseEntity.ok(Map.of("exists", false, "docCode", "")));
-        }
-        return this.documentInfoRepository.existsByDocCode(code)
-                .map(exists -> ResponseEntity.ok(Map.of("exists", exists, "docCode", code)));
-    }
-    /**
      * 编辑文档：更换上传的文件（同 docCode）。
      * 先删除老数据（Neo4j 分片/向量/原始文件/MySQL 记录），再上传新文件。
      * PUT /documents/v1/{docCode}/file  Content-Type: multipart/form-data

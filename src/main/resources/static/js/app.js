@@ -1940,92 +1940,6 @@ fileInput.addEventListener('change', e => {
     if (e.target.files.length > 0) selectFiles(e.target.files);
 });
 
-/* ---------- 业务编码(docCode)唯一性校验 + 提交按钮启用控制 ----------
- * 规则：本地/URL 两个提交按钮默认禁用；需同时满足"已选文件/已填URL" +
- * "已填业务编码" + "业务编码经接口校验不冲突"才允许点击。
- * 输入停止 1 秒（防抖）或光标移出(blur)时调用 GET /documents/v1/docCode/exists。
- * 重试失败文档时，预填的原 docCode 视为合法（retryDocCode），用户改动后重新走唯一性校验。
- */
-let retryDocCode = null;
-const docCodeState = {
-    local: { timer: null, ok: false },
-    url:   { timer: null, ok: false }
-};
-
-function docCodeSide(side) {
-    return side === 'local'
-        ? { input: $('uploadDocCode'), hint: $('uploadDocCodeHint') }
-        : { input: $('urlDocCode'),    hint: $('urlDocCodeHint') };
-}
-
-function setDocCodeHint(hint, msg, cls) {
-    hint.textContent = msg;
-    hint.className = 'text-xs mt-1 ' + cls;
-}
-
-async function checkDocCodeExists(side) {
-    const { input, hint } = docCodeSide(side);
-    const st = docCodeState[side];
-    const code = input.value.trim();
-    if (!code) {
-        st.ok = false;
-        setDocCodeHint(hint, '请输入业务编码', 'text-gray-500');
-        refreshUploadButtons();
-        return;
-    }
-    // 重试已有文档：原业务编码直接放行
-    if (side === 'local' && retryDocCode && code === retryDocCode) {
-        st.ok = true;
-        setDocCodeHint(hint, '重试原文档，业务编码沿用', 'text-green-400');
-        refreshUploadButtons();
-        return;
-    }
-    setDocCodeHint(hint, '校验中...', 'text-gray-400');
-    try {
-        const res = await fetch(`${API_BASE}/docCode/exists?docCode=${encodeURIComponent(code)}`);
-        const data = await res.json();
-        // 防抖期间用户又改了输入，丢弃过期结果
-        if (input.value.trim() !== code) return;
-        if (data.exists) {
-            st.ok = false;
-            setDocCodeHint(hint, `业务编码「${code}」已存在，请更换`, 'text-red-400');
-        } else {
-            st.ok = true;
-            setDocCodeHint(hint, '业务编码可用', 'text-green-400');
-        }
-    } catch (e) {
-        st.ok = false;
-        setDocCodeHint(hint, '校验失败，请检查网络后重试', 'text-red-400');
-    }
-    refreshUploadButtons();
-}
-
-function bindDocCodeCheck(side) {
-    const { input } = docCodeSide(side);
-    const st = docCodeState[side];
-    input.addEventListener('input', () => {
-        st.ok = false;
-        clearTimeout(st.timer);
-        st.timer = setTimeout(() => checkDocCodeExists(side), 1000);
-        refreshUploadButtons();
-    });
-    input.addEventListener('blur', () => {
-        clearTimeout(st.timer);
-        checkDocCodeExists(side);
-    });
-}
-
-function resetDocCodeCheck(side) {
-    const { input, hint } = docCodeSide(side);
-    const st = docCodeState[side];
-    st.ok = false;
-    clearTimeout(st.timer);
-    input.value = '';
-    hint.textContent = '';
-    hint.classList.add('hidden');
-    refreshUploadButtons();
-}
-
 function refreshUploadButtons() {
     // 业务编码(docCode)由后端按规则自动生成，前端无需输入/校验：
     // 本地上传只要选了文件，URL 上传只要填了地址，即可提交。
@@ -2036,8 +1950,6 @@ function refreshUploadButtons() {
     $('urlUploadBtn').disabled = !hasUrl;
 }
 
-bindDocCodeCheck('local');
-bindDocCodeCheck('url');
 $('urlInput').addEventListener('input', refreshUploadButtons);
 function selectFiles(files) {
     state.selectedFiles = Array.from(files);
@@ -2102,9 +2014,6 @@ $('uploadBtn').addEventListener('click', uploadFile);
 
 /* ---------- 上传弹窗 ---------- */
 function openUploadModal() {
-    retryDocCode = null;
-    resetDocCodeCheck('local');
-    resetDocCodeCheck('url');
     setTenantValue('uploadTenant', getTenant());
     $('uploadSystem').value = getSystem();
     setTenantValue('urlTenant', getTenant());
@@ -2155,7 +2064,6 @@ function clearUploadForm() {
     $('uploadTitle').value = '';
     $('uploadDesc').value = '';
     $('uploadDocCode').value = '';
-    resetDocCodeCheck('local');
 }
 
 /* ---------- URL 上传 ---------- */
@@ -2325,8 +2233,6 @@ async function loadDocuments(page) {
                 $('uploadTitle').value = card.dataset.title || '';
                 $('uploadDesc').value = card.dataset.desc || '';
                 $('uploadDocCode').value = card.dataset.docCode || '';
-                retryDocCode = card.dataset.docCode || '';
-                checkDocCodeExists('local');
                 setTenantValue('uploadTenant', card.dataset.tenant || getTenant());
                 $('uploadSystem').value = card.dataset.system || getSystem();
                 showToast('请重新选择文件上传', 'info');
