@@ -187,6 +187,16 @@ function tenantNameOf(code) {
     return name || String(code);
 }
 
+/* 系统类型编码 -> 中文名称（仅用于展示回显，数据源见 js/config.js 的 window.MOTCS_CONFIG.systems）：
+ * 找不到时回退显示编码本身；传给后端的仍为原始 code。 */
+function systemNameOf(code) {
+    if (code === undefined || code === null || code === '') return '-';
+    const key = String(code);
+    const list = window.MOTCS_CONFIG && Array.isArray(window.MOTCS_CONFIG.systems)
+        ? window.MOTCS_CONFIG.systems : [];
+    const hit = list.find(s => s && String(s.code) === key);
+    return hit && hit.label ? hit.label : key;
+}
 /* ---------- 配置持久化 ---------- */
 const CFG_KEY = 'motcs_cfg';
 function saveCfg() {
@@ -1922,18 +1932,119 @@ fileInput.addEventListener('change', e => {
     if (e.target.files.length > 0) selectFiles(e.target.files);
 });
 
+/* ---------- 业务编码(docCode)唯一性校验 + 提交按钮启用控制 ----------
+ * 规则：本地/URL 两个提交按钮默认禁用；需同时满足"已选文件/已填URL" +
+ * "已填业务编码" + "业务编码经接口校验不冲突"才允许点击。
+ * 输入停止 1 秒（防抖）或光标移出(blur)时调用 GET /documents/v1/docCode/exists。
+ * 重试失败文档时，预填的原 docCode 视为合法（retryDocCode），用户改动后重新走唯一性校验。
+ */
+let retryDocCode = null;
+const docCodeState = {
+    local: { timer: null, ok: false },
+    url:   { timer: null, ok: false }
+};
+
+function docCodeSide(side) {
+    return side === 'local'
+        ? { input: $('uploadDocCode'), hint: $('uploadDocCodeHint') }
+        : { input: $('urlDocCode'),    hint: $('urlDocCodeHint') };
+}
+
+function setDocCodeHint(hint, msg, cls) {
+    hint.textContent = msg;
+    hint.className = 'text-xs mt-1 ' + cls;
+}
+
+async function checkDocCodeExists(side) {
+    const { input, hint } = docCodeSide(side);
+    const st = docCodeState[side];
+    const code = input.value.trim();
+    if (!code) {
+        st.ok = false;
+        setDocCodeHint(hint, '请输入业务编码', 'text-gray-500');
+        refreshUploadButtons();
+        return;
+    }
+    // 重试已有文档：原业务编码直接放行
+    if (side === 'local' && retryDocCode && code === retryDocCode) {
+        st.ok = true;
+        setDocCodeHint(hint, '重试原文档，业务编码沿用', 'text-green-400');
+        refreshUploadButtons();
+        return;
+    }
+    setDocCodeHint(hint, '校验中...', 'text-gray-400');
+    try {
+        const res = await fetch(`${API_BASE}/docCode/exists?docCode=${encodeURIComponent(code)}`);
+        const data = await res.json();
+        // 防抖期间用户又改了输入，丢弃过期结果
+        if (input.value.trim() !== code) return;
+        if (data.exists) {
+            st.ok = false;
+            setDocCodeHint(hint, `业务编码「${code}」已存在，请更换`, 'text-red-400');
+        } else {
+            st.ok = true;
+            setDocCodeHint(hint, '业务编码可用', 'text-green-400');
+        }
+    } catch (e) {
+        st.ok = false;
+        setDocCodeHint(hint, '校验失败，请检查网络后重试', 'text-red-400');
+    }
+    refreshUploadButtons();
+}
+
+function bindDocCodeCheck(side) {
+    const { input } = docCodeSide(side);
+    const st = docCodeState[side];
+    input.addEventListener('input', () => {
+        st.ok = false;
+        clearTimeout(st.timer);
+        st.timer = setTimeout(() => checkDocCodeExists(side), 1000);
+        refreshUploadButtons();
+    });
+    input.addEventListener('blur', () => {
+        clearTimeout(st.timer);
+        checkDocCodeExists(side);
+    });
+}
+
+function resetDocCodeCheck(side) {
+    const { input, hint } = docCodeSide(side);
+    const st = docCodeState[side];
+    st.ok = false;
+    clearTimeout(st.timer);
+    input.value = '';
+    hint.textContent = '';
+    hint.classList.add('hidden');
+    refreshUploadButtons();
+}
+
+function refreshUploadButtons() {
+    // 业务编码(docCode)由后端按规则自动生成，前端无需输入/校验：
+    // 本地上传只要选了文件，URL 上传只要填了地址，即可提交。
+    const hasFile = state.selectedFiles && state.selectedFiles.length > 0;
+    $('uploadBtn').disabled = !hasFile;
+
+    const hasUrl = !!$('urlInput').value.trim();
+    $('urlUploadBtn').disabled = !hasUrl;
+}
+
+bindDocCodeCheck('local');
+bindDocCodeCheck('url');
+$('urlInput').addEventListener('input', refreshUploadButtons);
 function selectFiles(files) {
     state.selectedFiles = Array.from(files);
     $('selectedFile').classList.remove('hidden');
     const names = state.selectedFiles.map(f => f.name).join(', ');
     $('selectedFileName').textContent = state.selectedFiles.length > 1
         ? `${state.selectedFiles.length} 个文件：${names}` : names;
+    refreshUploadButtons();
 }
 
 $('clearFile').addEventListener('click', () => {
     state.selectedFiles = [];
     fileInput.value = '';
     $('selectedFile').classList.add('hidden');
+    refreshUploadButtons();
 });
 
 async function uploadFile() {
@@ -1953,7 +2064,6 @@ async function uploadFile() {
         formData.append('file', file);
         formData.append('title', total === 1 ? $('uploadTitle').value.trim() : file.name.replace(/\.[^.]+$/, ''));
         formData.append('description', $('uploadDesc').value.trim());
-        formData.append('docCode', total === 1 ? $('uploadDocCode').value.trim() : '');
         formData.append('tenantCode', $('uploadTenant').value.trim() || 'default');
         formData.append('systemType', $('uploadSystem').value.trim() || 'default');
         formData.append('userId', getUser());
@@ -1984,6 +2094,9 @@ $('uploadBtn').addEventListener('click', uploadFile);
 
 /* ---------- 上传弹窗 ---------- */
 function openUploadModal() {
+    retryDocCode = null;
+    resetDocCodeCheck('local');
+    resetDocCodeCheck('url');
     setTenantValue('uploadTenant', getTenant());
     $('uploadSystem').value = getSystem();
     setTenantValue('urlTenant', getTenant());
@@ -2034,6 +2147,7 @@ function clearUploadForm() {
     $('uploadTitle').value = '';
     $('uploadDesc').value = '';
     $('uploadDocCode').value = '';
+    resetDocCodeCheck('local');
 }
 
 /* ---------- URL 上传 ---------- */
@@ -2050,7 +2164,6 @@ async function uploadByUrl() {
         url,
         title: $('urlTitle').value.trim(),
         description: $('urlDesc').value.trim(),
-        docCode: $('urlDocCode').value.trim(),
         tenantCode: $('urlTenant').value.trim() || 'default',
         systemType: $('urlSystem').value.trim() || 'default'
     };
@@ -2068,6 +2181,7 @@ async function uploadByUrl() {
             $('urlTitle').value = '';
             $('urlDesc').value = '';
             $('urlDocCode').value = '';
+            refreshUploadButtons();
             updateStats();
             if (data.status === 'PROCESSING' && data.docCode) pollDocumentStatus(data.docCode);
             closeUploadModal();
@@ -2119,6 +2233,7 @@ async function loadDocuments(page) {
             return;
         }
 
+        state.docsCache = docs;
         list.innerHTML = docs.map((doc) => {
             const canDelete = (doc.status === 'SUCCESS' || doc.status === 'FAILED')
                 && doc.userId && doc.userId === getUser();
@@ -2158,13 +2273,13 @@ async function loadDocuments(page) {
                 <div class="grid grid-cols-3 gap-2 text-xs">
                     <div><span class="text-gray-500">分片</span> <span class="text-primary-400 font-semibold">${doc.chunkCount || 0}</span></div>
                     <div><span class="text-gray-500">大小</span> <span class="text-gray-300">${formatSize(doc.fileSize)}</span></div>
-                    <div><span class="text-gray-500">时间</span> <span class="text-gray-300">${formatTime(doc.uploadTime)}</span></div>
+                    <div><span class="text-gray-500">时间</span> <span class="text-gray-300">${formatTime(doc.createdTime)}</span></div>
                 </div>
                 <div class="flex items-center gap-2 mt-3 pt-3 border-t border-white/5 flex-wrap">
                     <span class="tag tag-gray">${uploaderLabel}</span>
                     ${doc.docCode ? `<span class="tag tag-blue">编码: ${escapeHtml(doc.docCode)}</span>` : ''}
                     ${doc.tenantCode ? `<span class="tag tag-purple">租户: ${escapeHtml(tenantNameOf(doc.tenantCode))}</span>` : ''}
-                    ${doc.systemType ? `<span class="tag tag-gray">系统: ${escapeHtml(doc.systemType)}</span>` : ''}
+                    ${doc.systemType ? `<span class="tag tag-gray">系统: ${escapeHtml(systemNameOf(doc.systemType))}</span>` : ''}
                 </div>
             </div>`;
         }).join('');
@@ -2202,6 +2317,8 @@ async function loadDocuments(page) {
                 $('uploadTitle').value = card.dataset.title || '';
                 $('uploadDesc').value = card.dataset.desc || '';
                 $('uploadDocCode').value = card.dataset.docCode || '';
+                retryDocCode = card.dataset.docCode || '';
+                checkDocCodeExists('local');
                 setTenantValue('uploadTenant', card.dataset.tenant || getTenant());
                 $('uploadSystem').value = card.dataset.system || getSystem();
                 showToast('请重新选择文件上传', 'info');
@@ -2243,10 +2360,8 @@ $('docStatusFilter').addEventListener('change', e => { state.docStatusFilter = e
  */
 function showDocPreview(docCode, docName) {
     if (!docCode) { showToast('该文档无编码', 'error'); return; }
-    fetch(`${API_BASE}/list?tenantCode=${encodeURIComponent(getTenant())}&systemType=${encodeURIComponent(getSystem())}&page=0&size=100`)
-        .then(r => r.json()).then(data => {
-            const docs = (data && data.content) ? data.content : (Array.isArray(data) ? data : []);
-            const doc = docs.find(d => d.docCode === docCode);
+    const docs = Array.isArray(state.docsCache) ? state.docsCache : [];
+    const doc = docs.find(d => d.docCode === docCode);
             if (!doc) { showToast('未找到文档', 'error'); return; }
             const statusText = doc.status === 'SUCCESS' ? '已完成' : doc.status === 'PROCESSING' ? '处理中' : doc.status === 'FAILED' ? '处理失败' : (doc.status || '-');
             const statusClass = doc.status === 'SUCCESS' ? 'text-green-400' : doc.status === 'PROCESSING' ? 'text-yellow-400' : doc.status === 'FAILED' ? 'text-red-400' : 'text-gray-400';
@@ -2257,7 +2372,7 @@ function showDocPreview(docCode, docName) {
                     <div class="flex items-baseline gap-2"><span class="text-gray-600 text-xs w-14 shrink-0">状态</span><span class="${statusClass} text-xs font-medium">${statusText}</span></div>
                     <div class="flex items-baseline gap-2"><span class="text-gray-600 text-xs w-14 shrink-0">分片数</span><span class="text-primary-400 text-xs font-medium">${doc.chunkCount || 0}</span></div>
                     <div class="flex items-baseline gap-2"><span class="text-gray-600 text-xs w-14 shrink-0">文件大小</span><span class="text-gray-300 text-xs">${formatSize(doc.fileSize)}</span></div>
-                    <div class="flex items-baseline gap-2"><span class="text-gray-600 text-xs w-14 shrink-0">上传时间</span><span class="text-gray-300 text-xs">${formatTime(doc.uploadTime)}</span></div>
+                    <div class="flex items-baseline gap-2"><span class="text-gray-600 text-xs w-14 shrink-0">上传时间</span><span class="text-gray-300 text-xs">${formatTime(doc.createdTime)}</span></div>
                     <div class="flex items-baseline gap-2"><span class="text-gray-600 text-xs w-14 shrink-0">上传者</span><span class="text-gray-300 text-xs">${escapeHtml(doc.userId || '-')}</span></div>
                     ${doc.docCode ? `<div class="flex items-baseline gap-2"><span class="text-gray-600 text-xs w-14 shrink-0">文档编码</span><span class="text-gray-300 text-xs font-mono">${escapeHtml(doc.docCode)}</span></div>` : ''}
                     <div class="flex items-baseline gap-2 col-span-2"><span class="text-gray-600 text-xs w-14 shrink-0">源文件</span><span class="text-gray-400 text-xs truncate" title="${escapeHtml(doc.fileName || '-')}">${escapeHtml(doc.fileName || '-')}</span></div>
@@ -2266,9 +2381,8 @@ function showDocPreview(docCode, docName) {
             `;
             const desc = doc.description ? escapeHtml(doc.description) : '<span class="text-gray-600">（无描述信息）</span>';
             $('sourceModalContent').innerHTML = `<div class="text-xs text-gray-500 mb-2">文档描述</div><div class="text-sm text-gray-300 whitespace-pre-wrap leading-7">${desc}</div>`;
-            $('sourceModal').classList.remove('hidden');
-            $('sourceModal').classList.add('flex');
-        }).catch(() => showToast('加载文档信息失败', 'error'));
+    $('sourceModal').classList.remove('hidden');
+    $('sourceModal').classList.add('flex');
 }
 
 /**

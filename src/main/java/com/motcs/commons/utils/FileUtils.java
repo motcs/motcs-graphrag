@@ -54,6 +54,25 @@ public class FileUtils {
     }
 
     /**
+     * 按指定存储名落盘（不使用原始文件名），返回完整磁盘路径。
+     * storedFileName 须已做安全处理（建议用 docCode + 后缀）。
+     */
+    public static String saveFileAs(MultipartFile file, String uploadDir, String tenantCode, String storedFileName) throws IOException {
+        Path uploadPath = Paths.get(uploadDir, "T%s".formatted(tenantCode));
+        if (!Files.exists(uploadPath)) {
+            Files.createDirectories(uploadPath);
+        }
+        if (storedFileName == null || storedFileName.isBlank()) {
+            throw new IOException("存储文件名不能为空");
+        }
+        // 防止路径穿越：只取文件名部分
+        String safeStored = Paths.get(storedFileName).getFileName().toString();
+        Path filePath = uploadPath.resolve(safeStored);
+        Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
+        return filePath.toString();
+    }
+
+    /**
      * 读取文件内容
      *
      * @param file 上传的文件

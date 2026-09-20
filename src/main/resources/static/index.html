@@ -281,16 +281,17 @@
                                 <input type="text" id="uploadTitle" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="文档标题（可选）">
                                 <input type="text" id="uploadDesc" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="文档描述（可选）">
                                 <div class="grid grid-cols-2 gap-3">
-                                    <input type="text" id="uploadDocCode" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="业务编码 docCode">
+                                    <input type="text" id="uploadDocCode" disabled class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg opacity-60 cursor-not-allowed" placeholder="业务编码由系统自动生成">
                                     <select id="uploadTenant" title="租户下拉来自租户配置表，支持关键字搜索" class="hidden">
                                         <option value="0">全部租户</option>
                                     </select>
                                 </div>
+                                <p id="uploadDocCodeHint" class="text-xs mt-1 hidden"></p>
                                 <select id="uploadSystem" title="系统下拉来自 js/config.js" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
                                     <option value="other">综合平台</option>
                                 </select>
                             </div>
-                            <button id="uploadBtn" class="w-full mt-5 py-2.5 bg-primary-600 hover:bg-primary-500 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed">
+                            <button id="uploadBtn" disabled class="w-full mt-5 py-2.5 bg-primary-600 hover:bg-primary-500 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed">
                                 <span id="uploadBtnText">上传并入库</span>
                             </button>
                         </div>
@@ -307,16 +308,17 @@
                                 <input type="text" id="urlTitle" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="文档标题（可选）">
                                 <input type="text" id="urlDesc" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="文档描述（可选）">
                                 <div class="grid grid-cols-3 gap-3">
-                                    <input type="text" id="urlDocCode" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition" placeholder="docCode">
+                                    <input type="text" id="urlDocCode" disabled class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg opacity-60 cursor-not-allowed" placeholder="由系统自动生成">
                                     <select id="urlTenant" title="租户下拉来自租户配置表，支持关键字搜索" class="hidden">
                                         <option value="0">全部租户</option>
                                     </select>
+                                    <p id="urlDocCodeHint" class="text-xs mt-1 hidden"></p>
                                     <select id="urlSystem" title="系统下拉来自 js/config.js" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
                                         <option value="other">综合平台</option>
                                     </select>
                                 </div>
                             </div>
-                            <button id="urlUploadBtn" class="w-full mt-5 py-2.5 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed">
+                            <button id="urlUploadBtn" disabled class="w-full mt-5 py-2.5 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed">
                                 <span id="urlUploadBtnText">下载并入库</span>
                             </button>
                         </div>
@@ -685,7 +687,7 @@
 </div>
 
 <script src="js/config.js?v=1"></script>
-<script src="js/app.js?v=120"></script>
+<script src="js/app.js?v=124"></script>
 
         <!-- 替换文档弹窗 -->
         <div id="reuploadModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

@@ -133,23 +133,24 @@ CREATE TABLE IF NOT EXISTS api_key_usage_summary
 -- ============================================================
 CREATE TABLE IF NOT EXISTS document_info
 (
-    id            BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
-    document_id   VARCHAR(64)  NOT NULL COMMENT '文档UUID（与Neo4j documentId一致）',
-    doc_code      VARCHAR(100) NOT NULL COMMENT '文档业务编码（唯一）',
-    tenant_code   VARCHAR(64)  NOT NULL COMMENT '租户编码',
-    system_type   VARCHAR(64)  NOT NULL COMMENT '系统类型',
-    file_name     VARCHAR(255) DEFAULT NULL COMMENT '文件名',
-    title         VARCHAR(255) DEFAULT NULL COMMENT '文档标题',
-    description   TEXT COMMENT '文档描述',
-    file_size     BIGINT       DEFAULT 0 COMMENT '文件大小（字节）',
-    file_path     VARCHAR(500) DEFAULT NULL COMMENT '文件存储路径',
-    status        VARCHAR(20)  DEFAULT 'PROCESSING' COMMENT '状态：PROCESSING/SUCCESS/FAILED',
-    error_message TEXT COMMENT '失败原因',
-    chunk_count   INT          DEFAULT 0 COMMENT '分片数',
-    enabled       TINYINT(1)   DEFAULT 0 COMMENT '是否启用参与检索',
-    user_id       VARCHAR(64)  DEFAULT NULL COMMENT '上传者',
-    created_time  DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '上传时间',
-    updated_time  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    id               BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    document_id      VARCHAR(64)  NOT NULL COMMENT '文档UUID（与Neo4j documentId一致）',
+    doc_code         VARCHAR(100) NOT NULL COMMENT '文档业务编码（唯一）',
+    tenant_code      VARCHAR(64)  NOT NULL COMMENT '租户编码',
+    system_type      VARCHAR(64)  NOT NULL COMMENT '系统类型',
+    file_name        VARCHAR(255) DEFAULT NULL COMMENT '原文件名（界面展示用）',
+    stored_file_name VARCHAR(255) DEFAULT NULL COMMENT '本地存储文件名（docCode.后缀，切文/图谱/删除均用此名）',
+    title            VARCHAR(255) DEFAULT NULL COMMENT '文档标题',
+    description      TEXT COMMENT '文档描述',
+    file_size        BIGINT       DEFAULT 0 COMMENT '文件大小（字节）',
+    file_path        VARCHAR(500) DEFAULT NULL COMMENT '文件存储路径',
+    status           VARCHAR(20)  DEFAULT 'PROCESSING' COMMENT '状态：PROCESSING/SUCCESS/FAILED',
+    error_message    TEXT COMMENT '失败原因',
+    chunk_count      INT          DEFAULT 0 COMMENT '分片数',
+    enabled          TINYINT(1)   DEFAULT 0 COMMENT '是否启用参与检索',
+    user_id          VARCHAR(64)  DEFAULT NULL COMMENT '上传者',
+    created_time     DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '上传时间',
+    updated_time     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_doc_code (doc_code),
     UNIQUE KEY uk_document_id (document_id),
     KEY idx_doc_tenant_system (tenant_code, system_type),
@@ -175,3 +176,6 @@ CREATE TABLE IF NOT EXISTS chat_session
     INDEX idx_api_key_id (api_key_id)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='对话会话';
+
+ALTER TABLE document_info
+    ADD COLUMN stored_file_name VARCHAR(255) DEFAULT NULL COMMENT '本地存储文件名' AFTER file_name;

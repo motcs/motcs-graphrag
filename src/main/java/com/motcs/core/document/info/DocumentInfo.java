@@ -47,6 +47,9 @@ public class DocumentInfo implements Serializable {
     @Column("file_name")
     private String fileName;
 
+    @Column("stored_file_name")
+    private String storedFileName;
+
     @Column("title")
     private String title;
 

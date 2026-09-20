@@ -19,6 +19,12 @@ public interface DocumentInfoRepository extends ReactiveCrudRepository<DocumentI
 
     Mono<Boolean> existsByDocCode(String docCode);
 
+    /**
+     * 按前缀（如 20260920D）倒序取最大 doc_code，用于新上传自动生成业务编码。
+     */
+    @Query("SELECT doc_code FROM document_info WHERE doc_code LIKE :prefix ORDER BY doc_code DESC LIMIT 1")
+    Mono<String> findMaxDocCodeByPrefix(@Param("prefix") String prefix);
+
     Mono<Void> deleteByDocCode(String docCode);
 
     /**

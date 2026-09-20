@@ -15,6 +15,8 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -30,7 +32,9 @@ import tools.jackson.databind.node.ObjectNode;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -59,6 +63,12 @@ public class DocumentService extends DatabaseService {
     private long maxFileSize;
 
     /**
+     * Serialize new-upload docCode generation so concurrent threads cannot get the same code.
+     */
+    private final Object docCodeLock = new Object();
+    private static final DateTimeFormatter DOC_CODE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    /**
      * 上传文档初始化（同步部分）：校验 → 清理旧数据 → 保存文件 → 创建占位分片(PROCESSING)
      * <p>
      * 不触发异步处理，返回 UploadContext 供调用方编排异步流程。
@@ -69,65 +79,117 @@ public class DocumentService extends DatabaseService {
             MultipartFile file = request.getFile();
             FileUtils.validateFile(file, maxFileSize);
 
-            // 重新上传同 docCode：先清理旧数据（向量+分片+图谱）
-            if (request.getDocCode() != null && !request.getDocCode().isBlank()) {
-                deleteByDocCodeSync(request.getDocCode());
+            // New upload (docCode blank): auto-generate docCode under process lock.
+            // Whole init is serialized so "query max +1" and document_info insert are
+            // atomically visible to other threads, preventing duplicate codes.
+            boolean isNewUpload = request.getDocCode() == null || request.getDocCode().isBlank();
+            if (isNewUpload) {
+                synchronized (docCodeLock) {
+                    request.setDocCode(generateDocCode(file.getOriginalFilename()));
+                    return doUploadInit(file, request);
+                }
             }
-
-            String filePath = FileUtils.saveFile(file, uploadDir, request.getTenantCode());
-            log.debug("文件已保存到: {}", filePath);
-
-            // 创建占位分片（PROCESSING），文档列表可见但不参与搜索
-            String documentId = UUID.randomUUID().toString();
-            String placeholderId = UUID.randomUUID().toString();
-            chunkRepository.save(DocumentChunk.builder()
-                    .id(placeholderId).documentId(documentId)
-                    .docCode(request.getDocCode()).tenantCode(request.getTenantCode())
-                    .systemType(request.getSystemType()).enabled(false)
-                    .fileName(request.getFileName()).userId(request.getUserId())
-                    .content("").chunkIndex(-1).status("PROCESSING").build());
-
-            // 同时写入 MySQL 文档元数据表（列表查询走 MySQL，不再每次扫 Neo4j）
-            try {
-                DocumentInfo info = DocumentInfo.builder()
-                        .documentId(documentId)
-                        .docCode(request.getDocCode())
-                        .tenantCode(request.getTenantCode())
-                        .systemType(request.getSystemType())
-                        .fileName(request.getFileName())
-                        .title(StringUtils.hasLength(request.getTitle()) ? request.getTitle() : request.getFileName())
-                        .description(request.getDescription())
-                        .fileSize(file.getSize())
-                        .filePath(filePath)
-                        .status("PROCESSING")
-                        .chunkCount(0)
-                        .enabled(false)
-                        .userId(request.getUserId())
-                        .build();
-                documentInfoRepository.save(info).block();
-            } catch (Exception e) {
-                log.warn("写入 document_info 失败（不影响主流程）: {}", e.getMessage());
-            }
-
-            UploadContext context = new UploadContext();
-            context.setDocumentId(documentId);
-            context.setPlaceholderId(placeholderId);
-            context.setFilePath(filePath);
-            context.setResponse(DocumentResponse.builder().documentId(FileUtils.parseDocumentId(documentId))
-                    .docCode(request.getDocCode()).tenantCode(request.getTenantCode())
-                    .systemType(request.getSystemType()).enabled(false).fileName(request.getFileName())
-                    .title(request.getTitle()).description(request.getDescription())
-                    .chunkCount(0).status("PROCESSING").uploadTime(LocalDateTime.now())
-                    .fileSize(file.getSize()).filePath(filePath).userId(request.getUserId()).build());
-
-            return context;
+            // Re-upload latest version: keep original docCode, clean old data first.
+            deleteByDocCodeSync(request.getDocCode());
+            return doUploadInit(file, request);
         }).subscribeOn(Schedulers.boundedElastic()).onErrorResume(e -> {
-            log.error("文档上传初始化失败: {}", e.getMessage(), e);
+            log.error("upload init failed: {}", e.getMessage(), e);
             UploadContext ctx = new UploadContext();
             ctx.setResponse(DocumentResponse.builder().status("FAILED")
                     .errorMessage(e.getMessage()).uploadTime(LocalDateTime.now()).build());
             return Mono.just(ctx);
         });
+    }
+
+    /**
+     * Shared init after docCode is known: save file, placeholder chunk, document_info, build context.
+     */
+    private UploadContext doUploadInit(MultipartFile file, DocumentUploadRequest request) throws java.io.IOException {
+        String safeOriginal = Paths.get(Objects.requireNonNull(file
+                .getOriginalFilename())).getFileName().toString();
+        String ext = Utils.getFileExtension(safeOriginal);
+        String storedFileName = ext.isBlank() ? request.getDocCode() : request.getDocCode() + "." + ext;
+        String filePath = FileUtils.saveFileAs(file, uploadDir, request.getTenantCode(), storedFileName);
+        // downstream chunk/graph/vector use stored name; UI and document_info.file_name keep original
+        request.setFileName(storedFileName);
+        log.debug("file saved as {} (original {})", filePath, safeOriginal);
+
+        // placeholder chunk (PROCESSING): visible in list but excluded from search
+        String documentId = UUID.randomUUID().toString();
+        String placeholderId = UUID.randomUUID().toString();
+        chunkRepository.save(DocumentChunk.builder()
+                .id(placeholderId).documentId(documentId)
+                .docCode(request.getDocCode()).tenantCode(request.getTenantCode())
+                .systemType(request.getSystemType()).enabled(false)
+                .fileName(request.getFileName()).userId(request.getUserId())
+                .content("").chunkIndex(-1).status("PROCESSING").build());
+
+        // write MySQL document metadata (list queries hit MySQL, not Neo4j)
+        try {
+            DocumentInfo info = DocumentInfo.builder()
+                    .documentId(documentId)
+                    .docCode(request.getDocCode())
+                    .tenantCode(request.getTenantCode())
+                    .systemType(request.getSystemType())
+                    .fileName(safeOriginal)
+                    .storedFileName(storedFileName)
+                    .title(StringUtils.hasLength(request.getTitle()) ? request.getTitle() : safeOriginal)
+                    .description(request.getDescription())
+                    .fileSize(file.getSize())
+                    .filePath(filePath)
+                    .status("PROCESSING")
+                    .chunkCount(0)
+                    .enabled(false)
+                    .userId(request.getUserId())
+                    .build();
+            documentInfoRepository.save(info).block();
+        } catch (Exception e) {
+            log.warn("write document_info failed (non-fatal): {}", e.getMessage());
+        }
+
+        UploadContext context = new UploadContext();
+        context.setDocumentId(documentId);
+        context.setPlaceholderId(placeholderId);
+        context.setFilePath(filePath);
+        context.setResponse(DocumentResponse.builder().documentId(FileUtils.parseDocumentId(documentId))
+                .docCode(request.getDocCode()).tenantCode(request.getTenantCode())
+                .systemType(request.getSystemType()).enabled(false).fileName(safeOriginal)
+                .title(request.getTitle()).description(request.getDescription())
+                .chunkCount(0).status("PROCESSING").uploadTime(LocalDateTime.now())
+                .fileSize(file.getSize()).filePath(filePath).userId(request.getUserId()).build());
+
+        return context;
+    }
+
+    /**
+     * Auto docCode: yyyyMMdd + first letter of file extension (uppercase) + 3-digit sequence.
+     * e.g. 2026-09-20 .docx with existing 20260920D001 -> 20260920D002.
+     * Caller must hold docCodeLock so query and insert are serialized.
+     */
+    private String generateDocCode(String fileName) {
+        String prefix = LocalDate.now().format(DOC_CODE_DATE) + resolveTypeLetter(fileName);
+        String max = documentInfoRepository.findMaxDocCodeByPrefix(prefix + "%").block();
+        int seq = 1;
+        if (max != null && max.startsWith(prefix) && max.length() > prefix.length()) {
+            try {
+                seq = Integer.parseInt(max.substring(prefix.length())) + 1;
+            } catch (NumberFormatException ignored) {
+                // legacy rows not matching the sequence format: start from 1
+            }
+        }
+        return prefix + String.format("%03d", seq);
+    }
+
+    /**
+     * First letter of extension uppercased (docx->D, xlsx->X, ppt->P, txt->T); fallback F.
+     */
+    private String resolveTypeLetter(String fileName) {
+        if (!StringUtils.hasLength(fileName)) return "F";
+        int dot = fileName.lastIndexOf('.');
+        if (dot < 0 || dot >= fileName.length() - 1) return "F";
+        String ext = fileName.substring(dot + 1).trim();
+        if (ext.isEmpty()) return "F";
+        return String.valueOf(Character.toUpperCase(ext.charAt(0)));
     }
 
     /**
@@ -522,17 +584,30 @@ public class DocumentService extends DatabaseService {
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
-    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    @EventListener(ApplicationReadyEvent.class)
     public void migrateIfEmpty() {
         try {
             Long cnt = documentInfoRepository.countAll().block();
-            if (cnt != null && cnt > 0) {
-                log.debug("document_info 已有 {} 条记录，跳过历史迁移", cnt);
-                return;
+            if (cnt == null || cnt == 0) {
+                migrateFromNeo4j().block();
             }
-            migrateFromNeo4j().block();
+            // backfill legacy rows: derive stored_file_name from file_path when missing
+            backfillStoredFileName();
         } catch (Exception e) {
-            log.warn("document_info 历史迁移失败: {}", e.getMessage());
+            log.warn("migrateIfEmpty failed: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Backfill legacy rows whose stored_file_name is NULL: derive the on-disk file name
+     * from file_path so delete etc. can still locate the local file. Idempotent.
+     */
+    private void backfillStoredFileName() {
+        try {
+            String sql = "update document_info set stored_file_name = file_path where stored_file_name is null;";
+            this.databaseClient.sql(sql).fetch().rowsUpdated().subscribe(res -> log.debug("同步数据条数：{}", res));
+        } catch (Exception e) {
+            log.warn("backfill stored_file_name failed: {}", e.getMessage());
         }
     }
 
