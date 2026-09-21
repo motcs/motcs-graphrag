@@ -98,8 +98,8 @@ public class AuthController {
 
     @GetMapping("/api-keys")
     @Operation(summary = "Key 列表分页（含累计用量，按创建时间降序；默认每页10条）")
-    public Mono<ResponseEntity<Page<UsageOverviewRow>>> listApiKeys(Pageable pageable) {
-        return this.apiKeyUsageService.listApiKeysPage(pageable).map(ResponseEntity::ok);
+    public Mono<ResponseEntity<Page<UsageOverviewRow>>> apiKeys(Pageable pageable) {
+        return this.apiKeyUsageService.apiKeysPage(pageable).map(ResponseEntity::ok);
     }
 
     @PostMapping("/api-keys")

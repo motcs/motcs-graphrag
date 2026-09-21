@@ -125,7 +125,7 @@ public class ApiKeyUsageService extends DatabaseService {
      * API Key 管理列表分页：api_key LEFT JOIN 汇总表，按创建时间降序，
      * 每行直接带出累计用量（避免前端逐行再调 usage-summary 造成 N+1）。
      */
-    public Mono<Page<UsageOverviewRow>> listApiKeysPage(Pageable pageable) {
+    public Mono<Page<UsageOverviewRow>> apiKeysPage(Pageable pageable) {
         String sql = """
                 select * from (SELECT k.id AS id, k.name AS name, k.key_prefix AS key_prefix, k.tenant_code AS tenant_code,
                  k.system_type AS system_type, k.enabled AS enabled, COALESCE(s.total_calls, 0) AS total_calls,
@@ -133,7 +133,8 @@ public class ApiKeyUsageService extends DatabaseService {
                  COALESCE(s.total_tokens, 0) AS total_tokens, s.last_used_at AS last_used_at, k.created_time AS created_time
                  FROM api_key k LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id order by COALESCE(s.total_tokens, 0) desc, id) t
                 """ + ContextUtil.applyPage(pageable);
-        Mono<Long> totalMono = this.summaryRepository.countAllKeys().defaultIfEmpty(0L);
+        String countSql = "select count(*) from (SELECT k.* FROM api_key k LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id) t";
+        Mono<Long> totalMono = super.countWith(countSql, Map.of()).defaultIfEmpty(0L);
         Mono<List<UsageOverviewRow>> listMono = super.queryWith(sql, Map.of(), UsageOverviewRow.class).collectList();
         return Mono.zip(listMono, totalMono).map(tuple2 ->
                 new PageImpl<>(tuple2.getT1(), pageable, tuple2.getT2()));
@@ -145,8 +146,8 @@ public class ApiKeyUsageService extends DatabaseService {
      */
     public Mono<Long> rebuildSummary() {
         log.debug("手动触发用量汇总表重建...");
-        return summaryRepository.truncate()
-                .then(summaryRepository.rebuildFromDetail())
+        return this.summaryRepository.truncate()
+                .then(this.summaryRepository.rebuildFromDetail())
                 .doOnSuccess(n -> log.debug("用量汇总表重建完成，共 {} 个 Key", n));
     }
 
@@ -158,7 +159,8 @@ public class ApiKeyUsageService extends DatabaseService {
      * @param pageable 分页参数（默认 size=10，由 Controller 设定）
      */
     public Mono<Map<String, Object>> overview(Pageable pageable) {
-        Mono<Long> totalMono = this.summaryRepository.countAllKeys().defaultIfEmpty(0L);
+        String countSql = "select count(*) from (SELECT k.* FROM api_key k LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id) t";
+        Mono<Long> totalMono = super.countWith(countSql, Map.of()).defaultIfEmpty(0L);
         Mono<UsageOverviewRow> totalsMono = this.summaryRepository.globalTotals()
                 .defaultIfEmpty(new UsageOverviewRow(null, null, null, null,
                         null, null, 0L, 0L, 0L,
