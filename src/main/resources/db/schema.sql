@@ -59,6 +59,8 @@ ALTER TABLE api_key
     ADD COLUMN tenant_code VARCHAR(64) DEFAULT NULL COMMENT '绑定的租户编码（对话/上传文档归属）';
 ALTER TABLE api_key
     ADD COLUMN system_type VARCHAR(64) DEFAULT NULL COMMENT '绑定的系统类型（对话/上传文档归属）';
+ALTER TABLE api_key
+    ADD COLUMN is_delete TINYINT(1) DEFAULT 0 COMMENT '是否已删除（软删除）：1 已删除，Key 失效且管理列表不可见';
 
 
 -- API Key 表（OpenAI 风格：只存 SHA-256 哈希与前缀掩码，明文仅创建时返回一次）
@@ -71,6 +73,7 @@ CREATE TABLE IF NOT EXISTS api_key
     tenant_code  VARCHAR(64) DEFAULT NULL COMMENT '绑定的租户编码（对话/上传文档归属）',
     system_type  VARCHAR(64) DEFAULT NULL COMMENT '绑定的系统类型（对话/上传文档归属）',
     enabled      TINYINT(1)  DEFAULT 1 COMMENT '是否启用 1启用 0停用',
+    is_delete    TINYINT(1)  DEFAULT 0 COMMENT '是否已删除（软删除）：1 已删除',
     created_by   VARCHAR(64) DEFAULT 'admin' COMMENT '创建人',
     created_time DATETIME    DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     UNIQUE KEY uk_key_hash (key_hash)
@@ -184,7 +187,5 @@ CREATE TABLE IF NOT EXISTS chat_session
 ALTER TABLE document_info
     ADD COLUMN stored_file_name VARCHAR(255) DEFAULT NULL COMMENT '本地存储文件名' AFTER file_name;
 
-update api_key set tenant_code ='0' where tenant_code ='-1';
-update chat_message set tenant_code ='0' where tenant_code ='-1';
-update chat_session set tenant_code ='0' where tenant_code ='-1';
-update document_info set tenant_code ='0' where tenant_code ='-1';
+ALTER TABLE api_key
+    ADD COLUMN is_delete TINYINT(1) DEFAULT 0 COMMENT '是否已删除（软删除）：1 已删除' AFTER created_by;

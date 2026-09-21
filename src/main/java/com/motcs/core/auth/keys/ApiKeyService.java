@@ -100,10 +100,10 @@ public class ApiKeyService {
     public Mono<Void> delete(Long id) {
         return this.apiKeyRepository.findById(id).flatMap(apiKey -> {
             String cacheKey = CACHE_KEY_PREFIX + apiKey.getKeyHash();
+            // 软删除：置 isDelete=true（Key 失效、管理列表不可见），用量流水与统计保留
+            apiKey.setIsDelete(Boolean.TRUE);
             return this.redisTemplate.delete(cacheKey)
-                    .then(this.apiKeyRepository.deleteById(id))
-                    .then(this.apiKeyUsageRepository.deleteAllByApiKeyId(id))
-                    .then(this.apiKeyUsageSummaryRepository.deleteByApiKeyId(id));
+                    .then(this.apiKeyRepository.save(apiKey));
         }).then();
     }
 

@@ -72,6 +72,4 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
             """)
     Mono<Long> rebuildFromDetail();
 
-    Mono<Void> deleteByApiKeyId(Long apiKeyId);
-
 }

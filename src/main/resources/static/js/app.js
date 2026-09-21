@@ -859,6 +859,7 @@ async function loadUsageOverview(page) {
         const data = await res.json();
         // 统计卡片
         $('monTotalKeys').textContent = data.totalKeys ?? 0;
+        $('monKeysBreakdown').textContent = `在用 ${data.activeKeys ?? 0} · 已删除 ${data.deletedKeys ?? 0}`;
         $('monTotalCalls').textContent = data.totalCalls ?? 0;
         $('monPrompt').textContent = (data.promptTokens ?? 0).toLocaleString();
         $('monCompletion').textContent = (data.completionTokens ?? 0).toLocaleString();
@@ -870,9 +871,11 @@ async function loadUsageOverview(page) {
         keys.forEach(k => {
             const tr = document.createElement('tr');
             tr.className = 'border-b border-white/5';
-            const enabledBadge = k.enabled
+            const enabledBadge = k.isDelete
+                ? '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-red-500/15 text-red-400">已删除</span>'
+                : (k.enabled
                 ? '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-emerald-500/15 text-emerald-400">启用</span>'
-                : '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>';
+                : '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>');
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 font-mono text-xs text-gray-300 hide-mobile">${escapeHtml(k.keyPrefix || k.prefix || 'sk-…')}…</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-300 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '-')}</td>

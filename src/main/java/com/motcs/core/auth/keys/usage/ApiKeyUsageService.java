@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * API Key 使用监控服务：
@@ -131,9 +132,9 @@ public class ApiKeyUsageService extends DatabaseService {
                  k.system_type AS system_type, k.enabled AS enabled, COALESCE(s.total_calls, 0) AS total_calls,
                  COALESCE(s.prompt_tokens, 0) AS prompt_tokens, COALESCE(s.completion_tokens, 0) AS completion_tokens,
                  COALESCE(s.total_tokens, 0) AS total_tokens, s.last_used_at AS last_used_at, k.created_time AS created_time
-                 FROM api_key k LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id order by COALESCE(s.total_tokens, 0) desc, id) t
+                 FROM api_key k LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id WHERE k.is_delete = 0 order by COALESCE(s.total_tokens, 0) desc, id) t
                 """ + ContextUtil.applyPage(pageable);
-        String countSql = "select count(*) from (SELECT k.* FROM api_key k LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id) t";
+        String countSql = "select count(*) from (SELECT k.* FROM api_key k LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id WHERE k.is_delete = 0) t";
         Mono<Long> totalMono = super.countWith(countSql, Map.of()).defaultIfEmpty(0L);
         Mono<List<UsageOverviewRow>> listMono = super.queryWith(sql, Map.of(), UsageOverviewRow.class).collectList();
         return Mono.zip(listMono, totalMono).map(tuple2 ->
@@ -159,28 +160,45 @@ public class ApiKeyUsageService extends DatabaseService {
      * @param pageable 分页参数（默认 size=10，由 Controller 设定）
      */
     public Mono<Map<String, Object>> overview(Pageable pageable) {
-        String countSql = "select count(*) from (SELECT k.* FROM api_key k LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id) t";
-        Mono<Long> totalMono = super.countWith(countSql, Map.of()).defaultIfEmpty(0L);
+        String countQuery = "select sum(if(is_delete = 0, 1, 0)) as active_keys, sum(if(is_delete = 1, 1, 0)) as deleted_keys from api_key";
+        Mono<List<ApiKeyUsageCount>> collectedList = super.queryWith(countQuery, Map.of(), ApiKeyUsageCount.class).collectList();
         Mono<UsageOverviewRow> totalsMono = this.summaryRepository.globalTotals()
                 .defaultIfEmpty(new UsageOverviewRow(null, null, null, null,
-                        null, null, 0L, 0L, 0L,
-                        0L, null, null));
+                        null, null, null, 0L, 0L, 0L, 0L,
+                        null, null));
         String sql = """
                 select * from (SELECT k.id AS id, k.name AS name, k.key_prefix AS key_prefix,
-                 k.tenant_code AS tenant_code, k.system_type AS system_type, k.enabled AS enabled,
+                 k.tenant_code AS tenant_code, k.system_type AS system_type, k.enabled AS enabled, k.is_delete AS is_delete,
                  COALESCE(s.total_calls, 0) AS total_calls, COALESCE(s.prompt_tokens, 0) AS prompt_tokens,
                  COALESCE(s.completion_tokens, 0) AS completion_tokens, COALESCE(s.total_tokens, 0) AS total_tokens,
                  s.last_used_at AS last_used_at FROM api_key k LEFT JOIN api_key_usage_summary s ON
                  s.api_key_id = k.id order by COALESCE(s.total_tokens, 0) desc, id) t
                 """ + ContextUtil.applyPage(pageable);
         Mono<List<UsageOverviewRow>> listMono = super.queryWith(sql, Map.of(), UsageOverviewRow.class).collectList();
-        return Mono.zip(totalMono, totalsMono).flatMap(t -> {
-            long totalKeys = t.getT1();
+        return Mono.zip(collectedList, totalsMono).flatMap(t -> {
+            AtomicLong totalKeys = new AtomicLong(0);
+            List<ApiKeyUsageCount> activeKeys = t.getT1();
             UsageOverviewRow g = t.getT2();
             return listMono.map(list -> {
                 Map<String, Object> result = new LinkedHashMap<>();
                 // 顶部统计卡片
-                result.put("totalKeys", totalKeys);
+                if (!ObjectUtils.isEmpty(activeKeys)) {
+                    ApiKeyUsageCount first = activeKeys.getFirst();
+                    if (ObjectUtils.isEmpty(first.getActiveKeys())) {
+                        first.setActiveKeys(0L);
+                    }
+                    if (ObjectUtils.isEmpty(first.getDeletedKeys())) {
+                        first.setDeletedKeys(0L);
+                    }
+                    totalKeys.set(first.getActiveKeys() + first.getDeletedKeys());
+                    result.put("totalKeys", totalKeys.get());
+                    result.put("activeKeys", first.getActiveKeys());
+                    result.put("deletedKeys", first.getDeletedKeys());
+                } else {
+                    result.put("totalKeys", 0);
+                    result.put("activeKeys", 0);
+                    result.put("deletedKeys", 0);
+                }
                 result.put("totalCalls", g.totalCalls() == null ? 0L : g.totalCalls());
                 result.put("promptTokens", g.promptTokens() == null ? 0L : g.promptTokens());
                 result.put("completionTokens", g.completionTokens() == null ? 0L : g.completionTokens());
@@ -190,9 +208,9 @@ public class ApiKeyUsageService extends DatabaseService {
                 // 分页信息
                 result.put("number", pageable.getPageNumber());
                 result.put("size", pageable.getPageSize());
-                result.put("totalElements", totalKeys);
+                result.put("totalElements", totalKeys.get());
                 int totalPages = pageable.getPageSize() == 0 ? 0
-                        : (int) ((totalKeys + pageable.getPageSize() - 1) / pageable.getPageSize());
+                        : (int) ((totalKeys.get() + pageable.getPageSize() - 1) / pageable.getPageSize());
                 result.put("totalPages", totalPages);
                 return result;
             });

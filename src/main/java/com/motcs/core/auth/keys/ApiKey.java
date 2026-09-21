@@ -58,6 +58,10 @@ public class ApiKey implements Serializable {
     @Column("enabled")
     private Boolean enabled;
 
+    @Schema(description = "是否已删除（软删除）：true 时 Key 失效、管理列表不可见")
+    @Column("is_delete")
+    private Boolean isDelete = false;
+
     @Schema(description = "创建人", example = "admin")
     @Column("created_by")
     private String createdBy;

@@ -18,6 +18,7 @@ public record UsageOverviewRow(
         @Schema(description = "租户编码") String tenantCode,
         @Schema(description = "系统类型") String systemType,
         @Schema(description = "是否启用") Boolean enabled,
+        @Schema(description = "是否已删除（软删除）") Boolean isDelete,
         @Schema(description = "累计调用次数") Long totalCalls,
         @Schema(description = "累计输入 token") Long promptTokens,
         @Schema(description = "累计输出 token") Long completionTokens,
