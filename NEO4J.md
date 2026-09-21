@@ -3,7 +3,7 @@
 你的解压目录：`D:\Deployment\neo4j-community-2026.03.1`Neo4j
 
 >
-> ⚠️注意：Neo4j 2026 新版本**自带内置 JDK**，优先使用它自带 JDK，避免你本地 JDK26 版本兼容问题！！
+> ⚠️注意：Neo4j 2026 新版本 **自带内置 JDK**，优先使用它自带 JDK，避免你本地 JDK26 版本兼容问题！！
 
 ## 一、环境变量配置（CMD 命令，新开 cmd 执行）
 
@@ -15,7 +15,7 @@ setx PATH "%NEO4J_HOME%\bin;%PATH%"
 ```
 
 >
-> setx 执行完成后，**关闭全部旧 CMD 窗口，打开全新 CMD 才生效**。
+> setx 执行完成后， **关闭全部旧 CMD 窗口，打开全新 CMD 才生效**。
 
 验证环境变量（新 cmd）
 
@@ -93,7 +93,7 @@ server.memory.heap.max_size=2G
 server.memory.pagecache.size=1G
 ```
 
-CSDN博...## 五、重要坑点（重点！！）
+## 五、重要坑点（重点！！）
 
 1. **Neo4j 2026 自带 JDK，优先用自带，不要强制用你本地 JDK26**
    如果启动报错 java 版本，删除系统环境变量`JAVA_HOME`，neo4j 会自动使用包内自带 JDK。
@@ -114,3 +114,5 @@ spring:
 
 >
 > 测试连通：启动 neo4j，浏览器访问 [http://127.0.0.1:7474](http://127.0.0.1:7474)，能打开界面代表数据库正常。
+
+## 七、
