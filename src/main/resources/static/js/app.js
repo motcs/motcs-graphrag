@@ -279,6 +279,8 @@ function fillTenantSelects(ids, tenants, withAll, extraOptions) {
 function initSearchableSelect(selectId, widthClass, placeholder) {
     const sel = $(selectId);
     if (!sel) return null;
+    // 已初始化过：复用已有 UI（选项由 fillTenantSelects 实时重建），避免重复包裹产生多个下拉框
+    if (sel.dataset.searchInit === '1') return tenantSearchApis[selectId] || null;
 
     // 构建 UI：输入框 + 下拉列表，select 隐藏后挂在容器末尾
     const wrap = document.createElement('div');
@@ -356,6 +358,7 @@ function initSearchableSelect(selectId, widthClass, placeholder) {
         input.dataset.selected = sel.value;
     }
 
+    sel.dataset.searchInit = '1';
     return {
         setValue(code) {
             if (code == null || code === '') { selectValue(''); return; }

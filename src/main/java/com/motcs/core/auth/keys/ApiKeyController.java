@@ -1,7 +1,9 @@
 package com.motcs.core.auth.keys;
 
+import com.motcs.commons.annotation.RestServerException;
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
+import com.motcs.core.knowledge.record.session.ChatSessionRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -37,19 +39,24 @@ public class ApiKeyController {
 
     @GetMapping
     @Operation(summary = "会话列表")
-    public Mono<ResponseEntity<?>> listSessions(ServerWebExchange exchange,
-                                                @RequestParam(value = "userId", required = false) String userId, Pageable pageable) {
-        return this.apiKeyService.resolveApiKey(exchange).flatMap(apiKey ->
-                        this.graphRagService.getSessionsByApiKey(apiKey, userId, pageable)
-                                .<ResponseEntity<?>>map(ResponseEntity::ok))
-                .switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(UNAUTHORIZED_BODY)));
+    public Mono<ResponseEntity<?>> listSessions(ServerWebExchange exchange, ChatSessionRequest request, Pageable pageable) {
+        if (ObjectUtils.isEmpty(request.getUserId())) {
+            return Mono.error(RestServerException.withMsg("查询会话必须传用户编码！"));
+        }
+        return this.apiKeyService.resolveApiKey(exchange).flatMap(apiKey -> {
+            request.setApiKeyId(apiKey.getId());
+            request.setTenantCode(apiKey.getTenantCode());
+            request.setSystemType(apiKey.getSystemType());
+            return this.graphRagService.getSessions(request, pageable)
+                    .<ResponseEntity<?>>map(ResponseEntity::ok);
+        }).switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(UNAUTHORIZED_BODY)));
     }
 
     @GetMapping("/session")
     @Operation(summary = "按会话ID查询消息（仅本 Key 创建的；不属于该 Key 返回空列表）")
     public Mono<ResponseEntity<?>> sessionMessages(ServerWebExchange exchange, @RequestParam("sessionId") String sessionId) {
         return this.apiKeyService.resolveApiKey(exchange).flatMap(apiKey -> this.graphRagService
-                        .getConversationsBySessionAndApiKey(sessionId, apiKey.getId()).<ResponseEntity<?>>map(ResponseEntity::ok))
+                        .querySession(sessionId, apiKey.getId()).<ResponseEntity<?>>map(ResponseEntity::ok))
                 .switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(UNAUTHORIZED_BODY)));
     }
 
@@ -88,7 +95,7 @@ public class ApiKeyController {
                     "success", false, "message", "sessionIds 不能为空")));
         }
         return this.apiKeyService.resolveApiKey(exchange).flatMap(apiKey -> {
-            Mono<Integer> deleteMono = graphRagService.deleteSessionsByApiKey(sessionIds, apiKey.getId());
+            Mono<Long> deleteMono = graphRagService.deleteSessions(sessionIds, apiKey.getId());
             return deleteMono.map(n -> {
                 Map<String, Object> success = Map.of("success", true, "deleted", n);
                 return ResponseEntity.ok(success);

@@ -55,7 +55,7 @@ public interface ChatMessageRepository extends ReactiveCrudRepository<ChatMessag
      * 批量更新某会话所有记录的标题
      */
     @Query("UPDATE chat_message SET title = :title WHERE session_id = :sessionId")
-    Mono<Integer> updateTitleBySessionId(String title, String sessionId);
+    Mono<Integer> updateTitle(String title, String sessionId);
 
     // ============ API Key 维度（对话归属校验与检索） ============
 
@@ -63,12 +63,12 @@ public interface ChatMessageRepository extends ReactiveCrudRepository<ChatMessag
      * 按会话ID + API Key 查询对话消息（正序，校验归属）
      */
     @Query("SELECT * FROM chat_message WHERE session_id = :sessionId AND api_key_id = :apiKeyId ORDER BY create_time")
-    Flux<ChatMessage> findBySessionIdAndApiKey(String sessionId, Long apiKeyId);
+    Flux<ChatMessage> querySession(String sessionId, Long apiKeyId);
 
     /**
      * 统计某会话中属于指定 API Key 的消息数（用于归属校验）
      */
     @Query("SELECT COUNT(*) FROM chat_message WHERE session_id = :sessionId AND api_key_id = :apiKeyId")
-    Mono<Long> countBySessionIdAndApiKey(String sessionId, Long apiKeyId);
+    Mono<Long> countSession(String sessionId, Long apiKeyId);
 
 }

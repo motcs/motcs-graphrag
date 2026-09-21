@@ -9,7 +9,8 @@ import com.motcs.core.document.info.DocumentInfoRepository;
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
 import com.motcs.core.knowledge.record.ChatMessage;
-import com.motcs.core.knowledge.record.ChatSession;
+import com.motcs.core.knowledge.record.session.ChatSession;
+import com.motcs.core.knowledge.record.session.ChatSessionRequest;
 import com.motcs.core.request.FileUploadRequest;
 import com.motcs.core.request.SessionRequest;
 import com.motcs.core.tenant.TenantConfig;
@@ -63,14 +64,14 @@ public class DocumentController {
      * GET /documents/v1/tenants
      */
     @GetMapping("/tenants")
-    public Mono<ResponseEntity<Flux<TenantConfig>>> listTenants() {
+    public Mono<ResponseEntity<List<TenantConfig>>> listTenants() {
         Flux<TenantConfig> configFlux = this.tenantConfigService.findByEnabledTrueOrderByIdAsc();
         TenantConfig config = new TenantConfig();
         config.setTenantCode("0");
         config.setTenantName("全部租户");
         config.setEnabled(true);
         Flux<TenantConfig> tenants = Flux.concat(Flux.just(config), configFlux);
-        return Mono.just(ResponseEntity.ok(tenants));
+        return tenants.collectList().map(ResponseEntity::ok);
     }
 
     /**
@@ -79,25 +80,9 @@ public class DocumentController {
      * 注意：原 GET /tenants（全量）保留供各处下拉框使用，不受影响。
      */
     @GetMapping("/tenants/page")
-    public Mono<ResponseEntity<Map<String, Object>>> listTenantsPage(
-            @RequestParam(value = "keyword", required = false) String keyword,
-            Pageable pageable) {
-        String kw = ObjectUtils.isEmpty(keyword) ? "" : keyword.trim();
-        Mono<Long> totalMono = this.tenantConfigService.countSearch(kw).defaultIfEmpty(0L);
-        Mono<List<TenantConfig>> listMono = this.tenantConfigService.search(keyword, pageable);
-        return Mono.zip(totalMono, listMono)
-                .map(t -> {
-                    long total = t.getT1();
-                    Map<String, Object> result = new HashMap<>();
-                    result.put("content", t.getT2());
-                    result.put("number", pageable.getPageNumber());
-                    result.put("size", pageable.getPageSize());
-                    result.put("totalElements", total);
-                    int totalPages = pageable.getPageSize() == 0 ? 0
-                            : (int) ((total + pageable.getPageSize() - 1) / pageable.getPageSize());
-                    result.put("totalPages", totalPages);
-                    return ResponseEntity.ok(result);
-                });
+    public Mono<ResponseEntity<Page<TenantConfig>>> tenantsPage(
+            @RequestParam(required = false) String keyword, Pageable pageable) {
+        return this.tenantConfigService.tenantsPage(keyword, pageable).map(ResponseEntity::ok);
     }
 
     /**
@@ -323,12 +308,11 @@ public class DocumentController {
      * GET /documents/v1/sessions
      */
     @GetMapping("/sessions")
-    public Mono<ResponseEntity<Page<ChatSession>>> getSessions(
-            @RequestParam("userId") String userId,
-            @RequestParam(value = "tenantCode", required = false) String tenantCode,
-            @RequestParam(value = "systemType", required = false) String systemType, Pageable pageable) {
-        return graphRagService.getSessions(userId, tenantCode, systemType, pageable)
-                .map(ResponseEntity::ok);
+    public Mono<ResponseEntity<Page<ChatSession>>> getSessions(ChatSessionRequest request, Pageable pageable) {
+        if (ObjectUtils.isEmpty(request.getUserId())) {
+            return Mono.error(RestServerException.withMsg("查询会话必须传用户编码！"));
+        }
+        return graphRagService.getSessions(request, pageable).map(ResponseEntity::ok);
     }
 
     /**
@@ -390,7 +374,7 @@ public class DocumentController {
      */
     @GetMapping("/list")
     public Mono<ResponseEntity<Page<DocumentInfo>>> listDocuments(DocumentRequest request, Pageable pageable) {
-        return this.documentService.queryDocumentsPage(request, pageable).map(ResponseEntity::ok);
+        return this.documentService.page(request, pageable).map(ResponseEntity::ok);
     }
 
     /**

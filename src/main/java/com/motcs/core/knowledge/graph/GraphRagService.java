@@ -4,8 +4,6 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.motcs.commons.ContextUtil;
 import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.base.DatabaseService;
-import com.motcs.commons.utils.Utils;
-import com.motcs.core.auth.keys.ApiKey;
 import com.motcs.core.document.DocumentResponse;
 import com.motcs.core.document.DocumentService;
 import com.motcs.core.document.DocumentUploadRequest;
@@ -13,7 +11,13 @@ import com.motcs.core.knowledge.KnowledgeEntity;
 import com.motcs.core.knowledge.KnowledgeEntityRepository;
 import com.motcs.core.knowledge.chunk.DocumentChunk;
 import com.motcs.core.knowledge.chunk.DocumentChunkRepository;
-import com.motcs.core.knowledge.record.*;
+import com.motcs.core.knowledge.record.ChatMessage;
+import com.motcs.core.knowledge.record.ChatMessageRepository;
+import com.motcs.core.knowledge.record.ChatSessionSummary;
+import com.motcs.core.knowledge.record.ChatSessionSummaryRepository;
+import com.motcs.core.knowledge.record.session.ChatSession;
+import com.motcs.core.knowledge.record.session.ChatSessionRepository;
+import com.motcs.core.knowledge.record.session.ChatSessionRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.jspecify.annotations.NonNull;
@@ -931,28 +935,29 @@ public class GraphRagService extends DatabaseService {
             request.setAnswer("");
         }
         // 查询该会话已有的标题（取最新一条记录的title），新记录继承相同标题
-        return this.chatMessageRepository.findRecentBySessionId(request.getSessionId(), 1, 0)
-                .next().map(latest -> StringUtils.hasLength(latest.getTitle()) ? latest.getTitle() : "")
-                .defaultIfEmpty("").flatMap(existingTitle -> {
-                    ChatMessage record = ChatMessage.builder().userId(request.getUserId())
-                            .sessionId(request.getSessionId()).title(existingTitle)
-                            .question(request.getQuestion()).answer(request.getAnswer())
-                            .reasoning(request.getReasoning()).sources(request.getSources())
-                            .tenantCode(request.getTenantCode()).systemType(request.getSystemType())
-                            .apiKeyId(apiKeyId).createTime(LocalDateTime.now()).build();
-                    return this.chatMessageRepository.save(record).publishOn(Schedulers.boundedElastic()).doOnSuccess(r -> {
-                        if (!ObjectUtils.isEmpty(r)) {
-                            log.debug("对话记录已保存: id={}, userId={}, sessionId={}, question={}", r.getId(), request.getUserId(), request.getSessionId(),
-                                    request.getQuestion().length() > 50 ? request.getQuestion().substring(0, 50) + "..." : request.getQuestion());
-                            // 同步更新 chat_session 主表
-                            upsertChatSession(request, apiKeyId, existingTitle).subscribe();
-                            // 首次问答完成且尚无标题时，异步生成会话主题
-                            if (!StringUtils.hasLength(existingTitle)) {
-                                generateSessionTitleAsync(request);
-                            }
-                        }
-                    });
-                }).then();
+        Mono<String> stringMono = this.chatMessageRepository
+                .findRecentBySessionId(request.getSessionId(), 1, 0)
+                .next().map(ChatMessage::getTitle).defaultIfEmpty("");
+        return stringMono.flatMap(existingTitle -> {
+            ChatMessage record = ChatMessage.builder().userId(request.getUserId())
+                    .sessionId(request.getSessionId()).title(existingTitle)
+                    .question(request.getQuestion()).answer(request.getAnswer())
+                    .reasoning(request.getReasoning()).sources(request.getSources())
+                    .tenantCode(request.getTenantCode()).systemType(request.getSystemType())
+                    .apiKeyId(apiKeyId).createTime(LocalDateTime.now()).build();
+            return this.chatMessageRepository.save(record).publishOn(Schedulers.boundedElastic()).doOnSuccess(r -> {
+                if (!ObjectUtils.isEmpty(r)) {
+                    log.debug("对话记录已保存: id={}, userId={}, sessionId={}, question={}", r.getId(), request.getUserId(), request.getSessionId(),
+                            request.getQuestion().length() > 50 ? request.getQuestion().substring(0, 50) + "..." : request.getQuestion());
+                    // 同步更新 chat_session 主表
+                    upsertChatSession(request, apiKeyId, existingTitle).subscribe();
+                    // 首次问答完成且尚无标题时，异步生成会话主题
+                    if (!StringUtils.hasLength(existingTitle)) {
+                        generateSessionTitleAsync(request);
+                    }
+                }
+            });
+        }).then();
     }
 
     /**
@@ -986,7 +991,7 @@ public class GraphRagService extends DatabaseService {
                     return;
                 }
                 // 再次确认尚无标题
-                ChatMessage latest = this.chatMessageRepository.findRecentBySessionId(request.getSessionId(), 1, 0).next().block();
+                ChatMessage latest = this.chatMessageRepository.findRecentBySessionId(request.getSessionId(), 1, 0).blockFirst();
                 if (!ObjectUtils.isEmpty(latest) && !ObjectUtils.isEmpty(latest.getTitle())) {
                     return;
                 }
@@ -998,8 +1003,8 @@ public class GraphRagService extends DatabaseService {
                     title = title.trim().replaceAll("[\"'`]", "")
                             .replaceAll("\\s+", " ");
                     if (title.length() > 30) title = title.substring(0, 30);
-                    this.chatMessageRepository.updateTitleBySessionId(title, request.getSessionId()).block();
-                    this.chatSessionRepository.updateTitleBySessionId(title, request.getSessionId()).block();
+                    this.chatMessageRepository.updateTitle(title, request.getSessionId()).subscribe();
+                    this.chatSessionRepository.updateTitle(title, request.getSessionId()).subscribe();
                     log.debug("会话主题已生成并更新: sessionId={}, title={}", request.getSessionId(), title);
                 }
             } catch (Exception e) {
@@ -1029,18 +1034,13 @@ public class GraphRagService extends DatabaseService {
     /**
      * 查询用户的会话列表（取每个会话最后一条记录的title作为标题，按最后活跃时间倒序）
      */
-    public Mono<Page<ChatSession>> getSessions(String userId, String tenantCode, String systemType, Pageable pageable) {
-        String builder = """
-                SELECT * FROM chat_session WHERE user_id = :userId
-                 AND (:tenantCode IS NULL OR tenant_code = :tenantCode)
-                 AND (:systemType IS NULL OR system_type = :systemType)
-                """ + ContextUtil.applyPage(pageable);
-
-        Map<String, Object> params = Map.of("userId", userId, "tenantCode", tenantCode, "systemType", systemType);
-        Flux<ChatSession> listMono = super.queryWith(builder, params, ChatSession.class);
-        Mono<Long> countMono = this.chatSessionRepository.countSessions(userId, tenantCode, systemType);
-        return Mono.zip(listMono.collectList(), countMono)
-                .map(tuple2 -> new PageImpl<>(tuple2.getT1(), pageable, tuple2.getT2()));
+    public Mono<Page<ChatSession>> getSessions(ChatSessionRequest request, Pageable pageable) {
+        String query = request.whereSql(pageable);
+        Map<String, Object> params = request.getParams();
+        Flux<ChatSession> listMono = super.queryWith(query, params, ChatSession.class);
+        Mono<Long> countMono = super.countWith(request.countSql(), params);
+        return Mono.zip(listMono.collectList(), countMono).map(tuple2 ->
+                new PageImpl<>(tuple2.getT1(), pageable, tuple2.getT2()));
     }
 
     /**
@@ -1067,23 +1067,10 @@ public class GraphRagService extends DatabaseService {
     }
 
     /**
-     * 按 API Key 查询会话列表（该 Key 创建的对话，可按用户/租户/系统过滤，条件为空不过滤）
-     */
-    public Mono<Page<ChatSession>> getSessionsByApiKey(ApiKey apiKey, String userId, Pageable pageable) {
-        String uid = Utils.blankToNull(userId);
-        String tc = Utils.blankToNull(apiKey.getTenantCode());
-        String st = Utils.blankToNull(apiKey.getSystemType());
-        Flux<ChatSession> listMono = this.chatSessionRepository.findSessionsByApiKey(apiKey.getId(), uid, tc, st, pageable);
-        Mono<Long> countMono = this.chatSessionRepository.countSessionsByApiKey(apiKey.getId(), uid, tc, st);
-        return Mono.zip(listMono.collectList(), countMono)
-                .map(tuple2 -> new PageImpl<>(tuple2.getT1(), pageable, tuple2.getT2()));
-    }
-
-    /**
      * 按会话ID + API Key 查询对话消息（校验归属：仅该 Key 创建的消息）
      */
-    public Mono<List<ChatMessage>> getConversationsBySessionAndApiKey(String sessionId, Long apiKeyId) {
-        return this.chatMessageRepository.findBySessionIdAndApiKey(sessionId, apiKeyId).collectList();
+    public Mono<List<ChatMessage>> querySession(String sessionId, Long apiKeyId) {
+        return this.chatMessageRepository.querySession(sessionId, apiKeyId).collectList();
     }
 
     // ==================== 对话记录 ====================
@@ -1094,7 +1081,7 @@ public class GraphRagService extends DatabaseService {
      * @return true=已删除；false=该会话不属于此 API Key，未做任何改动
      */
     public Mono<Boolean> deleteSessionByApiKey(String sessionId, Long apiKeyId) {
-        return this.chatMessageRepository.countBySessionIdAndApiKey(sessionId, apiKeyId).flatMap(count -> {
+        return this.chatMessageRepository.countSession(sessionId, apiKeyId).flatMap(count -> {
             if (count == 0) {
                 return Mono.error(RestServerException.withMsg("当前密钥下没有这个对话的权限！"));
             }
@@ -1108,13 +1095,13 @@ public class GraphRagService extends DatabaseService {
     /**
      * 批量删除会话（仅删除属于该 Key 的会话，返回实际删除数）
      */
-    public Mono<Integer> deleteSessionsByApiKey(List<String> sessionIds, Long apiKeyId) {
+    public Mono<Long> deleteSessions(List<String> sessionIds, Long apiKeyId) {
         if (ObjectUtils.isEmpty(sessionIds)) {
-            return Mono.just(0);
+            return Mono.just(0L);
         }
         return Flux.fromIterable(sessionIds)
                 .flatMap(id -> this.deleteSessionByApiKey(id, apiKeyId))
-                .filter(Boolean::booleanValue).count().map(Long::intValue);
+                .filter(Boolean::booleanValue).count();
     }
 
     /**
@@ -1124,8 +1111,8 @@ public class GraphRagService extends DatabaseService {
         if (ObjectUtils.isEmpty(title)) {
             return Mono.just(0);
         }
-        return this.chatMessageRepository.updateTitleBySessionId(title.trim(), sessionId)
-                .then(this.chatSessionRepository.updateTitleBySessionId(title.trim(), sessionId))
+        return this.chatMessageRepository.updateTitle(title.trim(), sessionId)
+                .then(this.chatSessionRepository.updateTitle(title.trim(), sessionId))
                 .doOnSuccess(cnt -> log.debug("会话标题已更新: sessionId={}, title={}, 影响行数={}", sessionId, title, cnt));
     }
 

@@ -1,6 +1,5 @@
 package com.motcs.core.tenant;
 
-import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -22,11 +21,5 @@ public interface TenantConfigRepository extends ReactiveCrudRepository<TenantCon
      * 按租户编码查询（唯一键，用于新增查重）
      */
     Mono<TenantConfig> findByTenantCode(String tenantCode);
-
-    /**
-     * 管理端分页总数（与 searchPage 同条件）
-     */
-    @Query("SELECT COUNT(*) FROM tenant_config WHERE (:keyword IS NULL OR :keyword = '' OR tenant_name LIKE CONCAT('%', :keyword, '%'))")
-    Mono<Long> countSearch(String keyword);
 
 }

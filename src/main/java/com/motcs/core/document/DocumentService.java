@@ -543,7 +543,7 @@ public class DocumentService extends DatabaseService {
     /**
      * 分页查询文档列表（数据库层面分页）
      */
-    public Mono<Page<DocumentInfo>> queryDocumentsPage(DocumentRequest request, Pageable pageable) {
+    public Mono<Page<DocumentInfo>> page(DocumentRequest request, Pageable pageable) {
         ParameterSql parameterSql = request.buildDocWhereSql();
         // 查询当前页数据
         String searchSql = "SELECT * FROM document_info" + parameterSql.whereSql() + ContextUtil.applyPage(pageable);

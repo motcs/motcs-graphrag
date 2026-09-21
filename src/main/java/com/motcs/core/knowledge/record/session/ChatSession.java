@@ -1,4 +1,4 @@
-package com.motcs.core.knowledge.record;
+package com.motcs.core.knowledge.record.session;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
