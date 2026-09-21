@@ -90,27 +90,25 @@ public class DocumentController {
      * POST /documents/v1/tenants  Body: {"tenantCode":"410725","tenantName":"长安区人大"}
      */
     @PostMapping("/tenants")
-    public Mono<ResponseEntity<Map<String, Object>>> createTenant(@RequestBody TenantConfig body) {
-        if (ObjectUtils.isEmpty(body.getTenantCode())) {
+    public Mono<ResponseEntity<Map<String, Object>>> createTenant(@RequestBody TenantConfig config) {
+        if (ObjectUtils.isEmpty(config.getTenantCode())) {
             return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户编码必填")));
         }
-        if (ObjectUtils.isEmpty(body.getTenantName())) {
+        if (ObjectUtils.isEmpty(config.getTenantName())) {
             return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户名称必填")));
         }
-        if ("0".equals(body.getTenantCode())) {
+        if ("0".equals(config.getTenantCode())) {
             return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户 0 为系统保留项，不能添加")));
         }
-        Mono<TenantConfig> configMono = this.tenantConfigService.findByTenantCode(body.getTenantCode());
+        Mono<TenantConfig> configMono = this.tenantConfigService.findByTenantCode(config.getTenantCode());
         Mono<ResponseEntity<Map<String, Object>>> responseEntityMono = configMono.flatMap(_ ->
                 Mono.just(ResponseEntity.badRequest().body(Map.of("success", false,
-                        "message", "租户编码已存在: " + body.getTenantCode()))));
+                        "message", "租户编码已存在: " + config.getTenantCode()))));
 
         return responseEntityMono.switchIfEmpty(Mono.defer(() -> {
-            TenantConfig tenantConfig = TenantConfig.builder()
-                    .tenantCode(body.getTenantCode())
-                    .tenantName(body.getTenantName()).enabled(true)
-                    .createdTime(LocalDateTime.now()).build();
-            return this.tenantConfigService.save(tenantConfig).flatMap(saved -> {
+            config.setEnabled(true);
+            config.setCreatedTime(LocalDateTime.now());
+            return this.tenantConfigService.save(config).flatMap(saved -> {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", true);
                 result.put("id", saved.getId());
@@ -139,6 +137,18 @@ public class DocumentController {
                 return ResponseEntity.ok(result);
             }));
         });
+    }
+
+    /**
+     * 修改租户名称（仅改 tenantName，租户编码 tenantCode 不变）
+     * PUT /documents/v1/tenants/{id}  Body: {"tenantName":"新名称"}
+     */
+    @PutMapping("/tenants")
+    public Mono<ResponseEntity<Map<String, Object>>> updateTenant(@RequestBody TenantConfig tenantConfig) {
+        if (ObjectUtils.isEmpty(tenantConfig.getId())) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "修改租户没有主键，无法修改数据！")));
+        }
+        return this.tenantConfigService.modify(tenantConfig);
     }
 
     /**

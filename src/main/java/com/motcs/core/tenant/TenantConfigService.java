@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
@@ -49,6 +51,41 @@ public class TenantConfigService extends DatabaseService {
 
     public Mono<TenantConfig> findByTenantCode(String tenantCode) {
         return tenantConfigRepository.findByTenantCode(tenantCode);
+    }
+
+    public Mono<ResponseEntity<Map<String, Object>>> modify(TenantConfig tenantConfig) {
+        if (ObjectUtils.isEmpty(tenantConfig.getTenantCode())) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户编码必填")));
+        }
+        if (ObjectUtils.isEmpty(tenantConfig.getTenantName())) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户名称必填")));
+        }
+        if ("0".equals(tenantConfig.getTenantCode())) {
+            return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", "租户 0 为系统保留项")));
+        }
+        Mono<ResponseEntity<Map<String, Object>>> conflict = Mono.just(ResponseEntity.badRequest()
+                .body(Map.of("success", false, "message", "租户编码已存在: " + tenantConfig.getTenantCode())));
+        return this.tenantConfigRepository.findById(tenantConfig.getId()).flatMap(config -> {
+            config.setTenantCode(tenantConfig.getTenantCode());
+            config.setTenantName(tenantConfig.getTenantName());
+            if (!tenantConfig.getTenantName().equals(config.getTenantCode())) {
+                return this.tenantConfigRepository.findByTenantCode(tenantConfig.getTenantCode())
+                        .flatMap(_ -> conflict)
+                        .switchIfEmpty(Mono.defer(() -> doModify(config)));
+            }
+            return doModify(config);
+        }).switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("success", false, "message", "租户不存在或已被删除"))));
+    }
+
+    private Mono<ResponseEntity<Map<String, Object>>> doModify(TenantConfig tenantConfig) {
+        return this.tenantConfigRepository.save(tenantConfig).map(saved -> {
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("id", saved.getId());
+            result.put("message", "租户已更新");
+            return ResponseEntity.ok(result);
+        });
     }
 
     public Mono<TenantConfig> save(TenantConfig tenantConfig) {

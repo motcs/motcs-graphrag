@@ -619,8 +619,8 @@ async function loadTenants(page) {
         list.innerHTML = tenants.map(t => `
             <tr class="border-b border-white/5 hover:bg-white/5">
                 <td class="py-2.5 text-gray-400">${t.id}</td>
-                <td class="py-2.5 font-mono text-primary-400">${escapeHtml(t.tenantCode ?? t.code)}</td>
-                <td class="py-2.5">${escapeHtml(t.tenantName ?? t.name)}</td>
+                <td class="py-2.5 font-mono text-gray-300">${escapeHtml(t.tenantCode ?? t.code)}</td>
+                <td class="py-2.5"><span class="tenant-name-btn cursor-pointer text-primary-400 hover:underline" data-id="${t.id}" data-code="${escapeHtml(t.tenantCode ?? t.code)}" data-name="${escapeHtml(t.tenantName ?? t.name)}">${escapeHtml(t.tenantName ?? t.name)}</span></td>
                 <td class="py-2.5"><span class="tag ${t.enabled ? 'tag-green' : 'tag-gray'}">${t.enabled ? '启用' : '停用'}</span></td>
                 <td class="py-2.5 text-gray-400">${t.createdTime ? formatTime(t.createdTime) : '-'}</td>
                 <td class="py-2.5 text-right">
@@ -629,6 +629,9 @@ async function loadTenants(page) {
             </tr>`).join('');
         list.querySelectorAll('.tenant-del-btn').forEach(btn => {
             btn.addEventListener('click', () => deleteTenant(btn.dataset.id, btn.dataset.name));
+        });
+        list.querySelectorAll('.tenant-name-btn').forEach(btn => {
+            btn.addEventListener('click', () => editTenant(btn.dataset.id, btn.dataset.code || '', btn.dataset.name || ''));
         });
         renderPagination($('tenantPagination'), data.number || 0, data.totalPages || 0, data.totalElements || 0, p => loadTenants(p));
     } catch (e) { /* 静默失败 */ }
@@ -666,6 +669,54 @@ async function deleteTenant(id, name) {
     } else {
         showToast(data.message || '删除失败', 'error');
     }
+}
+
+async function editTenant(id, oldCode, oldName) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/60';
+    overlay.innerHTML = `
+        <div class="bg-dark-900 border border-white/10 rounded-xl p-5 w-96 shadow-2xl">
+            <h3 class="text-base font-semibold mb-4">修改租户</h3>
+            <label class="block text-xs text-gray-400 mb-1">租户编码</label>
+            <input id="editTenantCode" type="text" value="${escapeHtml(oldCode)}" class="w-full px-3 py-2 mb-3 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none" />
+            <label class="block text-xs text-gray-400 mb-1">租户名称</label>
+            <input id="editTenantName" type="text" value="${escapeHtml(oldName)}" class="w-full px-3 py-2 mb-4 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none" />
+            <div class="flex justify-end gap-2">
+                <button id="editTenantCancel" class="px-4 py-2 text-sm rounded-lg bg-white/5 hover:bg-white/10 transition">取消</button>
+                <button id="editTenantOk" class="px-4 py-2 text-sm rounded-lg bg-primary-600 hover:bg-primary-500 transition">保存</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+    const codeInput = overlay.querySelector('#editTenantCode');
+    const nameInput = overlay.querySelector('#editTenantName');
+    nameInput.focus(); nameInput.select();
+    const close = () => overlay.remove();
+    overlay.querySelector('#editTenantCancel').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    const save = async () => {
+        const code = codeInput.value.trim();
+        const name = nameInput.value.trim();
+        if (!code) { showToast('租户编码不能为空', 'error'); return; }
+        if (!name) { showToast('租户名称不能为空', 'error'); return; }
+        if (code === oldCode && name === oldName) { close(); return; }
+        const res = await fetch(`${API_BASE}/tenants`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: Number(id), tenantCode: code, tenantName: name })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            showToast('租户已更新', 'success');
+            close();
+            loadTenants();
+            initTenantSystemSelects();
+        } else {
+            showToast(data.message || '更新失败', 'error');
+        }
+    };
+    overlay.querySelector('#editTenantOk').addEventListener('click', save);
+    nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') close(); });
+    codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') close(); });
 }
 
 /* ---------- 用量监控 ---------- */
