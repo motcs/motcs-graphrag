@@ -55,8 +55,8 @@
             </div>
             <div class="hidden sm:flex items-center gap-2">
                 <label class="text-xs text-gray-400">租户</label>
-                <select id="globalTenant" title="租户下拉内容来自后端租户配置表（GET /documents/v1/tenants），0 为超管全部租户，支持关键字搜索" class="hidden">
-                    <option value="0">全部租户</option>
+                <select id="globalTenant" title="租户下拉内容来自后端租户配置表（GET /documents/v1/tenants），0 为超管默认租户，支持关键字搜索" class="hidden">
+                    <option value="0">默认租户</option>
                 </select>
             </div>
             <div class="hidden md:flex items-center gap-1.5">
@@ -283,7 +283,7 @@
                                 <div class="grid grid-cols-2 gap-3">
                                     <input type="text" id="uploadDocCode" disabled class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg opacity-60 cursor-not-allowed" placeholder="业务编码由系统自动生成">
                                     <select id="uploadTenant" title="租户下拉来自租户配置表，支持关键字搜索" class="hidden">
-                                        <option value="0">全部租户</option>
+                                        <option value="0">默认租户</option>
                                     </select>
                                 </div>
                                 <p id="uploadDocCodeHint" class="text-xs mt-1 hidden"></p>
@@ -310,7 +310,7 @@
                                 <div class="grid grid-cols-3 gap-3">
                                     <input type="text" id="urlDocCode" disabled class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg opacity-60 cursor-not-allowed" placeholder="由系统自动生成">
                                     <select id="urlTenant" title="租户下拉来自租户配置表，支持关键字搜索" class="hidden">
-                                        <option value="0">全部租户</option>
+                                        <option value="0">默认租户</option>
                                     </select>
                                     <p id="urlDocCodeHint" class="text-xs mt-1 hidden"></p>
                                     <select id="urlSystem" title="系统下拉来自 js/config.js" class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
@@ -351,8 +351,8 @@
             </div>
 
             <div class="mb-4 flex flex-wrap items-center gap-3">
-                <select id="docFilterTenant" title="按租户筛选文档（0 为全部租户），支持关键字搜索" class="hidden">
-                    <option value="0">全部租户</option>
+                <select id="docFilterTenant" title="按租户筛选文档（0 为默认租户），支持关键字搜索" class="hidden">
+                    <option value="0">默认租户</option>
                 </select>
                 <select id="docFilterSystem" title="按系统类型筛选文档" class="px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
                     <option value="">全部系统</option>
@@ -387,7 +387,7 @@
             <div class="bg-dark-900/60 rounded-2xl border border-white/5 p-5">
                 <div class="mb-5">
                     <h2 class="text-2xl font-bold">租户管理</h2>
-                    <p class="text-sm text-gray-400 mt-1">维护租户配置表（tenant_config）：文档管理/对话/上传页的租户下拉数据源。租户 0（全部租户）为系统保留项，不在此管理</p>
+                    <p class="text-sm text-gray-400 mt-1">维护租户配置表（tenant_config）：文档管理/对话/上传页的租户下拉数据源。租户 0（默认租户）为系统保留项，不在此管理</p>
                 </div>
                 <div class="flex flex-wrap gap-3 mb-4">
                     <input id="tenantNewCode" type="text" placeholder="租户编码，如 410725"
@@ -403,12 +403,12 @@
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-xs text-gray-400 border-b border-white/5">
-                            <th class="text-left py-2 font-medium">ID</th>
-                            <th class="text-left py-2 font-medium">租户编码</th>
-                            <th class="text-left py-2 font-medium">租户名称</th>
+                            <th class="text-left py-2 font-medium sortable" data-sort-ns="tenant" data-sort="id" data-label="ID">ID</th>
+                            <th class="text-left py-2 font-medium sortable" data-sort-ns="tenant" data-sort="tenantCode" data-label="租户编码">租户编码</th>
+                            <th class="text-left py-2 font-medium sortable" data-sort-ns="tenant" data-sort="tenantName" data-label="租户名称">租户名称</th>
                             <th class="text-left py-2 font-medium">状态</th>
-                            <th class="text-left py-2 font-medium">创建时间</th>
-                            <th class="text-right py-2 font-medium">操作</th>
+                            <th class="text-left py-2 font-medium sortable" data-sort-ns="tenant" data-sort="createdTime" data-label="创建时间">创建时间</th>
+                            <th class="text-center py-2 font-medium">操作</th>
                         </tr>
                     </thead>
                     <tbody id="tenantList"></tbody>
@@ -523,13 +523,13 @@
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-xs text-gray-400 border-b border-white/5">
-                            <th class="text-left py-2 font-medium">备注</th>
+                            <th class="text-left py-2 font-medium sortable" data-sort-ns="apikey" data-sort="name" data-label="备注">备注</th>
                             <th class="text-left py-2 font-medium hide-mobile">Key</th>
-                            <th class="text-left py-2 font-medium">租户/系统</th>
-                            <th class="text-left py-2 font-medium whitespace-nowrap">状态</th>
-                            <th class="text-left py-2 font-medium">用量（次数/总token）</th>
-                            <th class="text-left py-2 font-medium hide-mobile">创建时间</th>
-                            <th class="text-right py-2 font-medium">操作</th>
+                            <th class="text-left py-2 font-medium sortable" data-sort-ns="apikey" data-sort="tenantCode" data-label="租户/系统">租户/系统</th>
+                            <th class="text-left py-2 font-medium whitespace-nowrap sortable" data-sort-ns="apikey" data-sort="enabled" data-label="状态">状态</th>
+                            <th class="text-left py-2 font-medium sortable" data-sort-ns="apikey" data-sort="totalTokens" data-label="用量（次数/总token）">用量（次数/总token）</th>
+                            <th class="text-left py-2 font-medium hide-mobile sortable" data-sort-ns="apikey" data-sort="createdTime" data-label="创建时间">创建时间</th>
+                            <th class="text-center py-2 font-medium">操作</th>
                         </tr>
                     </thead>
                     <tbody id="apiKeyList"></tbody>
@@ -576,15 +576,14 @@
                     <thead>
                         <tr class="text-xs text-gray-400 border-b border-white/5">
                             <th class="text-left py-2 font-medium hide-mobile">Key</th>
-                            <th class="text-left py-2 font-medium">备注</th>
-                            <th class="text-left py-2 font-medium">租户/系统</th>
-                            <th class="text-left py-2 font-medium whitespace-nowrap">状态</th>
-                            <th class="text-right py-2 font-medium">调用次数</th>
-                            <th class="text-right py-2 font-medium hide-mobile">输入 token</th>
-                            <th class="text-right py-2 font-medium hide-mobile">输出 token</th>
-                            <th class="text-right py-2 font-medium">总 token</th>
-                            <th class="text-left py-2 font-medium hide-mobile">最近使用</th>
-                            <th class="text-right py-2 font-medium hide-mobile">操作</th>
+                            <th class="text-left py-2 font-medium sortable" data-sort-ns="monitor" data-sort="name" data-label="备注">备注</th>
+                            <th class="text-left py-2 font-medium sortable" data-sort-ns="monitor" data-sort="tenantCode" data-label="租户/系统">租户/系统</th>
+                            <th class="text-left py-2 font-medium whitespace-nowrap sortable" data-sort-ns="monitor" data-sort="enabled" data-label="状态">状态</th>
+                            <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor" data-sort="totalCalls" data-label="调用次数">调用次数</th>
+                            <th class="text-right py-2 font-medium hide-mobile sortable" data-sort-ns="monitor" data-sort="promptTokens" data-label="输入 token">输入 token</th>
+                            <th class="text-right py-2 font-medium hide-mobile sortable" data-sort-ns="monitor" data-sort="completionTokens" data-label="输出 token">输出 token</th>
+                            <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor" data-sort="totalTokens" data-label="总 token">总 token</th>
+                            <th class="text-left py-2 pl-6 font-medium hide-mobile sortable" data-sort-ns="monitor" data-sort="lastUsedAt" data-label="最近使用">最近使用</th>
                         </tr>
                     </thead>
                     <tbody id="monitorUsageList"></tbody>
@@ -614,7 +613,7 @@
                                 <th class="text-left py-2 font-medium">模型</th>
                                 <th class="text-right py-2 font-medium">输入 token</th>
                                 <th class="text-right py-2 font-medium">输出 token</th>
-                                <th class="text-right py-2 font-medium">总 token</th>
+                                <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor" data-sort="totalTokens" data-label="总 token">总 token</th>
                             </tr>
                         </thead>
                         <tbody id="apiKeyUsageList"></tbody>
@@ -687,7 +686,7 @@
 </div>
 
 <script src="js/config.js?v=1"></script>
-<script src="js/app.js?v=135"></script>
+<script src="js/app.js?v=140"></script>
 
         <!-- 替换文档弹窗 -->
         <div id="reuploadModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

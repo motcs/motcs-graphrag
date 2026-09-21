@@ -34,7 +34,8 @@ public class Utils {
      * 从环境变量 SUPPORTED_FORMATS 读取（逗号分隔），未设置时使用默认值
      */
     public static List<String> SUPPORTED_FORMATS;
-
+    public static final Map<String, Object> UNAUTHORIZED_BODY = Map
+            .of("code", 401, "message", "非常抱歉，您的密钥无效或已停用，请检查后重试。");
     static {
         String envFormats = System.getenv("SUPPORTED_FORMATS");
         if (envFormats != null && !envFormats.isBlank()) {

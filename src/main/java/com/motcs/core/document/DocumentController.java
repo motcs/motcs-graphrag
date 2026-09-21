@@ -274,7 +274,7 @@ public class DocumentController {
                 request.setSessionId(sessionId);
                 request.setSources(sourcesJson.get());
                 request.setReasoning(reasoningBuilder.toString());
-                this.graphRagService.saveConversation(request, 0L).subscribe();
+                this.graphRagService.saveConversation(request).subscribe();
             }
         }).doOnError(e -> log.error("问答SSE流出错: {}", e.getMessage(), e));
     }
@@ -285,7 +285,7 @@ public class DocumentController {
      */
     @PostMapping("/conversations")
     public Mono<ResponseEntity<Map<String, Object>>> saveConversation(@RequestBody GraphRagRequest request) {
-        return graphRagService.saveConversation(request, 0L).then(Mono
+        return graphRagService.saveConversation(request).then(Mono
                 .fromCallable(() -> ResponseEntity.ok(Map.of("success", true))));
     }
 

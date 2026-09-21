@@ -1,5 +1,6 @@
 package com.motcs.core.auth.keys;
 
+import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.utils.Utils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -61,17 +62,17 @@ public class ApiKeyService {
      */
     public Mono<ApiKey> resolveApiKey(ServerWebExchange exchange) {
         String key = Utils.extractApiKey(exchange);
-        if (key == null || key.isBlank()) {
+        if (ObjectUtils.isEmpty(key)) {
             return Mono.empty();
         }
         String hash = sha256(key.trim());
         String cacheKey = CACHE_KEY_PREFIX + hash;
-        return redisTemplate.opsForValue().get(cacheKey).cast(ApiKey.class)
-                .switchIfEmpty(this.apiKeyRepository.findEnabledByKeyHash(hash)
-                        .switchIfEmpty(Mono.empty())
-                        .filter(k -> Boolean.TRUE.equals(k.getEnabled()))
-                        .flatMap(apiKey -> redisTemplate.opsForValue()
-                                .set(cacheKey, apiKey, CACHE_TTL).thenReturn(apiKey)));
+        Mono<ApiKey> alternate = this.apiKeyRepository.findEnabledByKeyHash(hash)
+                .switchIfEmpty(Mono.empty()).filter(ApiKey::getEnabled)
+                .flatMap(apiKey -> this.redisTemplate.opsForValue()
+                        .set(cacheKey, apiKey, CACHE_TTL).thenReturn(apiKey));
+        return this.redisTemplate.opsForValue().get(cacheKey)
+                .cast(ApiKey.class).switchIfEmpty(alternate);
     }
 
     /**
@@ -80,16 +81,16 @@ public class ApiKeyService {
      */
     public Mono<ApiKeyRecord> generate(String name, String tenantCode, String systemType, String createdBy) {
         if (ObjectUtils.isEmpty(name)) {
-            return Mono.error(new IllegalArgumentException("备注（name）必填"));
+            return Mono.error(RestServerException.withMsg("备注（name）必填"));
         }
         if (ObjectUtils.isEmpty(tenantCode)) {
-            return Mono.error(new IllegalArgumentException("租户编码（tenantCode）必填"));
+            return Mono.error(RestServerException.withMsg("租户编码（tenantCode）必填"));
         }
         if (ObjectUtils.isEmpty(systemType)) {
-            return Mono.error(new IllegalArgumentException("系统类型（systemType）必填"));
+            return Mono.error(RestServerException.withMsg("系统类型（systemType）必填"));
         }
         if ("0".equals(tenantCode.trim())) {
-            return Mono.error(new IllegalArgumentException("API Key 不允许绑定租户 0（超管全局租户），请填写具体租户编码"));
+            return Mono.error(RestServerException.withMsg("API Key 不允许绑定租户 0（超管全局租户），请填写具体租户编码"));
         }
         String plainKey = PREFIX + randomString();
         ApiKey entity = ApiKey.builder().name(name).keyPrefix(prefixMask(plainKey))
@@ -97,7 +98,7 @@ public class ApiKeyService {
                 .systemType(systemType.trim()).enabled(true)
                 .createdBy(ObjectUtils.isEmpty(createdBy) ? "xxhzj" : createdBy)
                 .createdTime(LocalDateTime.now()).build();
-        return apiKeyRepository.save(entity)
+        return this.apiKeyRepository.save(entity)
                 .map(saved -> ApiKeyRecord.of(saved, plainKey));
     }
 
@@ -105,26 +106,26 @@ public class ApiKeyService {
      * 删除 Key：同时清理 Redis 缓存
      */
     public Mono<Void> delete(Long id) {
-        return apiKeyRepository.findById(id).flatMap(apiKey -> {
+        return this.apiKeyRepository.findById(id).flatMap(apiKey -> {
             String cacheKey = CACHE_KEY_PREFIX + apiKey.getKeyHash();
-            return redisTemplate.delete(cacheKey)
-                    .then(apiKeyRepository.deleteById(id));
+            return this.redisTemplate.delete(cacheKey)
+                    .then(this.apiKeyRepository.deleteById(id));
         }).then();
     }
 
     /**
      * 启用/停用 Key：关闭后该 Key 临时失效，同时清理缓存；重新开启后立即恢复（重新查库缓存）
      */
-    public Mono<ApiKey> setEnabled(Long id, Boolean enabled) {
-        if (id == null || enabled == null) {
+    public Mono<ApiKey> setEnabled(Long id) {
+        if (ObjectUtils.isEmpty(id)) {
             return Mono.empty();
         }
-        return apiKeyRepository.findById(id).flatMap(existing -> {
-            existing.setEnabled(enabled);
+        return this.apiKeyRepository.findById(id).flatMap(existing -> {
+            existing.setEnabled(!existing.getEnabled());
             // 状态变更时清理缓存
             String cacheKey = CACHE_KEY_PREFIX + existing.getKeyHash();
-            return redisTemplate.delete(cacheKey)
-                    .then(apiKeyRepository.save(existing));
+            return this.redisTemplate.delete(cacheKey)
+                    .then(this.apiKeyRepository.save(existing));
         });
     }
 

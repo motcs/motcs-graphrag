@@ -1,6 +1,7 @@
 package com.motcs.core.auth.keys;
 
 import com.motcs.commons.annotation.RestServerException;
+import com.motcs.commons.utils.Utils;
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
 import com.motcs.core.knowledge.record.session.ChatSessionRequest;
@@ -32,8 +33,6 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ApiKeyController {
 
-    private static final Map<String, Object> UNAUTHORIZED_BODY = Map
-            .of("code", 401, "message", "非常抱歉，您的密钥无效或已停用，请检查后重试。");
     private final ApiKeyService apiKeyService;
     private final GraphRagService graphRagService;
 
@@ -46,10 +45,12 @@ public class ApiKeyController {
         return this.apiKeyService.resolveApiKey(exchange).flatMap(apiKey -> {
             request.setApiKeyId(apiKey.getId());
             request.setTenantCode(apiKey.getTenantCode());
-            request.setSystemType(apiKey.getSystemType());
+            if (ObjectUtils.isEmpty(request.getSystemType())) {
+                request.setSystemType(apiKey.getSystemType());
+            }
             return this.graphRagService.getSessions(request, pageable)
                     .<ResponseEntity<?>>map(ResponseEntity::ok);
-        }).switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(UNAUTHORIZED_BODY)));
+        }).switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Utils.UNAUTHORIZED_BODY)));
     }
 
     @GetMapping("/session")
@@ -57,7 +58,7 @@ public class ApiKeyController {
     public Mono<ResponseEntity<?>> sessionMessages(ServerWebExchange exchange, @RequestParam("sessionId") String sessionId) {
         return this.apiKeyService.resolveApiKey(exchange).flatMap(apiKey -> this.graphRagService
                         .querySession(sessionId, apiKey.getId()).<ResponseEntity<?>>map(ResponseEntity::ok))
-                .switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(UNAUTHORIZED_BODY)));
+                .switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Utils.UNAUTHORIZED_BODY)));
     }
 
     /**
@@ -67,11 +68,14 @@ public class ApiKeyController {
     @PostMapping("/conversations")
     public Mono<ResponseEntity<Map<String, Object>>> saveConversation(ServerWebExchange exchange, @RequestBody GraphRagRequest request) {
         return this.apiKeyService.resolveApiKey(exchange).<ResponseEntity<Map<String, Object>>>flatMap(apiKey -> {
+            request.setApiKeyId(apiKey.getId());
             request.setTenantCode(apiKey.getTenantCode());
-            request.setSystemType(apiKey.getSystemType());
-            return graphRagService.saveConversation(request, apiKey.getId())
+            if (ObjectUtils.isEmpty(request.getSystemType())) {
+                request.setSystemType(apiKey.getSystemType());
+            }
+            return this.graphRagService.saveConversation(request)
                     .then(Mono.fromCallable(() -> ResponseEntity.ok(Map.of("success", true))));
-        }).switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(UNAUTHORIZED_BODY)));
+        }).switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Utils.UNAUTHORIZED_BODY)));
     }
 
     @DeleteMapping("/session/{sessionId}")
@@ -84,7 +88,7 @@ public class ApiKeyController {
                     }
                     return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
                             "success", false, "message", "会话不存在或不属于当前 API Key"));
-                })).switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(UNAUTHORIZED_BODY)));
+                })).switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Utils.UNAUTHORIZED_BODY)));
     }
 
     @DeleteMapping("/batch")
@@ -94,13 +98,10 @@ public class ApiKeyController {
             return Mono.just(ResponseEntity.badRequest().body(Map.of(
                     "success", false, "message", "sessionIds 不能为空")));
         }
-        return this.apiKeyService.resolveApiKey(exchange).flatMap(apiKey -> {
-            Mono<Long> deleteMono = graphRagService.deleteSessions(sessionIds, apiKey.getId());
-            return deleteMono.map(n -> {
-                Map<String, Object> success = Map.of("success", true, "deleted", n);
-                return ResponseEntity.ok(success);
-            });
-        }).switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(UNAUTHORIZED_BODY)));
+        return this.apiKeyService.resolveApiKey(exchange)
+                .flatMap(apiKey -> this.graphRagService.deleteSessions(sessionIds, apiKey.getId())
+                        .map(n -> ResponseEntity.ok(Map.<String, Object>of("success", true, "deleted", n))))
+                .switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Utils.UNAUTHORIZED_BODY)));
     }
 
 }

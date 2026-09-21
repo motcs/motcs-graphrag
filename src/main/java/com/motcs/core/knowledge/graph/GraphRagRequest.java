@@ -55,6 +55,9 @@ public class GraphRagRequest implements Serializable {
     @Schema(description = "思考过程", example = "思考内容...")
     private String reasoning;
 
+    @Schema(description = "创建该对话的 API Key ID（空=登录用户创建）", example = "1")
+    private Long apiKeyId;
+
     public Double getThreshold() {
         return threshold == null ? 0.5d : threshold;
     }

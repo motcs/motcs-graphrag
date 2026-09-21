@@ -183,3 +183,8 @@ CREATE TABLE IF NOT EXISTS chat_session
 
 ALTER TABLE document_info
     ADD COLUMN stored_file_name VARCHAR(255) DEFAULT NULL COMMENT '本地存储文件名' AFTER file_name;
+
+update api_key set tenant_code ='0' where tenant_code ='-1';
+update chat_message set tenant_code ='0' where tenant_code ='-1';
+update chat_session set tenant_code ='0' where tenant_code ='-1';
+update document_info set tenant_code ='0' where tenant_code ='-1';

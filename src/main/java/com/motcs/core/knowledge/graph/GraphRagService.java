@@ -927,7 +927,7 @@ public class GraphRagService extends DatabaseService {
      *
      * @param request 用户提问
      */
-    public Mono<Void> saveConversation(GraphRagRequest request, Long apiKeyId) {
+    public Mono<Void> saveConversation(GraphRagRequest request) {
         if (ObjectUtils.isEmpty(request.getQuestion())) {
             return Mono.empty();
         }
@@ -944,13 +944,13 @@ public class GraphRagService extends DatabaseService {
                     .question(request.getQuestion()).answer(request.getAnswer())
                     .reasoning(request.getReasoning()).sources(request.getSources())
                     .tenantCode(request.getTenantCode()).systemType(request.getSystemType())
-                    .apiKeyId(apiKeyId).createTime(LocalDateTime.now()).build();
+                    .apiKeyId(request.getApiKeyId()).createTime(LocalDateTime.now()).build();
             return this.chatMessageRepository.save(record).publishOn(Schedulers.boundedElastic()).doOnSuccess(r -> {
                 if (!ObjectUtils.isEmpty(r)) {
                     log.debug("对话记录已保存: id={}, userId={}, sessionId={}, question={}", r.getId(), request.getUserId(), request.getSessionId(),
                             request.getQuestion().length() > 50 ? request.getQuestion().substring(0, 50) + "..." : request.getQuestion());
                     // 同步更新 chat_session 主表
-                    upsertChatSession(request, apiKeyId, existingTitle).subscribe();
+                    upsertChatSession(request, existingTitle).subscribe();
                     // 首次问答完成且尚无标题时，异步生成会话主题
                     if (!StringUtils.hasLength(existingTitle)) {
                         generateSessionTitleAsync(request);
@@ -963,11 +963,11 @@ public class GraphRagService extends DatabaseService {
     /**
      * 新增或更新 chat_session 主表记录
      */
-    private Mono<Void> upsertChatSession(GraphRagRequest request, Long apiKeyId, String title) {
+    private Mono<Void> upsertChatSession(GraphRagRequest request, String title) {
         return this.chatSessionRepository.findBySessionId(request.getSessionId())
                 .switchIfEmpty(Mono.defer(() -> {
                     ChatSession session = ChatSession.builder().sessionId(request.getSessionId())
-                            .title(title).userId(request.getUserId()).apiKeyId(apiKeyId)
+                            .title(title).userId(request.getUserId()).apiKeyId(request.getApiKeyId())
                             .tenantCode(request.getTenantCode()).systemType(request.getSystemType())
                             .createTime(LocalDateTime.now()).updateTime(LocalDateTime.now()).build();
                     return Mono.just(session);

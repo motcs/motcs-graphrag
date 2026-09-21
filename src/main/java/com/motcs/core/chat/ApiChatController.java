@@ -74,6 +74,7 @@ public class ApiChatController {
         return this.apiKeyService.resolveApiKey(exchange).flatMapMany(apiKey -> {
             // 租户/系统类型由 API Key 绑定值赋值（生成时已禁止租户 0）
             request.setSessionId(sessionId);
+            request.setApiKeyId(apiKey.getId());
             request.setTenantCode(apiKey.getTenantCode());
             request.setSystemType(apiKey.getSystemType());
             StringBuilder answerBuilder = new StringBuilder();
@@ -108,11 +109,11 @@ public class ApiChatController {
                                 request.setSessionId(sessionId);
                                 request.setSources(finalSourcesJson);
                                 request.setReasoning(reasoningBuilder.toString());
-                                graphRagService.saveConversation(request, apiKey.getId()).subscribe();
+                                this.graphRagService.saveConversation(request).subscribe();
                                 // 记录 token 用量（用量监控）
                                 Usage usage = usageRef.get();
                                 if (usage != null) {
-                                    apiKeyUsageService.record(apiKey.getId(), request.getUserId(), sessionId,
+                                    this.apiKeyUsageService.record(apiKey.getId(), request.getUserId(), sessionId,
                                             request.getModel(), usage.getPromptTokens(), usage.getCompletionTokens(),
                                             usage.getTotalTokens()).subscribe();
                                 }

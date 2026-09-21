@@ -2,7 +2,6 @@ package com.motcs.core.auth;
 
 import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.utils.Utils;
-import com.motcs.core.auth.keys.ApiKey;
 import com.motcs.core.auth.keys.ApiKeyService;
 import com.motcs.core.auth.keys.usage.ApiKeyUsage;
 import com.motcs.core.auth.keys.usage.ApiKeyUsageRequest;
@@ -138,16 +137,11 @@ public class AuthController {
      * 启用/停用 Key：关闭后该 Key 临时失效（携带它的请求立即 401），可随时重新开启
      * Body: {"enabled": true} 或 {"enabled": false}
      */
-    @PutMapping("/api-keys/{id}/enabled")
+    @PutMapping("/api-keys/{apiKeyId}/enabled")
     @Operation(summary = "启用/停用 Key（关闭后临时失效，可随时重新开启）")
-    public Mono<ResponseEntity<Map<String, Object>>> setApiKeyEnabled(@PathVariable Long id, @RequestBody ApiKey body) {
+    public Mono<ResponseEntity<Map<String, Object>>> setApiKeyEnabled(@PathVariable Long apiKeyId) {
         Map<String, Object> objectMap = new HashMap<>();
-        if (ObjectUtils.isEmpty(body.getEnabled())) {
-            objectMap.put("success", false);
-            objectMap.put("message", "enabled 字段必填（true/false）");
-            return Mono.just(ResponseEntity.badRequest().body(objectMap));
-        }
-        return this.apiKeyService.setEnabled(id, body.getEnabled()).flatMap(updated -> {
+        return this.apiKeyService.setEnabled(apiKeyId).flatMap(updated -> {
             objectMap.put("success", true);
             objectMap.put("id", updated.getId());
             objectMap.put("enabled", updated.getEnabled());
@@ -162,20 +156,20 @@ public class AuthController {
     /**
      * Key 使用监控汇总：调用次数 + 总 token 消耗（prompt/completion/total）
      */
-    @GetMapping("/api-keys/{id}/usage-summary")
+    @GetMapping("/api-keys/{apiKeyId}/usage-summary")
     @Operation(summary = "Key 使用汇总：调用次数 + 总 token 消耗")
-    public Mono<ResponseEntity<Map<String, Object>>> apiKeyUsageSummary(@PathVariable Long id) {
-        return this.apiKeyUsageService.summary(id).map(ResponseEntity::ok);
+    public Mono<ResponseEntity<Map<String, Object>>> apiKeyUsageSummary(@PathVariable Long apiKeyId) {
+        return this.apiKeyUsageService.summary(apiKeyId).map(ResponseEntity::ok);
     }
 
     /**
      * Key 使用监控明细：按时间倒序分页（标准 Pageable）
      */
-    @GetMapping("/api-keys/{id}/usage")
+    @GetMapping("/api-keys/{apiKeyId}/usage")
     @Operation(summary = "Key 使用明细（每次对话的 token 消耗，分页）")
-    public Mono<ResponseEntity<Page<ApiKeyUsage>>> apiKeyUsageList(@PathVariable Long id, Pageable pageable) {
+    public Mono<ResponseEntity<Page<ApiKeyUsage>>> apiKeyUsageList(@PathVariable Long apiKeyId, Pageable pageable) {
         ApiKeyUsageRequest request = new ApiKeyUsageRequest();
-        request.setApiKeyId(id);
+        request.setApiKeyId(apiKeyId);
         Mono<Page<ApiKeyUsage>> list = this.apiKeyUsageService.list(request, pageable);
         return list.map(ResponseEntity::ok);
     }

@@ -25,12 +25,12 @@ window.fetch = async function (...args) {
         const url = String(args[0]);
         if (!url.includes('/auth/v1/login')) {
             const init = args[1] || (args[1] = {});
-            init.headers = Object.assign({}, init.headers, { 'x-token': token });
+            init.headers = Object.assign({}, init.headers, {'x-token': token});
             // CSRF 后端仅对 POST 校验，因此只有 POST 需要携带 X-CSRF-TOKEN
             const method = String(init.method || 'GET').toUpperCase();
             if (method === 'POST') {
                 const csrf = getCookie('XSRF-TOKEN');
-                if (csrf) init.headers = Object.assign({}, init.headers, { 'X-CSRF-TOKEN': csrf });
+                if (csrf) init.headers = Object.assign({}, init.headers, {'X-CSRF-TOKEN': csrf});
             }
         }
     }
@@ -48,17 +48,31 @@ window.fetch = async function (...args) {
 function showLogin() {
     // 隐藏主界面（顶部栏 + 主内容），显示登录界面
     const v = $('loginView');
-    if (v) { v.classList.remove('hidden'); v.classList.add('flex'); }
-    const hd = $('appHeader'); if (hd) hd.classList.add('hidden');
-    const m = $('appMain'); if (m) m.classList.add('hidden');
-    setTimeout(() => { const u = $('loginUsername'); if (u) u.focus(); }, 50);
+    if (v) {
+        v.classList.remove('hidden');
+        v.classList.add('flex');
+    }
+    const hd = $('appHeader');
+    if (hd) hd.classList.add('hidden');
+    const m = $('appMain');
+    if (m) m.classList.add('hidden');
+    setTimeout(() => {
+        const u = $('loginUsername');
+        if (u) u.focus();
+    }, 50);
 }
+
 function hideLogin() {
     // 显示主界面，隐藏登录界面
     const v = $('loginView');
-    if (v) { v.classList.add('hidden'); v.classList.remove('flex'); }
-    const hd = $('appHeader'); if (hd) hd.classList.remove('hidden');
-    const m = $('appMain'); if (m) m.classList.remove('hidden');
+    if (v) {
+        v.classList.add('hidden');
+        v.classList.remove('flex');
+    }
+    const hd = $('appHeader');
+    if (hd) hd.classList.remove('hidden');
+    const m = $('appMain');
+    if (m) m.classList.remove('hidden');
 }
 
 async function checkAuth() {
@@ -76,7 +90,8 @@ async function checkAuth() {
             hideLogin();
             return true;
         }
-    } catch (e) { /* ignore */ }
+    } catch (e) { /* ignore */
+    }
     showLogin();
     return false;
 }
@@ -91,7 +106,7 @@ async function doLogin() {
         // （unescape/encodeURIComponent 兼容用户名密码中的非 Latin-1 字符）
         const res = await _rawFetch(`${AUTH_BASE}/login`, {
             method: 'POST',
-            headers: { 'Authorization': 'Basic ' + btoa(unescape(encodeURIComponent(username + ':' + password))) }
+            headers: {'Authorization': 'Basic ' + btoa(unescape(encodeURIComponent(username + ':' + password)))}
         });
         const data = await res.json().catch(() => ({}));
         // 后端登录成功返回 AuthenticationToken（含 token 字段，无 success 字段），
@@ -117,7 +132,10 @@ async function doLogin() {
 }
 
 async function doLogout() {
-    try { await fetch(`${AUTH_BASE}/logout`, { method: 'POST' }); } catch (e) {}
+    try {
+        await fetch(`${AUTH_BASE}/logout`, {method: 'POST'});
+    } catch (e) {
+    }
     localStorage.removeItem('motcs_token');
     localStorage.removeItem('motcs_username');
     document.cookie = 'XSRF-TOKEN=; Path=/; Max-Age=0';
@@ -163,7 +181,10 @@ function renderPagination(container, page, totalPages, totalElements, onPage) {
     if (!container) return;
     totalElements = totalElements || 0;
     totalPages = totalPages || 0;
-    if (totalElements === 0) { container.innerHTML = ''; return; }
+    if (totalElements === 0) {
+        container.innerHTML = '';
+        return;
+    }
     const prevDisabled = page <= 0 ? 'disabled' : '';
     const nextDisabled = page >= totalPages - 1 ? 'disabled' : '';
     const btnCls = 'px-2.5 py-1 rounded-md border border-white/10 text-gray-300 hover:border-primary-500 hover:text-primary-400 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-white/10 disabled:hover:text-gray-300';
@@ -175,14 +196,19 @@ function renderPagination(container, page, totalPages, totalElements, onPage) {
         </span>`;
     const prev = $(container.id + 'Prev');
     const next = $(container.id + 'Next');
-    if (prev) prev.addEventListener('click', () => { if (page > 0) onPage(page - 1); });
-    if (next) next.addEventListener('click', () => { if (page < totalPages - 1) onPage(page + 1); });
+    if (prev) prev.addEventListener('click', () => {
+        if (page > 0) onPage(page - 1);
+    });
+    if (next) next.addEventListener('click', () => {
+        if (page < totalPages - 1) onPage(page + 1);
+    });
 }
 
 /* 租户编码 -> 名称：找不到时回退显示编码本身 */
 function tenantNameOf(code) {
     if (code === undefined || code === null || code === '') return '-';
-    if (String(code) === '0') return '全部租户';
+    if (String(code) === '0') return '默认租户';
+    if (String(code) === '-1') return '默认租户';
     const name = state.tenantNameMap[String(code)];
     return name || String(code);
 }
@@ -197,28 +223,33 @@ function systemNameOf(code) {
     const hit = list.find(s => s && String(s.code) === key);
     return hit && hit.label ? hit.label : key;
 }
+
 /* ---------- 配置持久化 ---------- */
 const CFG_KEY = 'motcs_cfg';
+
 function saveCfg() {
     localStorage.setItem(CFG_KEY, JSON.stringify({
         tenant: $('globalTenant').value, system: $('globalSystem').value
     }));
 }
+
 function loadCfg() {
     try {
         const c = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
         // 用户编码固定为登录账号，不参与配置持久化/恢复
         if (c.tenant) setTenantValue('globalTenant', c.tenant);
         if (c.system) $('globalSystem').value = c.system;
-    } catch {}
+    } catch {
+    }
 }
 
 /* ---------- 租户/系统下拉初始化 ----------
  * 系统类型：选项来自外部配置 js（window.MOTCS_CONFIG.systems，见 js/config.js）
- * 租户：选项来自后端租户配置表（GET /documents/v1/tenants，含固定 0-全部租户）
+ * 租户：选项来自后端租户配置表（GET /documents/v1/tenants，含固定 0-默认租户）
  * 完成后恢复上次选择的租户/系统（localStorage）
  */
 /* ---------- 下拉框通用填充 ---------- */
+
 // 系统类型选项填充（数据源：js/config.js 的 window.MOTCS_CONFIG.systems）
 function fillSystemOptions(sel) {
     if (!sel || !window.MOTCS_CONFIG || !Array.isArray(window.MOTCS_CONFIG.systems)) return;
@@ -229,6 +260,7 @@ function fillSystemOptions(sel) {
         sel.appendChild(opt);
     });
 }
+
 // 填充系统下拉（id 数组），withAll=true 时首项为"全部系统"（空值）
 function fillSystemSelects(ids, withAll) {
     ids.forEach(id => {
@@ -238,8 +270,9 @@ function fillSystemSelects(ids, withAll) {
         fillSystemOptions(el);
     });
 }
+
 // 租户选项填充：其余来自租户配置表；下拉框仅显示租户名称，不显示编码（避免过长）。
-// withAll=true（默认）：首项"全部租户"（值 0，超管全局）；withAll=false：首项"请选择租户"（空值），
+// withAll=true（默认）：首项"默认租户"（值 0，超管全局）；withAll=false：首项"请选择租户"（空值），
 // 用于不允许绑定租户 0 的场景（如 API Key 绑定租户）。
 // extraOptions：额外附加选项（如 API Key 场景的"-1 通用密钥"），插在租户列表之前
 function fillTenantSelects(ids, tenants, withAll, extraOptions) {
@@ -247,7 +280,7 @@ function fillTenantSelects(ids, tenants, withAll, extraOptions) {
         const el = $(id);
         if (!el) return;
         el.innerHTML = withAll === false ? '<option value="">请选择租户</option>'
-                : '<option value="0">全部租户</option>';
+            : '<option value="0">默认租户</option>';
         (extraOptions || []).forEach(o => {
             const opt = document.createElement('option');
             opt.value = o.value;
@@ -311,7 +344,10 @@ function initSearchableSelect(selectId, widthClass, placeholder) {
             item.className = 'px-3 py-2 text-sm cursor-pointer hover:bg-white/5 transition';
             item.textContent = text;
             item.dataset.value = opt.value;
-            item.addEventListener('click', e => { e.stopPropagation(); selectValue(opt.value); });
+            item.addEventListener('click', e => {
+                e.stopPropagation();
+                selectValue(opt.value);
+            });
             list.appendChild(item);
             shown++;
         });
@@ -330,7 +366,7 @@ function initSearchableSelect(selectId, widthClass, placeholder) {
         input.value = (opt && code !== '') ? opt.textContent : '';
         input.dataset.selected = code || '';
         list.classList.add('hidden');
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        sel.dispatchEvent(new Event('change', {bubbles: true}));
     };
 
     // 聚焦时若已选中，清空显示重新展示全部，便于再次搜索
@@ -351,7 +387,7 @@ function initSearchableSelect(selectId, widthClass, placeholder) {
         if (!wrap.contains(e.target)) list.classList.add('hidden');
     });
 
-    // 初始化同步显示 select 已有的选中项（如文档筛选默认"全部租户"），不触发 change
+    // 初始化同步显示 select 已有的选中项（如文档筛选默认"默认租户"），不触发 change
     const initOpt = Array.from(sel.options).find(o => o.value === sel.value);
     if (initOpt && sel.value !== '') {
         input.value = initOpt.textContent;
@@ -361,7 +397,10 @@ function initSearchableSelect(selectId, widthClass, placeholder) {
     sel.dataset.searchInit = '1';
     return {
         setValue(code) {
-            if (code == null || code === '') { selectValue(''); return; }
+            if (code == null || code === '') {
+                selectValue('');
+                return;
+            }
             const opt = Array.from(sel.options).find(o => o.value === code);
             if (opt) selectValue(code);
         },
@@ -373,21 +412,26 @@ function initSearchableSelect(selectId, widthClass, placeholder) {
  * 统一注册所有租户下拉的组件实例，供"默认跟随全局"等逻辑通过 setTenantValue 同步 UI
  */
 const tenantSearchApis = {};
+
 function initTenantSearchable(id, widthClass) {
     const api = initSearchableSelect(id, widthClass);
     if (api) tenantSearchApis[id] = api;
     return api;
 }
+
 // 设置租户选中值：已注册组件的走组件 setValue（同步 UI），未注册的兜底直接赋 select.value
 function setTenantValue(id, code) {
     const api = tenantSearchApis[id];
     if (api) api.setValue(code);
-    else { const el = $(id); if (el) el.value = code; }
+    else {
+        const el = $(id);
+        if (el) el.value = code;
+    }
 }
 
 /* ---------- 租户/系统下拉初始化 ----------
  * 系统类型：选项来自外部配置 js（window.MOTCS_CONFIG.systems，见 js/config.js）
- * 租户：选项来自后端租户配置表（GET /documents/v1/tenants，含固定 0-全部租户）
+ * 租户：选项来自后端租户配置表（GET /documents/v1/tenants，含固定 0-默认租户）
  * 覆盖：顶部全局（globalTenant/globalSystem）、上传弹窗（uploadTenant/uploadSystem、
  * urlTenant/urlSystem）、文档管理筛选（docFilterTenant/docFilterSystem）
  * 完成后恢复上次选择的租户/系统（localStorage），上传弹窗默认跟随全局
@@ -401,7 +445,8 @@ async function initTenantSystemSelects() {
     try {
         const res = await fetch(`${API_BASE}/tenants`);
         if (res.ok) tenants = await res.json();
-    } catch (e) { /* 接口不可用时保留"0 - 全部租户"兜底 */ }
+    } catch (e) { /* 接口不可用时保留"0 - 默认租户"兜底 */
+    }
     (tenants || []).forEach(t => {
         const tc = t ? (t.tenantCode ?? t.code) : null;
         const tn = t ? (t.tenantName ?? t.name) : '';
@@ -409,7 +454,7 @@ async function initTenantSystemSelects() {
     });
     fillTenantSelects(['globalTenant', 'uploadTenant', 'urlTenant', 'docFilterTenant'], tenants);
     // API Key 绑定租户：不允许 0（超管全局租户），首项"请选择租户"必选；"-1"为通用密钥（检索全部文档）
-    fillTenantSelects(['apiKeyTenant'], tenants, false, [{ value: '-1', text: '通用密钥' }]);
+    fillTenantSelects(['apiKeyTenant'], tenants, false, [{value: '0', text: '默认租户'}]);
     // 所有租户下拉统一改为可搜索组件（宽度按所在位置适配）
     initTenantSearchable('globalTenant', 'w-40');
     initTenantSearchable('uploadTenant', 'w-full');
@@ -421,19 +466,28 @@ async function initTenantSystemSelects() {
         const c = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
         if (c.tenant) setTenantValue('globalTenant', c.tenant);
         if (c.system && $('globalSystem')) $('globalSystem').value = c.system;
-    } catch {}
+    } catch {
+    }
     // 上传弹窗/筛选默认跟随全局
     ['uploadTenant', 'urlTenant'].forEach(id => setTenantValue(id, getTenant()));
-    ['uploadSystem', 'urlSystem'].forEach(id => { const el = $(id); if (el) el.value = getSystem(); });
+    ['uploadSystem', 'urlSystem'].forEach(id => {
+        const el = $(id);
+        if (el) el.value = getSystem();
+    });
     // API Key 下拉默认跟随全局（全局租户为 0 时保持"请选择租户"）
     const akTenantApi = tenantSearchApis['apiKeyTenant'];
-    if (akTenantApi) { const t = getTenant(); if (t && t !== '0') akTenantApi.setValue(t); }
+    if (akTenantApi) {
+        const t = getTenant();
+        if (t && t !== '0') akTenantApi.setValue(t);
+    }
     const akSystem = $('apiKeySystem');
     if (akSystem) akSystem.value = getSystem();
 }
 
 /* ---------- 工具函数 ---------- */
-function $(id) { return document.getElementById(id); }
+function $(id) {
+    return document.getElementById(id);
+}
 
 function genSessionId() {
     return 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
@@ -451,8 +505,10 @@ function formatTime(dt) {
     try {
         // 兼容 "2026-09-09 18:14:46" 这类字符串（后端 DATETIME）
         const d = new Date(String(dt).includes(' ') ? String(dt).replace(' ', 'T') : dt);
-        return d.toLocaleString('zh-CN', { hour12: false });
-    } catch { return dt; }
+        return d.toLocaleString('zh-CN', {hour12: false});
+    } catch {
+        return dt;
+    }
 }
 
 function showToast(msg, type = 'info') {
@@ -470,8 +526,14 @@ function showToast(msg, type = 'info') {
     showToast._t = setTimeout(() => toast.classList.add('hidden'), 3500);
 }
 
-function getTenant() { return $('globalTenant').value.trim() || '0'; }
-function getSystem() { return $('globalSystem').value.trim() || 'other'; }
+function getTenant() {
+    return $('globalTenant').value.trim() || '0';
+}
+
+function getSystem() {
+    return $('globalSystem').value.trim() || 'other';
+}
+
 function getUser() {
     const v = $('globalUser').value.trim();
     if (v) return v;
@@ -484,14 +546,15 @@ function getUser() {
  */
 function initMarkdown() {
     if (typeof marked !== 'undefined' && marked.setOptions) {
-        marked.setOptions({ gfm: true, breaks: true });
+        marked.setOptions({gfm: true, breaks: true});
     }
 }
 
 function renderMarkdown(text) {
     if (!text) return '';
     // 去除首尾空白
-    text = text.replace(/__NL__/g, '\n'); let t = text.replace(/^\s+/, '').replace(/\s+$/, '');
+    text = text.replace(/__NL__/g, '\n');
+    let t = text.replace(/^\s+/, '').replace(/\s+$/, '');
     // 修复 AI 常见不规范写法：###标题 → ### 标题
     t = t.replace(/^[ \t]*(#{1,6})(?!#)([^ #\t\n])/gm, (m, hash, rest) => hash + ' ' + rest);
     // 2) 中文顿号/句点数字列表：1、xxx / 1．xxx -> 1. xxx
@@ -507,7 +570,7 @@ function renderMarkdown(text) {
     // 优先使用 marked 完整渲染
     if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
         try {
-            return marked.parse(t, { breaks: true });
+            return marked.parse(t, {breaks: true});
         } catch (e) {
             console.warn('marked 渲染失败:', e);
         }
@@ -547,10 +610,18 @@ function renderLightMarkdown(md) {
     const lines = h.split('\n');
     const out = [];
     let listOpen = false;
-    const closeList = () => { if (listOpen) { out.push('</ul>'); listOpen = false; } };
+    const closeList = () => {
+        if (listOpen) {
+            out.push('</ul>');
+            listOpen = false;
+        }
+    };
     for (const line of lines) {
         if (/^<li>/.test(line)) {
-            if (!listOpen) { out.push('<ul>'); listOpen = true; }
+            if (!listOpen) {
+                out.push('<ul>');
+                listOpen = true;
+            }
             out.push(line);
         } else {
             closeList();
@@ -595,11 +666,47 @@ function switchTab(tab) {
     if (tab === 'tenants') loadTenants();
     if (tab === 'apikey') {
         // 进入 API Key 管理面板：重置新 Key 展示区并加载列表
-        const r = $('apiKeyNewResult'); if (r) r.classList.add('hidden');
-        const n = $('apiKeyName'); if (n) n.value = '';
+        const r = $('apiKeyNewResult');
+        if (r) r.classList.add('hidden');
+        const n = $('apiKeyName');
+        if (n) n.value = '';
         loadApiKeys();
     }
     if (tab === 'monitor') loadUsageOverview();
+}
+
+/* ---------- 列表列排序（正序/倒序/重置 三态） ---------- */
+const sortState = {tenant: {field: '', dir: ''}, apikey: {field: '', dir: ''}, monitor: {field: '', dir: ''}};
+
+function sortParam(ns, defaultSort) {
+    const s = sortState[ns];
+    return (s.field && s.dir) ? `&sort=${s.field},${s.dir}` : `&sort=${defaultSort}`;
+}
+
+function renderSortIndicators(ns) {
+    const cur = sortState[ns];
+    document.querySelectorAll(`th[data-sort-ns="${ns}"]`).forEach(th => {
+        const label = th.dataset.label || th.dataset.sort || '';
+        const arrow = (cur.field && th.dataset.sort === cur.field) ? (cur.dir === 'asc' ? ' ↑' : ' ↓') : '';
+        th.textContent = label + arrow;
+    });
+}
+
+function bindTableSort(ns, reloadFn) {
+    document.querySelectorAll(`th[data-sort-ns="${ns}"]`).forEach(th => {
+        th.classList.add('cursor-pointer', 'select-none', 'hover:text-white');
+        th.addEventListener('click', () => {
+            const field = th.dataset.sort;
+            const cur = sortState[ns];
+            let dir = '';
+            if (!cur.field || cur.field !== field) dir = 'asc';
+            else if (cur.dir === 'asc') dir = 'desc';
+            else if (cur.dir === 'desc') dir = ''; // 重置回默认排序
+            sortState[ns] = {field: dir ? field : '', dir};
+            renderSortIndicators(ns);
+            reloadFn(0);
+        });
+    });
 }
 
 /* ---------- 租户管理 ---------- */
@@ -610,7 +717,7 @@ async function loadTenants(page) {
     if (typeof page === 'number') state.tenantsPage = page;
     const kw = ($('tenantSearch') ? $('tenantSearch').value : '').trim();
     try {
-        const url = `${API_BASE}/tenants/page?page=${state.tenantsPage}&size=${state.pageSize}&keyword=${encodeURIComponent(kw)}&sort=id,createdTime,desc`;
+        const url = `${API_BASE}/tenants/page?page=${state.tenantsPage}&size=${state.pageSize}&keyword=${encodeURIComponent(kw)}${sortParam('tenant', 'id,createdTime,desc')}`;
         const res = await fetch(url);
         if (!res.ok) return;
         const data = await res.json();
@@ -634,17 +741,21 @@ async function loadTenants(page) {
             btn.addEventListener('click', () => editTenant(btn.dataset.id, btn.dataset.code || '', btn.dataset.name || ''));
         });
         renderPagination($('tenantPagination'), data.number || 0, data.totalPages || 0, data.totalElements || 0, p => loadTenants(p));
-    } catch (e) { /* 静默失败 */ }
+    } catch (e) { /* 静默失败 */
+    }
 }
 
 async function addTenant() {
     const code = $('tenantNewCode').value.trim();
     const name = $('tenantNewName').value.trim();
-    if (!code || !name) { showToast('租户编码与租户名称必填', 'error'); return; }
+    if (!code || !name) {
+        showToast('租户编码与租户名称必填', 'error');
+        return;
+    }
     const res = await fetch(`${API_BASE}/tenants`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantCode: code, tenantName: name })
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({tenantCode: code, tenantName: name})
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.success) {
@@ -660,7 +771,7 @@ async function addTenant() {
 
 async function deleteTenant(id, name) {
     if (!confirm(`确认删除租户「${name}」？删除后该租户不再出现在下拉框，已上传的文档不受影响。`)) return;
-    const res = await fetch(`${API_BASE}/tenants/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/tenants/${id}`, {method: 'DELETE'});
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.success) {
         showToast('租户已删除', 'success');
@@ -689,20 +800,32 @@ async function editTenant(id, oldCode, oldName) {
     document.body.appendChild(overlay);
     const codeInput = overlay.querySelector('#editTenantCode');
     const nameInput = overlay.querySelector('#editTenantName');
-    nameInput.focus(); nameInput.select();
+    nameInput.focus();
+    nameInput.select();
     const close = () => overlay.remove();
     overlay.querySelector('#editTenantCancel').addEventListener('click', close);
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    overlay.addEventListener('click', e => {
+        if (e.target === overlay) close();
+    });
     const save = async () => {
         const code = codeInput.value.trim();
         const name = nameInput.value.trim();
-        if (!code) { showToast('租户编码不能为空', 'error'); return; }
-        if (!name) { showToast('租户名称不能为空', 'error'); return; }
-        if (code === oldCode && name === oldName) { close(); return; }
+        if (!code) {
+            showToast('租户编码不能为空', 'error');
+            return;
+        }
+        if (!name) {
+            showToast('租户名称不能为空', 'error');
+            return;
+        }
+        if (code === oldCode && name === oldName) {
+            close();
+            return;
+        }
         const res = await fetch(`${API_BASE}/tenants`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: Number(id), tenantCode: code, tenantName: name })
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: Number(id), tenantCode: code, tenantName: name})
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.success) {
@@ -715,8 +838,14 @@ async function editTenant(id, oldCode, oldName) {
         }
     };
     overlay.querySelector('#editTenantOk').addEventListener('click', save);
-    nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') close(); });
-    codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') close(); });
+    nameInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') close();
+    });
+    codeInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') close();
+    });
 }
 
 /* ---------- 用量监控 ---------- */
@@ -725,7 +854,7 @@ async function loadUsageOverview(page) {
     const empty = $('monitorUsageEmpty');
     if (typeof page === 'number') state.monitorPage = page;
     try {
-        const res = await fetch(`${AUTH_BASE}/usage-overview?page=${state.monitorPage}&size=${state.pageSize}&sort=totalTokens,desc`);
+        const res = await fetch(`${AUTH_BASE}/usage-overview?page=${state.monitorPage}&size=${state.pageSize}${sortParam('monitor', 'totalTokens,desc')}`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         // 统计卡片
@@ -742,21 +871,19 @@ async function loadUsageOverview(page) {
             const tr = document.createElement('tr');
             tr.className = 'border-b border-white/5';
             const enabledBadge = k.enabled
-                ? '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-emerald-500/15 text-emerald-400">启用</span>'
-                : '<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>';
+                ? '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-emerald-500/15 text-emerald-400">启用</span>'
+                : '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>';
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 font-mono text-xs text-gray-300 hide-mobile">${escapeHtml(k.keyPrefix || k.prefix || 'sk-…')}…</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-300 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '-')}</td>
-                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(k.systemType || '-')}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(systemNameOf(k.systemType))}</td>
                 <td class="py-2.5 pr-3">${enabledBadge}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-300">${k.totalCalls ?? 0}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.promptTokens ?? 0).toLocaleString()}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.completionTokens ?? 0).toLocaleString()}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-300 font-medium">${(k.totalTokens ?? 0).toLocaleString()}</td>
-                <td class="py-2.5 pr-3 text-xs text-gray-400 hide-mobile">${k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未使用'}</td>
-                <td class="py-2.5 text-right hide-mobile">
-                    <button onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')" class="text-xs px-2 py-1 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition">明细</button>
-                </td>`;
+                <td class="py-2.5 pr-3 pl-6 text-xs text-gray-400 hide-mobile">${k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未使用'}</td>
+`;
             tbody.appendChild(tr);
         });
         renderPagination($('monitorPagination'), data.number || 0, data.totalPages || 0, data.totalElements || 0, p => loadUsageOverview(p));
@@ -968,7 +1095,10 @@ function stripMarkdown(text) {
 }
 
 function renderSourcesInMessage(sourcesEl, sources) {
-    if (!sources || sources.length === 0) { sourcesEl.classList.add('hidden'); return; }
+    if (!sources || sources.length === 0) {
+        sourcesEl.classList.add('hidden');
+        return;
+    }
     sourcesEl.classList.remove('hidden');
     sourcesEl.innerHTML = `<div class="sources-header">本轮引用 · ${sources.length} 篇</div><div class="sources-scroll">` +
         sources.map((s, i) => {
@@ -1015,7 +1145,8 @@ function enableDragScroll(container) {
     container.style.cursor = 'grab';
 
     container.addEventListener('mousedown', e => {
-        isDown = true; moved = false;
+        isDown = true;
+        moved = false;
         const rect = container.getBoundingClientRect();
         startX = e.clientX - rect.left;
         scrollLeft = container.scrollLeft;
@@ -1044,14 +1175,20 @@ function enableDragScroll(container) {
 
     // 拖拽后阻止点击
     container.addEventListener('click', e => {
-        if (moved) { e.stopPropagation(); e.preventDefault(); }
+        if (moved) {
+            e.stopPropagation();
+            e.preventDefault();
+        }
     }, true);
 }
 
 /* ---------- 智能问答 ---------- */
 async function askQuestion() {
     const question = $('questionInput').value.trim();
-    if (!question) { showToast('请输入问题', 'error'); return; }
+    if (!question) {
+        showToast('请输入问题', 'error');
+        return;
+    }
 
     // 如果有正在进行的回答，中断上一个（保留已生成内容，不保存到数据库）
     if (state.abortController) {
@@ -1105,7 +1242,7 @@ async function askQuestion() {
         // POST /query 使用 JSON body 传参
         const res = await fetch(`${API_BASE}/query`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 question,
                 tenantCode: getTenant(),
@@ -1126,9 +1263,9 @@ async function askQuestion() {
         let buffer = '';
 
         while (true) {
-            const { done, value } = await reader.read();
+            const {done, value} = await reader.read();
             if (done) break;
-            buffer += decoder.decode(value, { stream: true });
+            buffer += decoder.decode(value, {stream: true});
             const events = buffer.split('\n\n');
             buffer = events.pop();
 
@@ -1142,7 +1279,12 @@ async function askQuestion() {
                 const data = dataLines.join('\n');
                 if (!data) continue;
                 let ev;
-                try { ev = JSON.parse(data); } catch (e) { console.warn('非JSON SSE事件', data); continue; }
+                try {
+                    ev = JSON.parse(data);
+                } catch (e) {
+                    console.warn('非JSON SSE事件', data);
+                    continue;
+                }
 
                 if (ev.type === 'session') {
                     state.sessionId = ev.sessionId;
@@ -1230,7 +1372,7 @@ async function askQuestion() {
                 try {
                     await fetch(`${API_BASE}/conversations`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
                             question: question,
                             answer: fullAnswer || '',
@@ -1242,7 +1384,9 @@ async function askQuestion() {
                         })
                     });
                     loadHistory();
-                } catch (e) { console.warn('保存终止对话失败', e); }
+                } catch (e) {
+                    console.warn('保存终止对话失败', e);
+                }
             }
             state._abortByNewChat = false;
         } else {
@@ -1281,7 +1425,7 @@ function newChat() {
         if (q) {
             fetch(`${API_BASE}/conversations`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     question: q, answer: a || '',
                     userId: getUser(), sessionId: sid,
@@ -1317,13 +1461,22 @@ function autoResizeTextarea() {
 $('askBtn').addEventListener('click', askQuestion);
 $('newChatBtn').addEventListener('click', newChat);
 $('questionInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askQuestion(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        askQuestion();
+    }
 });
 $('questionInput').addEventListener('input', autoResizeTextarea);
 // 全局快捷键
 document.addEventListener('keydown', e => {
-    if (e.ctrlKey && e.key === 'n') { e.preventDefault(); newChat(); }
-    if (e.ctrlKey && e.key === 'k') { e.preventDefault(); $('questionInput').focus(); }
+    if (e.ctrlKey && e.key === 'n') {
+        e.preventDefault();
+        newChat();
+    }
+    if (e.ctrlKey && e.key === 'k') {
+        e.preventDefault();
+        $('questionInput').focus();
+    }
 });
 
 // 历史对话管理
@@ -1331,12 +1484,15 @@ $('syncChatBtn').addEventListener('click', async () => {
     const btn = $('syncChatBtn');
     btn.disabled = true;
     try {
-        const res = await fetch(API_BASE + '/sync', { method: 'POST' });
+        const res = await fetch(API_BASE + '/sync', {method: 'POST'});
         const data = await res.json().catch(() => ({}));
         showToast(data.message || (res.ok ? '同步完成' : '同步失败'), res.ok ? 'success' : 'error');
         loadHistory();
-    } catch (e) { showToast('同步失败: ' + e.message, 'error'); }
-    finally { btn.disabled = false; }
+    } catch (e) {
+        showToast('同步失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
 });
 
 $('historyManageBtn').addEventListener('click', () => {
@@ -1505,13 +1661,16 @@ function renderHistory() {
                     try {
                         const res = await fetch(`${API_BASE}/conversations/session/${encodeURIComponent(sessionId)}/title`, {
                             method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ title: newName.trim() })
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({title: newName.trim()})
                         });
                         if (res.ok) {
                             // 更新历史列表中的标题
                             const hi = state.history.find(s => s.sessionId === sessionId);
-                            if (hi) { hi.title = newName.trim(); hi.question = newName.trim(); }
+                            if (hi) {
+                                hi.title = newName.trim();
+                                hi.question = newName.trim();
+                            }
                             // 如果是当前打开的会话，同步更新显示
                             if (state.sessionId === sessionId) {
                                 state.currentTitle = newName.trim();
@@ -1628,7 +1787,10 @@ function showExportMenu(anchor, sessionId, title) {
     });
     setTimeout(() => {
         document.addEventListener('click', function closeMenu(e) {
-            if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', closeMenu); }
+            if (!menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener('click', closeMenu);
+            }
         });
     }, 10);
 }
@@ -1645,17 +1807,28 @@ async function exportConversation(sessionId, title) {
         // 分页正序查询，依次写出
         while (true) {
             const res = await fetch(`${API_BASE}/conversations/session?sessionId=${encodeURIComponent(sessionId)}&page=${Math.floor(offset / pageSize)}&size=${pageSize}&order=asc`);
-            if (!res.ok) { showToast('导出失败', 'error'); return; }
+            if (!res.ok) {
+                showToast('导出失败', 'error');
+                return;
+            }
             const messages = await res.json();
             if (!messages || messages.length === 0) break;
             messages.forEach(m => {
                 md += `## 用户\n${m.question || ''}\n\n`;
                 md += `## AI\n${m.answer || ''}\n\n`;
                 let srcs = m.sources;
-                if (typeof srcs === 'string') { try { srcs = JSON.parse(srcs); } catch { srcs = null; } }
+                if (typeof srcs === 'string') {
+                    try {
+                        srcs = JSON.parse(srcs);
+                    } catch {
+                        srcs = null;
+                    }
+                }
                 if (srcs && Array.isArray(srcs) && srcs.length) {
                     md += `**引用来源:**\n`;
-                    srcs.forEach((s, i) => { md += `${i + 1}. ${s.title || s.fileName || '未命名'} (第${s.pageNumber || '-'}页)\n`; });
+                    srcs.forEach((s, i) => {
+                        md += `${i + 1}. ${s.title || s.fileName || '未命名'} (第${s.pageNumber || '-'}页)\n`;
+                    });
                     md += '\n';
                 }
                 md += `---\n\n`;
@@ -1664,7 +1837,7 @@ async function exportConversation(sessionId, title) {
             if (messages.length < pageSize) break;
             offset += pageSize;
         }
-        const blob = new Blob([md], { type: 'text/markdown' });
+        const blob = new Blob([md], {type: 'text/markdown'});
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `${title || 'conversation'}.md`;
@@ -1701,10 +1874,18 @@ async function exportConversationPDF(sessionId, title) {
                         <strong>AI：</strong>${renderMarkdown(m.answer || '')}
                     </div>`;
                 let srcs = m.sources;
-                if (typeof srcs === 'string') { try { srcs = JSON.parse(srcs); } catch { srcs = null; } }
+                if (typeof srcs === 'string') {
+                    try {
+                        srcs = JSON.parse(srcs);
+                    } catch {
+                        srcs = null;
+                    }
+                }
                 if (srcs && Array.isArray(srcs) && srcs.length) {
                     html += `<div style="font-size:12px;color:#666;margin-top:6px;padding-left:14px;"><strong>引用来源：</strong>`;
-                    srcs.forEach((s, i) => { html += `${i + 1}. ${escapeHtml(s.title || s.fileName || '未命名')} (第${s.pageNumber || '-'}页) `; });
+                    srcs.forEach((s, i) => {
+                        html += `${i + 1}. ${escapeHtml(s.title || s.fileName || '未命名')} (第${s.pageNumber || '-'}页) `;
+                    });
                     html += `</div>`;
                 }
                 html += `</div>`;
@@ -1739,7 +1920,7 @@ async function exportConversationPDF(sessionId, title) {
 
 async function deleteHistorySession(sessionId) {
     try {
-        const res = await fetch(`${API_BASE}/conversations/session/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+        const res = await fetch(`${API_BASE}/conversations/session/${encodeURIComponent(sessionId)}`, {method: 'DELETE'});
         if (res.ok) {
             showToast('对话已删除', 'success');
             state.historySelected.delete(sessionId);
@@ -1763,8 +1944,8 @@ async function batchDeleteHistory() {
     try {
         const res = await fetch(`${API_BASE}/conversations/batch`, {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionIds: [...state.historySelected] })
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({sessionIds: [...state.historySelected]})
         });
         if (res.ok) {
             showToast(`已删除 ${state.historySelected.size} 条对话`, 'success');
@@ -1854,7 +2035,10 @@ function prependOlderMessages(messages) {
     messages.forEach(m => {
         frag.appendChild(buildUserMessage(m));
         const aiRow = buildAIMessage(m);
-        if (aiRow) { if (m.reasoning && m.reasoning.trim()) renderReasoningBlock(aiRow.querySelector('.msg-bubble'), m.reasoning); } frag.appendChild(aiRow);
+        if (aiRow) {
+            if (m.reasoning && m.reasoning.trim()) renderReasoningBlock(aiRow.querySelector('.msg-bubble'), m.reasoning);
+        }
+        frag.appendChild(aiRow);
     });
     container.insertBefore(frag, container.firstChild);
     // 保持滚动位置（跳到加载前的位置）
@@ -1883,7 +2067,9 @@ function renderReasoningBlock(bubble, reasoning) {
     el.querySelector('.thinking-text').textContent = stripMarkdown(reasoning);
     const body = el.querySelector('.thinking-body');
     const toggle = el.querySelector('.thinking-toggle');
-    body.classList.add('hidden'); toggle.textContent = '▸'; el.querySelector('.thinking-head').addEventListener('click', () => {
+    body.classList.add('hidden');
+    toggle.textContent = '▸';
+    el.querySelector('.thinking-head').addEventListener('click', () => {
         const collapsed = body.classList.toggle('hidden');
         toggle.textContent = collapsed ? '▸' : '▾';
     });
@@ -1893,7 +2079,10 @@ function renderReasoningBlock(bubble, reasoning) {
 
 /** 渲染多轮对话线程（含历史思考内容展示） */
 function renderThreadWithReasoning(messages) {
-    if (!messages || messages.length === 0) { clearChat(); return; }
+    if (!messages || messages.length === 0) {
+        clearChat();
+        return;
+    }
     $('chatMessages').innerHTML = '';
     messages.forEach(m => {
         const userRow = document.createElement('div');
@@ -1922,7 +2111,13 @@ function buildAIMessage(m) {
         </div>`;
     if (m.sources) {
         let srcs = m.sources;
-        if (typeof srcs === 'string') { try { srcs = JSON.parse(srcs); } catch (e) { srcs = null; } }
+        if (typeof srcs === 'string') {
+            try {
+                srcs = JSON.parse(srcs);
+            } catch (e) {
+                srcs = null;
+            }
+        }
         if (srcs && Array.isArray(srcs) && srcs.length) {
             renderSourcesInMessage(row.querySelector('.msg-sources'), srcs);
         }
@@ -1961,7 +2156,13 @@ function renderConversationThread(messages) {
             // 每轮都显示来源，标注"本轮引用"
             if (m.sources) {
                 let srcs = m.sources;
-                if (typeof srcs === 'string') { try { srcs = JSON.parse(srcs); } catch (e) { srcs = null; } }
+                if (typeof srcs === 'string') {
+                    try {
+                        srcs = JSON.parse(srcs);
+                    } catch (e) {
+                        srcs = null;
+                    }
+                }
                 if (srcs && Array.isArray(srcs) && srcs.length) {
                     const sourcesEl = aiRow.querySelector('.msg-sources');
                     renderSourcesInMessage(sourcesEl, srcs);
@@ -1983,7 +2184,10 @@ const dropZone = $('dropZone');
 const fileInput = $('fileInput');
 
 dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+});
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop', e => {
     e.preventDefault();
@@ -2005,6 +2209,7 @@ function refreshUploadButtons() {
 }
 
 $('urlInput').addEventListener('input', refreshUploadButtons);
+
 function selectFiles(files) {
     state.selectedFiles = Array.from(files);
     $('selectedFile').classList.remove('hidden');
@@ -2022,7 +2227,10 @@ $('clearFile').addEventListener('click', () => {
 });
 
 async function uploadFile() {
-    if (!state.selectedFiles || state.selectedFiles.length === 0) { showToast('请先选择文件', 'error'); return; }
+    if (!state.selectedFiles || state.selectedFiles.length === 0) {
+        showToast('请先选择文件', 'error');
+        return;
+    }
 
     const btn = $('uploadBtn');
     const btnText = $('uploadBtnText');
@@ -2043,7 +2251,7 @@ async function uploadFile() {
         formData.append('userId', getUser());
 
         try {
-            const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData });
+            const res = await fetch(`${API_BASE}/upload`, {method: 'POST', body: formData});
             const data = await res.json();
             if (data.status === 'SUCCESS' || data.status === 'PROCESSING') {
                 successCount++;
@@ -2075,10 +2283,12 @@ function openUploadModal() {
     $('uploadModal').classList.remove('hidden');
     $('uploadModal').classList.add('flex');
 }
+
 function closeUploadModal() {
     $('uploadModal').classList.add('hidden');
     $('uploadModal').classList.remove('flex');
 }
+
 $('fabUpload').addEventListener('click', openUploadModal);
 $('uploadModalClose').addEventListener('click', closeUploadModal);
 
@@ -2090,7 +2300,10 @@ function pollDocumentStatus(docCode) {
     const maxAttempts = 20; // 最多轮询 10 分钟（20 * 30s）
     const interval = setInterval(async () => {
         attempts++;
-        if (attempts > maxAttempts) { clearInterval(interval); return; }
+        if (attempts > maxAttempts) {
+            clearInterval(interval);
+            return;
+        }
         try {
             const res = await fetch(`${API_BASE}/list?tenantCode=${encodeURIComponent(getTenant())}&systemType=${encodeURIComponent(getSystem())}&sort=createdTime,desc`);
             const docs = await res.json();
@@ -2107,7 +2320,8 @@ function pollDocumentStatus(docCode) {
                     showToast(`文档处理失败: ${doc.errorMessage || '未知错误'}`, 'error');
                 }
             }
-        } catch { /* 静默重试 */ }
+        } catch { /* 静默重试 */
+        }
     }, 30000);
 }
 
@@ -2123,7 +2337,10 @@ function clearUploadForm() {
 /* ---------- URL 上传 ---------- */
 async function uploadByUrl() {
     const url = $('urlInput').value.trim();
-    if (!url) { showToast('请输入文件 URL', 'error'); return; }
+    if (!url) {
+        showToast('请输入文件 URL', 'error');
+        return;
+    }
 
     const btn = $('urlUploadBtn');
     const btnText = $('urlUploadBtnText');
@@ -2141,7 +2358,7 @@ async function uploadByUrl() {
     try {
         const res = await fetch(`${API_BASE}/upload/url`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload)
         });
         const data = await res.json();
@@ -2211,10 +2428,10 @@ async function loadDocuments(page) {
             const uploaderLabel = doc.userId ? `上传者: ${escapeHtml(doc.userId)}` : '上传者: 未知';
             const statusClass = doc.status === 'SUCCESS' ? 'tag-green' :
                 doc.status === 'PROCESSING' ? 'tag-yellow' :
-                doc.status === 'FAILED' ? 'tag-red' : 'tag-gray';
+                    doc.status === 'FAILED' ? 'tag-red' : 'tag-gray';
             const statusText = doc.status === 'SUCCESS' ? '已完成' :
                 doc.status === 'PROCESSING' ? '处理中' :
-                doc.status === 'FAILED' ? '处理失败' : (doc.status || '-');
+                    doc.status === 'FAILED' ? '处理失败' : (doc.status || '-');
             const statusSpinner = doc.status === 'PROCESSING' ? '<span class="spinner-sm"></span>' : '';
             return `
             <div class="doc-card cursor-pointer" data-doc-code="${escapeHtml(doc.docCode || '')}" data-doc-name="${escapeHtml(doc.title || doc.fileName || '')}" data-title="${escapeHtml(doc.title || '')}" data-desc="${escapeHtml(doc.description || '')}" data-tenant="${escapeHtml(doc.tenantCode || '')}" data-system="${escapeHtml(doc.systemType || '')}">
@@ -2299,7 +2516,10 @@ async function loadDocuments(page) {
     }
 
     // 仅当当前页有处理中(PROCESSING)的文档时才自动轮询，否则不重复请求
-    if (state.docsRefreshTimer) { clearTimeout(state.docsRefreshTimer); state.docsRefreshTimer = null; }
+    if (state.docsRefreshTimer) {
+        clearTimeout(state.docsRefreshTimer);
+        state.docsRefreshTimer = null;
+    }
     const hasProcessing = Array.from(list.querySelectorAll('.tag-yellow')).length > 0
         || Array.from(list.querySelectorAll('.doc-card')).some(c => c.textContent.includes('处理中'));
     if (hasProcessing && !$('tab-documents').classList.contains('hidden')) {
@@ -2311,31 +2531,48 @@ $('refreshDocs').addEventListener('click', () => loadDocuments(state.docsPage));
 $('migrateDocsBtn').addEventListener('click', async () => {
     const btn = $('migrateDocsBtn');
     const origin = btn.innerHTML;
-    btn.disabled = true; btn.textContent = '同步中...';
+    btn.disabled = true;
+    btn.textContent = '同步中...';
     try {
-        const res = await fetch(`${API_BASE}/migrate-documents`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/migrate-documents`, {method: 'POST'});
         const data = await res.json().catch(() => ({}));
         alert(data.message || (res.ok ? '同步完成' : '同步失败'));
         loadDocuments(0);
-    } catch (e) { alert('同步失败: ' + e.message); }
-    finally { btn.disabled = false; btn.innerHTML = origin; }
+    } catch (e) {
+        alert('同步失败: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origin;
+    }
 });
-$('docSearch').addEventListener('input', e => { state.docSearch = e.target.value; loadDocuments(0); });
-$('docStatusFilter').addEventListener('change', e => { state.docStatusFilter = e.target.value; loadDocuments(0); });
+$('docSearch').addEventListener('input', e => {
+    state.docSearch = e.target.value;
+    loadDocuments(0);
+});
+$('docStatusFilter').addEventListener('change', e => {
+    state.docStatusFilter = e.target.value;
+    loadDocuments(0);
+});
 
 /**
  * 文档预览：复用来源弹窗展示文档基本信息
  */
 function showDocPreview(docCode, docName) {
-    if (!docCode) { showToast('该文档无编码', 'error'); return; }
+    if (!docCode) {
+        showToast('该文档无编码', 'error');
+        return;
+    }
     const docs = Array.isArray(state.docsCache) ? state.docsCache : [];
     const doc = docs.find(d => d.docCode === docCode);
-            if (!doc) { showToast('未找到文档', 'error'); return; }
-            const statusText = doc.status === 'SUCCESS' ? '已完成' : doc.status === 'PROCESSING' ? '处理中' : doc.status === 'FAILED' ? '处理失败' : (doc.status || '-');
-            const statusClass = doc.status === 'SUCCESS' ? 'text-green-400' : doc.status === 'PROCESSING' ? 'text-yellow-400' : doc.status === 'FAILED' ? 'text-red-400' : 'text-gray-400';
-            const displayTitle = doc.title || doc.fileName || '未命名';
-            $('sourceModalTitle').textContent = displayTitle;
-            $('sourceModalMeta').innerHTML = `
+    if (!doc) {
+        showToast('未找到文档', 'error');
+        return;
+    }
+    const statusText = doc.status === 'SUCCESS' ? '已完成' : doc.status === 'PROCESSING' ? '处理中' : doc.status === 'FAILED' ? '处理失败' : (doc.status || '-');
+    const statusClass = doc.status === 'SUCCESS' ? 'text-green-400' : doc.status === 'PROCESSING' ? 'text-yellow-400' : doc.status === 'FAILED' ? 'text-red-400' : 'text-gray-400';
+    const displayTitle = doc.title || doc.fileName || '未命名';
+    $('sourceModalTitle').textContent = displayTitle;
+    $('sourceModalMeta').innerHTML = `
                 <div class="grid grid-cols-2 gap-x-6 gap-y-2.5">
                     <div class="flex items-baseline gap-2"><span class="text-gray-600 text-xs w-14 shrink-0">状态</span><span class="${statusClass} text-xs font-medium">${statusText}</span></div>
                     <div class="flex items-baseline gap-2"><span class="text-gray-600 text-xs w-14 shrink-0">分片数</span><span class="text-primary-400 text-xs font-medium">${doc.chunkCount || 0}</span></div>
@@ -2347,8 +2584,8 @@ function showDocPreview(docCode, docName) {
                     ${doc.errorMessage ? `<div class="flex items-baseline gap-2 col-span-2"><span class="text-gray-600 text-xs w-14 shrink-0">错误信息</span><span class="text-red-400 text-xs">${escapeHtml(doc.errorMessage)}</span></div>` : ''}
                 </div>
             `;
-            const desc = doc.description ? escapeHtml(doc.description) : '<span class="text-gray-600">（无描述信息）</span>';
-            $('sourceModalContent').innerHTML = `<div class="text-xs text-gray-500 mb-2">文档描述</div><div class="text-sm text-gray-300 whitespace-pre-wrap leading-7">${desc}</div>`;
+    const desc = doc.description ? escapeHtml(doc.description) : '<span class="text-gray-600">（无描述信息）</span>';
+    $('sourceModalContent').innerHTML = `<div class="text-xs text-gray-500 mb-2">文档描述</div><div class="text-sm text-gray-300 whitespace-pre-wrap leading-7">${desc}</div>`;
     $('sourceModal').classList.remove('hidden');
     $('sourceModal').classList.add('flex');
 }
@@ -2356,11 +2593,14 @@ function showDocPreview(docCode, docName) {
 /**
  * 重新上传最新版：打开弹窗，可同时修改名称和描述，选新文件提交
  */
-let reuploadCtx = { docCode: null, btn: null };
+let reuploadCtx = {docCode: null, btn: null};
 
 function replaceDocumentFile(docCode, oldTitle, btn) {
-    if (!docCode) { showToast('该文档无 docCode，无法更换', 'error'); return; }
-    reuploadCtx = { docCode, btn };
+    if (!docCode) {
+        showToast('该文档无 docCode，无法更换', 'error');
+        return;
+    }
+    reuploadCtx = {docCode, btn};
     $('reuploadTitle').value = oldTitle || '';
     $('reuploadDesc').value = '';
     $('reuploadFile').value = '';
@@ -2371,30 +2611,45 @@ document.addEventListener('DOMContentLoaded', () => {
     $('reuploadClose')?.addEventListener('click', () => $('reuploadModal').classList.add('hidden'));
     $('reuploadSubmit')?.addEventListener('click', async () => {
         const file = $('reuploadFile').files[0];
-        if (!file) { showToast('请选择新文件', 'error'); return; }
+        if (!file) {
+            showToast('请选择新文件', 'error');
+            return;
+        }
         const title = $('reuploadTitle').value.trim();
         const desc = $('reuploadDesc').value.trim();
         const btn = reuploadCtx.btn;
         const original = btn ? btn.innerHTML : '';
         $('reuploadModal').classList.add('hidden');
-        if (btn) { btn.disabled = true; btn.innerHTML = '<span class="inline-block w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></span>'; }
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="inline-block w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></span>';
+        }
         try {
             const fd = new FormData();
             fd.append('file', file);
             if (title) fd.append('title', title);
             if (desc) fd.append('description', desc);
-            const res = await fetch(`${API_BASE}/${encodeURIComponent(reuploadCtx.docCode)}/file`, { method: 'PUT', body: fd });
+            const res = await fetch(`${API_BASE}/${encodeURIComponent(reuploadCtx.docCode)}/file`, {
+                method: 'PUT',
+                body: fd
+            });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
                 showToast('新文件已上传，处理中...', 'success');
                 setTimeout(() => loadDocuments(state.docsPage), 3000);
             } else {
                 showToast(data.errorMessage || data.message || '更换失败', 'error');
-                if (btn) { btn.disabled = false; btn.innerHTML = original; }
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = original;
+                }
             }
         } catch (err) {
             showToast('更换失败: ' + err.message, 'error');
-            if (btn) { btn.disabled = false; btn.innerHTML = original; }
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = original;
+            }
         }
     });
 });
@@ -2404,7 +2659,10 @@ document.addEventListener('DOMContentLoaded', () => {
  * 删除后记录到 localStorage，对话中引用该文档时标注"已删除"
  */
 async function deleteDocument(docCode, fileName, docName, card) {
-    if (!docCode) { showToast('该文档无 docCode，无法删除', 'error'); return; }
+    if (!docCode) {
+        showToast('该文档无 docCode，无法删除', 'error');
+        return;
+    }
     if (!confirm(`确定要删除文档「${docName}」吗？\n\n将同时删除：所有分片、独占知识点、关联关系、向量数据和原始文件，此操作不可恢复。`)) return;
 
     // 进入删除中状态：禁用按钮、卡片半透明、显示 spinner
@@ -2421,7 +2679,7 @@ async function deleteDocument(docCode, fileName, docName, card) {
     }
 
     try {
-        const res = await fetch(`${API_BASE}/docCode/${encodeURIComponent(docCode)}`, { method: 'DELETE' });
+        const res = await fetch(`${API_BASE}/docCode/${encodeURIComponent(docCode)}`, {method: 'DELETE'});
         if (res.ok) {
             if (card) card.remove();
             loadDocuments();
@@ -2490,9 +2748,17 @@ function renderGraph(data) {
             group: n.group,
             shape: isChunk ? 'box' : 'dot',
             color: isChunk
-                ? { background: 'rgba(96,165,250,0.2)', border: '#60a5fa', highlight: { background: 'rgba(96,165,250,0.4)', border: '#93c5fd' } }
-                : { background: 'rgba(167,139,250,0.3)', border: '#a78bfa', highlight: { background: 'rgba(167,139,250,0.5)', border: '#c4b5fd' } },
-            font: { color: '#e5e7eb', size: isChunk ? 11 : 13, face: 'sans-serif' },
+                ? {
+                    background: 'rgba(96,165,250,0.2)',
+                    border: '#60a5fa',
+                    highlight: {background: 'rgba(96,165,250,0.4)', border: '#93c5fd'}
+                }
+                : {
+                    background: 'rgba(167,139,250,0.3)',
+                    border: '#a78bfa',
+                    highlight: {background: 'rgba(167,139,250,0.5)', border: '#c4b5fd'}
+                },
+            font: {color: '#e5e7eb', size: isChunk ? 11 : 13, face: 'sans-serif'},
             size: isChunk ? 16 : 18,
             borderWidth: 1.5,
             _raw: n
@@ -2505,14 +2771,14 @@ function renderGraph(data) {
         from: e.from,
         to: e.to,
         label: e.label,
-        color: { color: e.color || '#64748b', highlight: '#818cf8' },
-        font: { color: '#94a3b8', size: 10, strokeWidth: 0 },
-        arrows: { to: { enabled: true, scaleFactor: 0.5 } },
-        smooth: { type: 'dynamic' },
+        color: {color: e.color || '#64748b', highlight: '#818cf8'},
+        font: {color: '#94a3b8', size: 10, strokeWidth: 0},
+        arrows: {to: {enabled: true, scaleFactor: 0.5}},
+        smooth: {type: 'dynamic'},
         _raw: e
     })));
 
-    const graphData = { nodes, edges };
+    const graphData = {nodes, edges};
 
     const options = {
         interaction: {
@@ -2532,11 +2798,11 @@ function renderGraph(data) {
                 springConstant: 0.04,
                 damping: 0.09
             },
-            stabilization: { iterations: 150 }
+            stabilization: {iterations: 150}
         },
         groups: {
-            chunk: { shape: 'box' },
-            entity: { shape: 'dot' }
+            chunk: {shape: 'box'},
+            entity: {shape: 'dot'}
         }
     };
 
@@ -2547,7 +2813,7 @@ function renderGraph(data) {
 
     // 稳定化完成后自动关闭物理模拟，防止节点多时一直乱动
     state.graphNetwork.on('stabilizationIterationsDone', () => {
-        state.graphNetwork.setOptions({ physics: { enabled: false } });
+        state.graphNetwork.setOptions({physics: {enabled: false}});
     });
 
     // 点击节点显示详情
@@ -2607,7 +2873,7 @@ function showNodeDetail(node) {
 $('refreshGraph').addEventListener('click', loadGraph);
 $('relayoutGraph').addEventListener('click', () => {
     if (state.graphNetwork) {
-        state.graphNetwork.setOptions({ physics: { enabled: true } });
+        state.graphNetwork.setOptions({physics: {enabled: true}});
         state.graphNetwork.stabilize(200);
     }
 });
@@ -2619,7 +2885,8 @@ async function updateStats() {
         const data = await res.json();
         $('statDocs').textContent = data.docCount ?? 0;
         $('statChunks').textContent = data.chunkCount ?? 0;
-    } catch { /* 静默失败 */ }
+    } catch { /* 静默失败 */
+    }
 }
 
 /* ---------- 全局用户/租户/系统联动 ---------- */
@@ -2704,8 +2971,12 @@ function init() {
     const modelSelectMobile = $('modelSelectMobile');
     if (modelSelect && modelSelectMobile) {
         modelSelectMobile.value = modelSelect.value;
-        modelSelect.addEventListener('change', () => { modelSelectMobile.value = modelSelect.value; });
-        modelSelectMobile.addEventListener('change', () => { modelSelect.value = modelSelectMobile.value; });
+        modelSelect.addEventListener('change', () => {
+            modelSelectMobile.value = modelSelect.value;
+        });
+        modelSelectMobile.addEventListener('change', () => {
+            modelSelect.value = modelSelectMobile.value;
+        });
     }
 
     // AI提供商标签 + 会话ID 同步到小屏（实时监听变化）
@@ -2723,7 +2994,7 @@ function init() {
     const sidEl = $('currentSessionId');
     if (sidEl && typeof MutationObserver !== 'undefined') {
         const observer = new MutationObserver(() => syncMobileLabels());
-        observer.observe(sidEl, { childList: true, characterData: true, subtree: true });
+        observer.observe(sidEl, {childList: true, characterData: true, subtree: true});
     }
 
     // 小屏系统下拉与大屏同步
@@ -2735,7 +3006,8 @@ function init() {
         sysMobile.innerHTML = '';
         sys.querySelectorAll('option').forEach(o => {
             const opt = document.createElement('option');
-            opt.value = o.value; opt.textContent = o.textContent;
+            opt.value = o.value;
+            opt.textContent = o.textContent;
             sysMobile.appendChild(opt);
         });
         sysMobile.value = sys.value;
@@ -2797,7 +3069,8 @@ function init() {
             // 复制大屏选项
             tenant.querySelectorAll('option').forEach(o => {
                 const opt = document.createElement('option');
-                opt.value = o.value; opt.textContent = o.textContent;
+                opt.value = o.value;
+                opt.textContent = o.textContent;
                 mobileSel.appendChild(opt);
             });
             // 初始值
@@ -2828,7 +3101,8 @@ function init() {
     // 小屏退出按钮
     const logoutBtnMobile = $('logoutBtnMobile');
     if (logoutBtnMobile) logoutBtnMobile.addEventListener('click', () => {
-        const btn = $('logoutBtn'); if (btn) btn.click();
+        const btn = $('logoutBtn');
+        if (btn) btn.click();
     });
 
     initTenantSystemSelects();
@@ -2914,13 +3188,14 @@ async function loadApiKeys(page) {
     tbody.innerHTML = '';
     if (typeof page === 'number') state.apiKeysPage = page;
     try {
-        const res = await fetch(`${AUTH_BASE}/api-keys?page=${state.apiKeysPage}&size=${state.pageSize}&sort=createdTime,desc`);
+        const res = await fetch(`${AUTH_BASE}/api-keys?page=${state.apiKeysPage}&size=${state.pageSize}${sortParam('apikey', 'createdTime,desc')}`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         const list = data.content || [];
         if (!list || list.length === 0) {
             empty.classList.remove('hidden');
-            renderPagination($('apiKeyPagination'), 0, 0, 0, () => {});
+            renderPagination($('apiKeyPagination'), 0, 0, 0, () => {
+            });
             return;
         }
         empty.classList.add('hidden');
@@ -2930,12 +3205,12 @@ async function loadApiKeys(page) {
             const totalCalls = k.totalCalls || 0;
             const totalTokens = k.totalTokens || 0;
             const usageText = `${totalCalls} 次 / ${totalTokens.toLocaleString()} token`;
-            const usageTitle = `输入 ${(k.promptTokens||0).toLocaleString()} · 输出 ${(k.completionTokens||0).toLocaleString()} token`;
+            const usageTitle = `输入 ${(k.promptTokens || 0).toLocaleString()} · 输出 ${(k.completionTokens || 0).toLocaleString()} token`;
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '')}</td>
                 <td class="py-2.5 pr-3 font-mono text-xs text-gray-400 hide-mobile">${escapeHtml(k.keyPrefix || '')}</td>
-                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(k.systemType || '-')}</td>
-                <td class="py-2.5 pr-3">${k.enabled ? '<span class="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400">启用</span>' : '<span class="text-xs px-2.5 py-1 rounded-full bg-red-500/10 text-red-400">停用</span>'}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(systemNameOf(k.systemType))}</td>
+                <td class="py-2.5 pr-3">${k.enabled ? '<span class="whitespace-nowrap text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400">启用</span>' : '<span class="whitespace-nowrap text-xs px-2.5 py-1 rounded-full bg-red-500/10 text-red-400">停用</span>'}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400" title="${usageTitle}">${usageText}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400 hide-mobile">${k.createdTime ? formatTime(k.createdTime) : '-'}</td>
                 <td class="py-2.5 text-right whitespace-nowrap">
@@ -2956,7 +3231,10 @@ async function loadKeyUsageSummary(id) {
     if (!el) return;
     try {
         const res = await fetch(`${AUTH_BASE}/api-keys/${id}/usage-summary`);
-        if (!res.ok) { el.textContent = '-'; return; }
+        if (!res.ok) {
+            el.textContent = '-';
+            return;
+        }
         const s = await res.json();
         const total = s.totalTokens || 0;
         el.textContent = `${s.totalCalls || 0} 次 / ${total} token`;
@@ -2973,8 +3251,7 @@ async function toggleApiKey(id, currentEnabled) {
     try {
         const res = await fetch(`${AUTH_BASE}/api-keys/${id}/enabled`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: !currentEnabled })
+            headers: {'Content-Type': 'application/json'}
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         showToast(`已${action}`, 'success');
@@ -3015,7 +3292,9 @@ async function loadApiKeyUsagePage(page) {
         const data = await res.json();
         state.apiKeyUsagePage = data.number || 0;
         const list = data.content || [];
-        if (list.length === 0) { $('apiKeyUsageEmpty').classList.remove('hidden'); }
+        if (list.length === 0) {
+            $('apiKeyUsageEmpty').classList.remove('hidden');
+        }
         list.forEach(u => {
             const tr = document.createElement('tr');
             tr.className = 'border-b border-white/5';
@@ -3058,14 +3337,15 @@ async function createApiKey() {
     }
     if (tenantCode === '0') {
         showToast('API Key 不允许绑定租户 0（超管全局租户），请选择具体租户', 'error');
-        const s = $('apiKeyTenantSearch'); if (s) s.focus();
+        const s = $('apiKeyTenantSearch');
+        if (s) s.focus();
         return;
     }
     try {
         const res = await fetch(`${AUTH_BASE}/api-keys`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, tenantCode, systemType })
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, tenantCode, systemType})
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
@@ -3080,7 +3360,7 @@ async function createApiKey() {
 async function deleteApiKey(id) {
     if (!confirm('确定删除该 API Key？删除后携带该 Key 的请求立即失效。')) return;
     try {
-        const res = await fetch(`${AUTH_BASE}/api-keys/${id}`, { method: 'DELETE' });
+        const res = await fetch(`${AUTH_BASE}/api-keys/${id}`, {method: 'DELETE'});
         if (!res.ok) throw new Error('HTTP ' + res.status);
         showToast('已删除', 'success');
         await loadApiKeys();
@@ -3096,31 +3376,47 @@ function copyNewKey() {
         navigator.clipboard.writeText(val).then(() => showToast('已复制', 'success'));
     } else {
         const ta = document.createElement('textarea');
-        ta.value = val; document.body.appendChild(ta); ta.select();
-        document.execCommand('copy'); document.body.removeChild(ta);
+        ta.value = val;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
         showToast('已复制', 'success');
     }
 }
 
 /* ---------- 认证事件绑定 ---------- */
 function initAuth() {
-    $('loginForm').addEventListener('submit', e => { e.preventDefault(); doLogin(); });
+    $('loginForm').addEventListener('submit', e => {
+        e.preventDefault();
+        doLogin();
+    });
     $('logoutBtn').addEventListener('click', doLogout);
     $('apiKeyCreateBtn').addEventListener('click', createApiKey);
     $('apiKeyCopyBtn').addEventListener('click', copyNewKey);
     $('monitorRefreshBtn').addEventListener('click', loadUsageOverview);
     $('monitorRebuildBtn').addEventListener('click', async () => {
         const btn = $('monitorRebuildBtn');
-        btn.disabled = true; btn.textContent = '同步中...';
+        btn.disabled = true;
+        btn.textContent = '同步中...';
         try {
-            const res = await fetch(`${AUTH_BASE}/usage-summary/rebuild`, { method: 'POST' });
+            const res = await fetch(`${AUTH_BASE}/usage-summary/rebuild`, {method: 'POST'});
             const data = await res.json().catch(() => ({}));
             alert(data.message || (res.ok ? '同步完成' : '同步失败'));
             loadUsageOverview(0);
-        } catch (e) { alert('同步失败: ' + e.message); }
-        finally { btn.disabled = false; btn.textContent = '同步历史数据'; }
+        } catch (e) {
+            alert('同步失败: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '同步历史数据';
+        }
     });
     $('tenantAddBtn').addEventListener('click', addTenant);
     $('tenantSearch').addEventListener('input', () => loadTenants(0));
 }
+
 initAuth();
+
+bindTableSort('tenant', loadTenants);
+bindTableSort('apikey', loadApiKeys);
+bindTableSort('monitor', loadUsageOverview);
