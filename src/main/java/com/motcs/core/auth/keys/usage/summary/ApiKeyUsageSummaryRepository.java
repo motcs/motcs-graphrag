@@ -37,12 +37,6 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
     Mono<Long> incrementUsage(Long apiKeyId, long promptTokens, long completionTokens, long totalTokens, LocalDateTime now);
 
     /**
-     * Key 总数（监控总览分页总数）
-     */
-    @Query("SELECT COUNT(*) FROM api_key")
-    Mono<Long> countAllKeys();
-
-    /**
      * 全局合计（汇总表 SUM，用于监控页顶部卡片）
      */
     @Query("""
@@ -77,4 +71,7 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
              where api_key_id in (select id from api_key) GROUP BY api_key_id
             """)
     Mono<Long> rebuildFromDetail();
+
+    Mono<Void> deleteByApiKeyId(Long apiKeyId);
+
 }

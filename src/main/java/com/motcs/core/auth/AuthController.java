@@ -117,11 +117,6 @@ public class AuthController {
             Map<String, Object> stringMap = Map.of("success", false, "message", "系统类型（systemType）必填");
             return Mono.just(ResponseEntity.badRequest().body(stringMap));
         }
-
-        if ("0".equals(request.getTenantCode())) {
-            return Mono.just(ResponseEntity.badRequest().body(Map.of("success", false,
-                    "message", "API Key 不允许绑定租户 0（超管全局租户），请填写具体租户编码")));
-        }
         String createdBy = ObjectUtils.isEmpty(principal) ? "xxhzj" : String.valueOf(principal);
         return this.apiKeyService.generate(request.getName(), request.getTenantCode(),
                 request.getSystemType(), createdBy).map(ResponseEntity::ok);

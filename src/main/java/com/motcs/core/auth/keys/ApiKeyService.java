@@ -2,6 +2,8 @@ package com.motcs.core.auth.keys;
 
 import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.utils.Utils;
+import com.motcs.core.auth.keys.usage.ApiKeyUsageRepository;
+import com.motcs.core.auth.keys.usage.summary.ApiKeyUsageSummaryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
@@ -42,6 +44,8 @@ public class ApiKeyService {
 
     private final ApiKeyRepository apiKeyRepository;
     private final ReactiveRedisTemplate<String, Object> redisTemplate;
+    private final ApiKeyUsageRepository apiKeyUsageRepository;
+    private final ApiKeyUsageSummaryRepository apiKeyUsageSummaryRepository;
     @Value("${app.auth.api.key.length:40}")
     private Integer apiKeyLen;
 
@@ -80,18 +84,6 @@ public class ApiKeyService {
      * 租户编码与系统类型必填：对话/上传文档时以此为归属，区分租户自定义内容
      */
     public Mono<ApiKeyRecord> generate(String name, String tenantCode, String systemType, String createdBy) {
-        if (ObjectUtils.isEmpty(name)) {
-            return Mono.error(RestServerException.withMsg("备注（name）必填"));
-        }
-        if (ObjectUtils.isEmpty(tenantCode)) {
-            return Mono.error(RestServerException.withMsg("租户编码（tenantCode）必填"));
-        }
-        if (ObjectUtils.isEmpty(systemType)) {
-            return Mono.error(RestServerException.withMsg("系统类型（systemType）必填"));
-        }
-        if ("0".equals(tenantCode.trim())) {
-            return Mono.error(RestServerException.withMsg("API Key 不允许绑定租户 0（超管全局租户），请填写具体租户编码"));
-        }
         String plainKey = PREFIX + randomString();
         ApiKey entity = ApiKey.builder().name(name).keyPrefix(prefixMask(plainKey))
                 .keyHash(sha256(plainKey)).tenantCode(tenantCode.trim())
@@ -109,7 +101,9 @@ public class ApiKeyService {
         return this.apiKeyRepository.findById(id).flatMap(apiKey -> {
             String cacheKey = CACHE_KEY_PREFIX + apiKey.getKeyHash();
             return this.redisTemplate.delete(cacheKey)
-                    .then(this.apiKeyRepository.deleteById(id));
+                    .then(this.apiKeyRepository.deleteById(id))
+                    .then(this.apiKeyUsageRepository.deleteAllByApiKeyId(id))
+                    .then(this.apiKeyUsageSummaryRepository.deleteByApiKeyId(id));
         }).then();
     }
 

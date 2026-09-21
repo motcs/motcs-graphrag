@@ -3335,12 +3335,6 @@ async function createApiKey() {
         showToast('请选择租户和系统类型', 'error');
         return;
     }
-    if (tenantCode === '0') {
-        showToast('API Key 不允许绑定租户 0（超管全局租户），请选择具体租户', 'error');
-        const s = $('apiKeyTenantSearch');
-        if (s) s.focus();
-        return;
-    }
     try {
         const res = await fetch(`${AUTH_BASE}/api-keys`, {
             method: 'POST',
