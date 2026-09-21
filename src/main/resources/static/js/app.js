@@ -610,7 +610,7 @@ async function loadTenants(page) {
     if (typeof page === 'number') state.tenantsPage = page;
     const kw = ($('tenantSearch') ? $('tenantSearch').value : '').trim();
     try {
-        const url = `${API_BASE}/tenants/page?page=${state.tenantsPage}&size=${state.pageSize}&keyword=${encodeURIComponent(kw)}`;
+        const url = `${API_BASE}/tenants/page?page=${state.tenantsPage}&size=${state.pageSize}&keyword=${encodeURIComponent(kw)}&sort=id,createdTime,desc`;
         const res = await fetch(url);
         if (!res.ok) return;
         const data = await res.json();
@@ -725,7 +725,7 @@ async function loadUsageOverview(page) {
     const empty = $('monitorUsageEmpty');
     if (typeof page === 'number') state.monitorPage = page;
     try {
-        const res = await fetch(`${AUTH_BASE}/usage-overview?page=${state.monitorPage}&size=${state.pageSize}`);
+        const res = await fetch(`${AUTH_BASE}/usage-overview?page=${state.monitorPage}&size=${state.pageSize}&sort=totalTokens,desc`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         // 统计卡片
@@ -2092,7 +2092,7 @@ function pollDocumentStatus(docCode) {
         attempts++;
         if (attempts > maxAttempts) { clearInterval(interval); return; }
         try {
-            const res = await fetch(`${API_BASE}/list?tenantCode=${encodeURIComponent(getTenant())}&systemType=${encodeURIComponent(getSystem())}`);
+            const res = await fetch(`${API_BASE}/list?tenantCode=${encodeURIComponent(getTenant())}&systemType=${encodeURIComponent(getSystem())}&sort=createdTime,desc`);
             const docs = await res.json();
             const doc = (docs || []).find(d => d.docCode === docCode);
             if (doc) {
@@ -2190,7 +2190,7 @@ async function loadDocuments(page) {
         if (fs) url += `&systemType=${encodeURIComponent(fs)}`;
         if (kw) url += `&keyword=${encodeURIComponent(kw)}`;
         if (sf && sf !== 'all') url += `&status=${encodeURIComponent(sf)}`;
-        url += `&page=${state.docsPage}&size=${state.pageSize}`;
+        url += `&page=${state.docsPage}&size=${state.pageSize}&sort=createdTime,desc`;
         const res = await fetch(url);
         let data = await res.json();
         loading.classList.add('hidden');
@@ -2914,7 +2914,7 @@ async function loadApiKeys(page) {
     tbody.innerHTML = '';
     if (typeof page === 'number') state.apiKeysPage = page;
     try {
-        const res = await fetch(`${AUTH_BASE}/api-keys?page=${state.apiKeysPage}&size=${state.pageSize}`);
+        const res = await fetch(`${AUTH_BASE}/api-keys?page=${state.apiKeysPage}&size=${state.pageSize}&sort=createdTime,desc`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         const list = data.content || [];

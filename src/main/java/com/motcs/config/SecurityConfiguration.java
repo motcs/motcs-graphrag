@@ -30,6 +30,9 @@ import org.springframework.security.web.server.context.ServerSecurityContextRepo
 import org.springframework.security.web.server.csrf.ServerCsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatcher;
 import org.springframework.util.ObjectUtils;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.reactive.CorsConfigurationSource;
+import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import reactor.core.publisher.Mono;
@@ -106,6 +109,24 @@ public class SecurityConfiguration {
         return new UserDetailsRepositoryReactiveAuthenticationManager(userDetailsService);
     }
 
+    /**
+     * 跨域配置：允许前端任意来源携带凭证（cookie / x-token / X-CSRF-TOKEN）访问。
+     * 使用 allowedOriginPatterns("*") 以兼容 allowCredentials(true)。
+     */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOriginPatterns(List.of("*"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        config.setAllowedHeaders(List.of("*"));
+        config.setExposedHeaders(List.of("X-CSRF-TOKEN", "x-token"));
+        config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
+    }
+
     @Bean
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http, ApiKeyService apiKeyService,
                                                          TokenStore tokenStore) {
@@ -146,6 +167,7 @@ public class SecurityConfiguration {
                 // 认证成功后 SecurityContext 保存到 WebSession（会话免登录）并继续进入 Controller
                 // （以 Authentication 参数接收登录用户）；认证失败返回 JSON 401 且不带
                 // WWW-Authenticate 挑战头（避免浏览器原生 Basic 登录弹窗）
+                .cors(cors -> {})
                 .httpBasic(basic -> basic
                         .authenticationEntryPoint((exchange, _) -> writeJson(exchange,
                                 HttpStatus.UNAUTHORIZED, "用户名或密码错误"))
