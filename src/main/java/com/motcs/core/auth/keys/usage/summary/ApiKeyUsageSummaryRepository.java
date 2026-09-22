@@ -28,13 +28,16 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
     @Modifying
     @Query("""
             INSERT INTO api_key_usage_summary(api_key_id, total_calls, prompt_tokens,
-             completion_tokens, total_tokens, last_used_at, updated_time)
-             VALUES (:apiKeyId, 1, :promptTokens, :completionTokens, :totalTokens, :now, :now)
+             completion_tokens, total_tokens, input_cost, output_cost, last_used_at, updated_time)
+             VALUES (:apiKeyId, 1, :promptTokens, :completionTokens, :totalTokens,
+             :inputCost, :outputCost, :now, :now)
              ON DUPLICATE KEY UPDATE total_calls = total_calls + 1, prompt_tokens = prompt_tokens + :promptTokens,
              completion_tokens = completion_tokens + :completionTokens, total_tokens = total_tokens + :totalTokens,
+             input_cost = input_cost + :inputCost, output_cost = output_cost + :outputCost,
              last_used_at = IF(:now > last_used_at OR last_used_at IS NULL, :now, last_used_at), updated_time = :now
             """)
-    Mono<Long> incrementUsage(Long apiKeyId, long promptTokens, long completionTokens, long totalTokens, LocalDateTime now);
+    Mono<Long> incrementUsage(Long apiKeyId, long promptTokens, long completionTokens, long totalTokens,
+                              double inputCost, double outputCost, LocalDateTime now);
 
     /**
      * 全局合计（汇总表 SUM，用于监控页顶部卡片）
@@ -43,7 +46,9 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
             SELECT COALESCE(SUM(total_calls), 0)       AS total_calls,
                    COALESCE(SUM(prompt_tokens), 0)    AS prompt_tokens,
                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-                   COALESCE(SUM(total_tokens), 0)     AS total_tokens
+                   COALESCE(SUM(total_tokens), 0)     AS total_tokens,
+                   COALESCE(SUM(input_cost), 0)       AS input_cost,
+                   COALESCE(SUM(output_cost), 0)      AS output_cost
              FROM api_key_usage_summary where api_key_id in (select id from api_key)
             """)
     Mono<UsageOverviewRow> globalTotals();
@@ -57,6 +62,7 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
     /**
      * 从明细表全量重建汇总表（初始化/修复用）：
      * 按 api_key_id 聚合明细表后写入汇总表（先清空再写）。
+     * 花费按明细表记录的 model 套用单价计算（与 ModelPricing 一致）。
      */
     @Modifying
     @Query("TRUNCATE TABLE api_key_usage_summary")
@@ -65,9 +71,19 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
     @Modifying
     @Query("""
             INSERT INTO api_key_usage_summary(api_key_id, total_calls, prompt_tokens,
-             completion_tokens, total_tokens, last_used_at, updated_time) SELECT api_key_id, COUNT(*),
+             completion_tokens, total_tokens, input_cost, output_cost, last_used_at, updated_time)
+             SELECT api_key_id, COUNT(*),
              COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0),
-             COALESCE(SUM(total_tokens), 0), MAX(created_time), NOW() FROM api_key_usage
+             COALESCE(SUM(total_tokens), 0),
+             COALESCE(SUM(CASE
+                 WHEN model LIKE '%deepseek%' THEN prompt_tokens / 1000.0 * 0.003
+                 WHEN model LIKE '%glm%' THEN prompt_tokens / 1000.0 * 0.0008
+                 WHEN model LIKE '%ernie%' THEN prompt_tokens / 1000.0 * 0.0008 ELSE 0 END), 0),
+             COALESCE(SUM(CASE
+                 WHEN model LIKE '%deepseek%' THEN completion_tokens / 1000.0 * 0.009
+                 WHEN model LIKE '%glm%' THEN completion_tokens / 1000.0 * 0.0028
+                 WHEN model LIKE '%ernie%' THEN completion_tokens / 1000.0 * 0.0032 ELSE 0 END), 0),
+             MAX(created_time), NOW() FROM api_key_usage
              where api_key_id in (select id from api_key) GROUP BY api_key_id
             """)
     Mono<Long> rebuildFromDetail();

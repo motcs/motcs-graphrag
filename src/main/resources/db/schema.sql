@@ -61,6 +61,15 @@ ALTER TABLE api_key
     ADD COLUMN system_type VARCHAR(64) DEFAULT NULL COMMENT '绑定的系统类型（对话/上传文档归属）';
 ALTER TABLE api_key
     ADD COLUMN is_delete TINYINT(1) DEFAULT 0 COMMENT '是否已删除（软删除）：1 已删除，Key 失效且管理列表不可见';
+ALTER TABLE api_key
+    ADD COLUMN quota DECIMAL(12,6) DEFAULT -1 COMMENT '费用额度(元)：-1无限制 0禁止 >0用尽拒绝';
+ALTER TABLE api_key
+    ADD COLUMN used_quota DECIMAL(12,6) DEFAULT 0 COMMENT '已用额度(元)';
+-- 老库兼容：用量汇总表补花费列（重复执行由 continue-on-error 吞掉）
+ALTER TABLE api_key_usage_summary
+    ADD COLUMN input_cost DECIMAL(12, 6) DEFAULT 0 COMMENT '累计输入花费（元）';
+ALTER TABLE api_key_usage_summary
+    ADD COLUMN output_cost DECIMAL(12, 6) DEFAULT 0 COMMENT '累计输出花费（元）';
 
 
 -- API Key 表（OpenAI 风格：只存 SHA-256 哈希与前缀掩码，明文仅创建时返回一次）
@@ -74,6 +83,8 @@ CREATE TABLE IF NOT EXISTS api_key
     system_type  VARCHAR(64) DEFAULT NULL COMMENT '绑定的系统类型（对话/上传文档归属）',
     enabled      TINYINT(1)  DEFAULT 1 COMMENT '是否启用 1启用 0停用',
     is_delete    TINYINT(1)  DEFAULT 0 COMMENT '是否已删除（软删除）：1 已删除',
+    quota        DECIMAL(12,6) DEFAULT -1 COMMENT '费用额度(元)：-1无限制 0禁止 >0用尽拒绝',
+    used_quota   DECIMAL(12,6) DEFAULT 0 COMMENT '已用额度(元)',
     created_by   VARCHAR(64) DEFAULT 'admin' COMMENT '创建人',
     created_time DATETIME    DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     UNIQUE KEY uk_key_hash (key_hash)
@@ -118,12 +129,14 @@ CREATE TABLE IF NOT EXISTS api_key_usage_summary
 (
     id                BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
     api_key_id        BIGINT   NOT NULL COMMENT 'API Key 主键ID（唯一）',
-    total_calls       BIGINT   DEFAULT 0 COMMENT '累计调用次数',
-    prompt_tokens     BIGINT   DEFAULT 0 COMMENT '累计输入 token',
-    completion_tokens BIGINT   DEFAULT 0 COMMENT '累计输出 token',
-    total_tokens      BIGINT   DEFAULT 0 COMMENT '累计总 token',
+    total_calls       BIGINT         DEFAULT 0 COMMENT '累计调用次数',
+    prompt_tokens     BIGINT         DEFAULT 0 COMMENT '累计输入 token',
+    completion_tokens BIGINT         DEFAULT 0 COMMENT '累计输出 token',
+    total_tokens      BIGINT         DEFAULT 0 COMMENT '累计总 token',
+    input_cost        DECIMAL(12, 6) DEFAULT 0 COMMENT '累计输入花费（元）',
+    output_cost       DECIMAL(12, 6) DEFAULT 0 COMMENT '累计输出花费（元）',
     last_used_at      DATETIME NULL COMMENT '最近调用时间',
-    updated_time      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    updated_time      DATETIME       DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_summary_api_key (api_key_id),
     KEY idx_summary_total_tokens (total_tokens)
 ) ENGINE = InnoDB
@@ -189,3 +202,19 @@ ALTER TABLE document_info
 
 ALTER TABLE api_key
     ADD COLUMN is_delete TINYINT(1) DEFAULT 0 COMMENT '是否已删除（软删除）：1 已删除' AFTER created_by;
+
+-- ============================================================
+-- API Key 额度变更流水（SET 设置额度/ADD 追加额度，每次变更单独记录）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS api_key_quota_log
+(
+    id             BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    api_key_id     BIGINT NOT NULL COMMENT 'API Key 主键ID',
+    type           VARCHAR(16) NOT NULL COMMENT 'SET设置/ADD追加',
+    amount         DECIMAL(12,6) DEFAULT 0 COMMENT '本次变更金额',
+    balance_after  DECIMAL(12,6) DEFAULT 0 COMMENT '变更后总额度',
+    used_after     DECIMAL(12,6) DEFAULT 0 COMMENT '变更后已用',
+    remark         VARCHAR(255) DEFAULT NULL COMMENT '备注',
+    created_time   DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '变更时间',
+    KEY idx_quota_log_key (api_key_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='API Key 额度变更流水';

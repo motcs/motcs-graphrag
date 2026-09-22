@@ -62,6 +62,14 @@ public class ApiKey implements Serializable {
     @Column("is_delete")
     private Boolean isDelete = false;
 
+    @Schema(description = "费用额度（元）：-1 无限制；0 禁止请求；>0 用尽后拒绝", example = "-1")
+    @Column("quota")
+    private Double quota = -1.0;
+
+    @Schema(description = "已用额度（元）", example = "0")
+    @Column("used_quota")
+    private Double usedQuota = 0.0;
+
     @Schema(description = "创建人", example = "admin")
     @Column("created_by")
     private String createdBy;

@@ -1,8 +1,9 @@
 package com.motcs.core.auth.keys;
 
-import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.utils.Utils;
 import com.motcs.core.auth.keys.usage.ApiKeyUsageRepository;
+import com.motcs.core.auth.keys.usage.quota.ApiKeyQuotaLog;
+import com.motcs.core.auth.keys.usage.quota.ApiKeyQuotaLogRepository;
 import com.motcs.core.auth.keys.usage.summary.ApiKeyUsageSummaryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,6 +47,7 @@ public class ApiKeyService {
     private final ReactiveRedisTemplate<String, Object> redisTemplate;
     private final ApiKeyUsageRepository apiKeyUsageRepository;
     private final ApiKeyUsageSummaryRepository apiKeyUsageSummaryRepository;
+    private final ApiKeyQuotaLogRepository apiKeyQuotaLogRepository;
     @Value("${app.auth.api.key.length:40}")
     private Integer apiKeyLen;
 
@@ -80,18 +82,98 @@ public class ApiKeyService {
     }
 
     /**
+     * 设置新额度（SET）：历史已用清零重算；quota 不能小于 -1，负数只允许 -1
+     */
+    public Mono<ApiKey> updateQuota(Long id, Double quota, String remark) {
+        if (quota == null || quota < -1) {
+            return Mono.error(new IllegalArgumentException("额度不能小于 -1，负数只能是 -1（无限制）"));
+        }
+        return this.apiKeyRepository.findById(id).flatMap(existing -> {
+            existing.setQuota(quota);
+            existing.setUsedQuota(0.0);
+            String cacheKey = CACHE_KEY_PREFIX + existing.getKeyHash();
+            ApiKeyQuotaLog log = ApiKeyQuotaLog.builder()
+                    .apiKeyId(id).type("SET").amount(quota).balanceAfter(quota).usedAfter(0.0)
+                    .remark(remark).createdTime(LocalDateTime.now()).build();
+            return this.redisTemplate.delete(cacheKey)
+                    .then(this.apiKeyRepository.save(existing))
+                    .flatMap(saved -> this.apiKeyQuotaLogRepository.save(log).thenReturn(saved));
+        });
+    }
+
+    /**
+     * 追加额度（ADD）：在现有总额度上累加 amount，已用不变；amount 必须 > 0
+     */
+    public Mono<ApiKey> appendQuota(Long id, Double amount, String remark) {
+        if (amount == null || amount <= 0) {
+            return Mono.error(new IllegalArgumentException("追加额度必须大于 0"));
+        }
+        return this.apiKeyRepository.findById(id).flatMap(existing -> {
+            double oldQuota = existing.getQuota() == null ? -1.0 : existing.getQuota();
+            // 无限制(-1) 不能追加，先设置一个实际额度
+            if (oldQuota < 0) {
+                return Mono.error(new IllegalArgumentException("当前为无限制额度，请先设置实际额度再追加"));
+            }
+            double balance = oldQuota + amount;
+            double used = existing.getUsedQuota() == null ? 0 : existing.getUsedQuota();
+            existing.setQuota(balance);
+            String cacheKey = CACHE_KEY_PREFIX + existing.getKeyHash();
+            ApiKeyQuotaLog log = ApiKeyQuotaLog.builder()
+                    .apiKeyId(id).type("ADD").amount(amount).balanceAfter(balance).usedAfter(used)
+                    .remark(remark).createdTime(LocalDateTime.now()).build();
+            return this.redisTemplate.delete(cacheKey)
+                    .then(this.apiKeyRepository.save(existing))
+                    .flatMap(saved -> this.apiKeyQuotaLogRepository.save(log).thenReturn(saved));
+        });
+    }
+
+    /**
+     * 判断 Key 是否还有费用额度：quota=-1 无限制；quota=0 或已用>=额度 拒绝请求
+     */
+    public boolean hasQuota(ApiKey apiKey) {
+        if (apiKey == null) {
+            return false;
+        }
+        double quota = apiKey.getQuota() == null ? -1.0 : apiKey.getQuota();
+        if (quota < 0) {
+            return true;
+        }
+        double used = apiKey.getUsedQuota() == null ? 0 : apiKey.getUsedQuota();
+        return used < quota;
+    }
+
+    /**
+     * 本次对话结束后累加已用额度
+     */
+    public Mono<Void> consumeQuota(Long apiKeyId, double cost) {
+        if (apiKeyId == null || cost <= 0) {
+            return Mono.empty();
+        }
+        return this.apiKeyRepository.addUsedQuota(apiKeyId, cost).then();
+    }
+
+    /**
      * 生成一个新 Key，返回明文（仅此一次）
      * 租户编码与系统类型必填：对话/上传文档时以此为归属，区分租户自定义内容
      */
-    public Mono<ApiKeyRecord> generate(String name, String tenantCode, String systemType, String createdBy) {
+    public Mono<ApiKeyRecord> generate(String name, String tenantCode, String systemType, String createdBy, Double quota) {
         String plainKey = PREFIX + randomString();
         ApiKey entity = ApiKey.builder().name(name).keyPrefix(prefixMask(plainKey))
                 .keyHash(sha256(plainKey)).tenantCode(tenantCode.trim())
                 .systemType(systemType.trim()).enabled(true)
+                .quota(quota == null ? -1.0 : quota).usedQuota(0.0)
                 .createdBy(ObjectUtils.isEmpty(createdBy) ? "xxhzj" : createdBy)
                 .createdTime(LocalDateTime.now()).build();
-        return this.apiKeyRepository.save(entity)
-                .map(saved -> ApiKeyRecord.of(saved, plainKey));
+        return this.apiKeyRepository.save(entity).flatMap(saved -> {
+            double q = saved.getQuota() == null ? -1.0 : saved.getQuota();
+            if (q > 0) {
+                ApiKeyQuotaLog log = ApiKeyQuotaLog.builder()
+                        .apiKeyId(saved.getId()).type("SET").amount(q).balanceAfter(q).usedAfter(0.0)
+                        .remark("初始化额度").createdTime(LocalDateTime.now()).build();
+                return this.apiKeyQuotaLogRepository.save(log).thenReturn(saved);
+            }
+            return Mono.just(saved);
+        }).map(saved -> ApiKeyRecord.of(saved, plainKey));
     }
 
     /**

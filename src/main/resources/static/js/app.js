@@ -860,6 +860,8 @@ async function loadUsageOverview(page) {
         // 统计卡片
         $('monTotalKeys').textContent = data.totalKeys ?? 0;
         $('monKeysBreakdown').textContent = `在用 ${data.activeKeys ?? 0} · 已删除 ${data.deletedKeys ?? 0}`;
+        $('monTotalCost').textContent = '¥' + (data.totalCost ?? 0).toFixed(4);
+        $('monCostBreakdown').textContent = '输入 ¥' + (data.inputCost ?? 0).toFixed(4) + ' · 输出 ¥' + (data.outputCost ?? 0).toFixed(4);
         $('monTotalCalls').textContent = data.totalCalls ?? 0;
         $('monPrompt').textContent = (data.promptTokens ?? 0).toLocaleString();
         $('monCompletion').textContent = (data.completionTokens ?? 0).toLocaleString();
@@ -871,11 +873,19 @@ async function loadUsageOverview(page) {
         keys.forEach(k => {
             const tr = document.createElement('tr');
             tr.className = 'border-b border-white/5';
+
             const enabledBadge = k.isDelete
                 ? '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-red-500/15 text-red-400">已删除</span>'
                 : (k.enabled
                 ? '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-emerald-500/15 text-emerald-400">启用</span>'
                 : '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>');
+            const quota = (k.quota === null || k.quota === undefined) ? -1 : k.quota;
+            const usedQ = (k.usedQuota || 0);
+            const quotaText = quota < 0 ? '无限' : (quota === 0 ? '禁止' : '¥' + usedQ.toFixed(4) + ' / ¥' + quota.toFixed(2));
+            tr.dataset.keyId = k.id;
+            tr.dataset.quota = quota;
+            tr.dataset.used = usedQ;
+            tr.dataset.keyId = k.id; tr.dataset.quota = quota; tr.dataset.used = usedQ;
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 font-mono text-xs text-gray-300 hide-mobile">${escapeHtml(k.keyPrefix || k.prefix || 'sk-…')}…</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-300 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '-')}</td>
@@ -885,6 +895,9 @@ async function loadUsageOverview(page) {
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.promptTokens ?? 0).toLocaleString()}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.completionTokens ?? 0).toLocaleString()}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-300 font-medium">${(k.totalTokens ?? 0).toLocaleString()}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">¥${(k.inputCost ?? 0).toFixed(4)}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">¥${(k.outputCost ?? 0).toFixed(4)}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-amber-400 font-medium">¥${((k.inputCost ?? 0) + (k.outputCost ?? 0)).toFixed(4)}</td>
                 <td class="py-2.5 pr-3 pl-6 text-xs text-gray-400 hide-mobile">${k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未使用'}</td>
 `;
             tbody.appendChild(tr);
@@ -3205,16 +3218,21 @@ async function loadApiKeys(page) {
         list.forEach(k => {
             const tr = document.createElement('tr');
             tr.className = 'border-b border-white/5';
+
             const totalCalls = k.totalCalls || 0;
             const totalTokens = k.totalTokens || 0;
             const usageText = `${totalCalls} 次 / ${totalTokens.toLocaleString()} token`;
             const usageTitle = `输入 ${(k.promptTokens || 0).toLocaleString()} · 输出 ${(k.completionTokens || 0).toLocaleString()} token`;
+            const quota = (k.quota === null || k.quota === undefined) ? -1 : k.quota;
+            const usedQ = (k.usedQuota || 0);
+            const quotaText = quota < 0 ? '无限' : (quota === 0 ? '禁止' : '¥' + usedQ.toFixed(4) + ' / ¥' + quota.toFixed(2));
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '')}</td>
                 <td class="py-2.5 pr-3 font-mono text-xs text-gray-400 hide-mobile">${escapeHtml(k.keyPrefix || '')}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(systemNameOf(k.systemType))}</td>
                 <td class="py-2.5 pr-3">${k.enabled ? '<span class="whitespace-nowrap text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400">启用</span>' : '<span class="whitespace-nowrap text-xs px-2.5 py-1 rounded-full bg-red-500/10 text-red-400">停用</span>'}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400" title="${usageTitle}">${usageText}</td>
+                <td class="py-2.5 pr-3 text-xs text-primary-400 cursor-pointer hover:underline" title="点击管理额度" onclick="openQuotaModal(${k.id})">${quotaText}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400 hide-mobile">${k.createdTime ? formatTime(k.createdTime) : '-'}</td>
                 <td class="py-2.5 text-right whitespace-nowrap">
                     <button onclick="toggleApiKey(${k.id}, ${k.enabled})" class="text-xs px-2 py-1 rounded-lg ${k.enabled ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'} transition mr-1">${k.enabled ? '停用' : '启用'}</button>
@@ -3301,6 +3319,10 @@ async function loadApiKeyUsagePage(page) {
         list.forEach(u => {
             const tr = document.createElement('tr');
             tr.className = 'border-b border-white/5';
+
+            const quota = (k.quota === null || k.quota === undefined) ? -1 : k.quota;
+            const usedQ = (k.usedQuota || 0);
+            const quotaText = quota < 0 ? '无限' : (quota === 0 ? '禁止' : '¥' + usedQ.toFixed(4) + ' / ¥' + quota.toFixed(2));
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${formatTime(u.createdTime)}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(u.userId || '-')}</td>
@@ -3338,11 +3360,13 @@ async function createApiKey() {
         showToast('请选择租户和系统类型', 'error');
         return;
     }
+    const quotaRaw = parseFloat(($('apiKeyQuota').value || '-1').trim());
+    const quota = isNaN(quotaRaw) ? -1 : quotaRaw;
     try {
         const res = await fetch(`${AUTH_BASE}/api-keys`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name, tenantCode, systemType})
+            body: JSON.stringify({name, tenantCode, systemType, quota})
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
@@ -3417,3 +3441,84 @@ initAuth();
 bindTableSort('tenant', loadTenants);
 bindTableSort('apikey', loadApiKeys);
 bindTableSort('monitor', loadUsageOverview);
+
+let quotaModalKeyId = null;
+
+async function openQuotaModal(id) {
+    quotaModalKeyId = id;
+    $('quotaModal').classList.remove('hidden');
+    await refreshQuotaModal();
+}
+function closeQuotaModal() {
+    $('quotaModal').classList.add('hidden');
+    quotaModalKeyId = null;
+}
+async function refreshQuotaModal() {
+    if (!quotaModalKeyId) return;
+    try {
+        const res = await fetch(`${AUTH_BASE}/api-keys/${quotaModalKeyId}/quota-logs`);
+        const logs = await res.json();
+        const quotaLogs = $('quotaLogList');
+        quotaLogs.innerHTML = '';
+        $('quotaLogEmpty').classList.toggle('hidden', logs.length > 0);
+        logs.forEach(l => {
+            const tr = document.createElement('tr');
+            tr.className = 'border-b border-white/5';
+
+            const isSet = l.type === 'SET';
+            tr.innerHTML = `
+                <td class="py-1.5 pr-3 text-xs text-gray-400">${formatTime(l.createdTime)}</td>
+                <td class="py-1.5 pr-3 text-xs">${isSet ? '<span class="px-2 py-0.5 rounded bg-primary-500/15 text-primary-300">设置</span>' : '<span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400">追加</span>'}</td>
+                <td class="py-1.5 pr-3 text-xs text-right text-gray-300">¥${(l.amount || 0).toFixed(4)}</td>
+                <td class="py-1.5 pr-3 text-xs text-gray-400 hide-mobile">${escapeHtml(l.remark || '-')}</td>`;
+            quotaLogs.appendChild(tr);
+        });
+        let q = -1, used = 0;
+        const row = document.querySelector(`#apiKeyList tr[data-key-id="${quotaModalKeyId}"]`);
+        if (row && row.dataset.quota !== undefined) {
+            q = parseFloat(row.dataset.quota);
+            used = parseFloat(row.dataset.used || '0');
+        } else if (logs.length > 0) {
+            q = logs[0].balanceAfter == null ? -1 : logs[0].balanceAfter;
+            used = logs[0].usedAfter || 0;
+        }
+        $('quotaCurrent').textContent = q < 0 ? '无限制' : ('¥' + (q || 0).toFixed(2));
+        $('quotaUsed').textContent = '¥' + used.toFixed(4);
+        $('quotaLeft').textContent = q < 0 ? '∞' : ('¥' + Math.max(0, q - used).toFixed(4));
+        $('quotaModalSub').textContent = '当前额度与变更记录';
+    } catch (e) {
+        showToast('加载额度明细失败', 'error');
+    }
+}
+async function saveQuota() {
+    if (!quotaModalKeyId) return;
+    const v = parseFloat($('quotaInput').value);
+    if (isNaN(v) || v < -1) { showToast('额度不能小于 -1', 'error'); return; }
+    try {
+        const res = await fetch(`${AUTH_BASE}/api-keys/${quotaModalKeyId}/quota`, {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({quota: v, remark: '手动设置额度'})
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        showToast('已设置新额度，历史用量清零重算', 'success');
+        $('quotaInput').value = '';
+        await loadApiKeys();
+        await refreshQuotaModal();
+    } catch (e) { showToast('设置额度失败', 'error'); }
+}
+async function addQuota() {
+    if (!quotaModalKeyId) return;
+    const v = parseFloat($('quotaAddInput').value);
+    if (isNaN(v) || v <= 0) { showToast('追加金额必须大于 0', 'error'); return; }
+    try {
+        const res = await fetch(`${AUTH_BASE}/api-keys/${quotaModalKeyId}/quota/add`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({amount: v, remark: '追加额度'})
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        showToast('额度已追加', 'success');
+        $('quotaAddInput').value = '';
+        await loadApiKeys();
+        await refreshQuotaModal();
+    } catch (e) { showToast('追加额度失败', 'error'); }
+}

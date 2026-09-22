@@ -6,6 +6,8 @@ import com.motcs.core.auth.keys.ApiKeyService;
 import com.motcs.core.auth.keys.usage.ApiKeyUsage;
 import com.motcs.core.auth.keys.usage.ApiKeyUsageRequest;
 import com.motcs.core.auth.keys.usage.ApiKeyUsageService;
+import com.motcs.core.auth.keys.usage.quota.ApiKeyQuotaLog;
+import com.motcs.core.auth.keys.usage.quota.ApiKeyQuotaLogRepository;
 import com.motcs.core.auth.keys.usage.summary.UsageOverviewRow;
 import com.motcs.core.auth.token.AuthenticationToken;
 import com.motcs.core.auth.token.TokenStore;
@@ -27,6 +29,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -43,6 +46,7 @@ public class AuthController {
     private final TokenStore tokenStore;
     private final ApiKeyService apiKeyService;
     private final ApiKeyUsageService apiKeyUsageService;
+    private final ApiKeyQuotaLogRepository apiKeyQuotaLogRepository;
 
     /**
      * 超管登录（HTTP Basic Auth）：POST /auth/v1/login 携带
@@ -119,7 +123,7 @@ public class AuthController {
         }
         String createdBy = ObjectUtils.isEmpty(principal) ? "xxhzj" : String.valueOf(principal);
         return this.apiKeyService.generate(request.getName(), request.getTenantCode(),
-                request.getSystemType(), createdBy).map(ResponseEntity::ok);
+                request.getSystemType(), createdBy, request.getQuota()).map(ResponseEntity::ok);
     }
 
     @DeleteMapping("/api-keys/{id}")
@@ -148,6 +152,50 @@ public class AuthController {
         }));
     }
 
+    /**
+     * 设置新额度（历史已用清零重算；quota 不能小于 -1，负数只允许 -1）
+     * Body: {"quota": 100, "remark": "季度预算"}
+     */
+    @PutMapping("/api-keys/{id}/quota")
+    @Operation(summary = "设置 API Key 费用额度（已用清零重算）")
+    public Mono<ResponseEntity<Map<String, Object>>> setQuota(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        Double quota = body.get("quota") == null ? null : Double.valueOf(String.valueOf(body.get("quota")));
+        String remark = body.get("remark") == null ? null : String.valueOf(body.get("remark"));
+        return this.apiKeyService.updateQuota(id, quota, remark).map(k -> {
+            Map<String, Object> m = new HashMap<>();
+            m.put("success", true);
+            m.put("quota", k.getQuota());
+            m.put("usedQuota", k.getUsedQuota());
+            return ResponseEntity.ok(m);
+        }).onErrorResume(e -> Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()))));
+    }
+
+    /**
+     * 追加额度（在现有总额度上累加，已用不变；amount 必须 > 0）
+     * Body: {"amount": 50, "remark": "追加预算"}
+     */
+    @PostMapping("/api-keys/{id}/quota/add")
+    @Operation(summary = "追加 API Key 费用额度")
+    public Mono<ResponseEntity<Map<String, Object>>> addQuota(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        Double amount = body.get("amount") == null ? null : Double.valueOf(String.valueOf(body.get("amount")));
+        String remark = body.get("remark") == null ? null : String.valueOf(body.get("remark"));
+        return this.apiKeyService.appendQuota(id, amount, remark).map(k -> {
+            Map<String, Object> m = new HashMap<>();
+            m.put("success", true);
+            m.put("quota", k.getQuota());
+            m.put("usedQuota", k.getUsedQuota());
+            return ResponseEntity.ok(m);
+        }).onErrorResume(e -> Mono.just(ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()))));
+    }
+
+    /**
+     * 额度变更明细流水
+     */
+    @GetMapping("/api-keys/{id}/quota-logs")
+    @Operation(summary = "API Key 额度变更明细")
+    public Mono<ResponseEntity<List<ApiKeyQuotaLog>>> quotaLogs(@PathVariable Long id) {
+        return this.apiKeyQuotaLogRepository.findByApiKeyId(id).collectList().map(ResponseEntity::ok);
+    }
     /**
      * Key 使用监控汇总：调用次数 + 总 token 消耗（prompt/completion/total）
      */

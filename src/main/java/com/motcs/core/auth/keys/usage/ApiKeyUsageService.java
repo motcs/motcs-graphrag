@@ -4,6 +4,7 @@ import com.motcs.commons.ContextUtil;
 import com.motcs.commons.base.DatabaseService;
 import com.motcs.commons.utils.ParameterSql;
 import com.motcs.commons.utils.Utils;
+import com.motcs.core.auth.keys.usage.quota.ModelPricing;
 import com.motcs.core.auth.keys.usage.summary.ApiKeyUsageSummaryRepository;
 import com.motcs.core.auth.keys.usage.summary.UsageOverviewRow;
 import lombok.RequiredArgsConstructor;
@@ -79,12 +80,15 @@ public class ApiKeyUsageService extends DatabaseService {
         int p = Utils.nullToZero(promptTokens);
         int c = Utils.nullToZero(completionTokens);
         int t = Utils.nullToZero(totalTokens);
+        ModelPricing.Price price = ModelPricing.of(model);
+        double inputCost = p / 1000.0 * price.inPerK();
+        double outputCost = c / 1000.0 * price.outPerK();
         ApiKeyUsage usage = ApiKeyUsage.builder().apiKeyId(apiKeyId).userId(userId)
                 .sessionId(sessionId).model(model).promptTokens(p)
                 .completionTokens(c).totalTokens(t).createdTime(LocalDateTime.now()).build();
         // 明细落库 + 汇总累加，两者并行；任一项失败不影响另一个
         Mono<Void> detail = this.apiKeyUsageRepository.save(usage).then();
-        Mono<Void> summary = this.summaryRepository.incrementUsage(apiKeyId, p, c, t, LocalDateTime.now()).then();
+        Mono<Void> summary = this.summaryRepository.incrementUsage(apiKeyId, p, c, t, inputCost, outputCost, LocalDateTime.now()).then();
         return Mono.when(detail, summary).doOnSuccess(_ ->
                 log.debug("API Key 用量已记录并累加汇总: apiKeyId={}, userId={}, totalTokens={}", apiKeyId, userId, t));
     }
@@ -131,7 +135,7 @@ public class ApiKeyUsageService extends DatabaseService {
                 select * from (SELECT k.id AS id, k.name AS name, k.key_prefix AS key_prefix, k.tenant_code AS tenant_code,
                  k.system_type AS system_type, k.enabled AS enabled, COALESCE(s.total_calls, 0) AS total_calls,
                  COALESCE(s.prompt_tokens, 0) AS prompt_tokens, COALESCE(s.completion_tokens, 0) AS completion_tokens,
-                 COALESCE(s.total_tokens, 0) AS total_tokens, s.last_used_at AS last_used_at, k.created_time AS created_time
+                 COALESCE(s.total_tokens, 0) AS total_tokens, COALESCE(s.input_cost, 0) AS input_cost, COALESCE(s.output_cost, 0) AS output_cost, k.quota AS quota, k.used_quota AS used_quota, s.last_used_at AS last_used_at, k.created_time AS created_time
                  FROM api_key k LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id WHERE k.is_delete = 0 order by COALESCE(s.total_tokens, 0) desc, id) t
                 """ + ContextUtil.applyPage(pageable);
         String countSql = "select count(*) from (SELECT k.* FROM api_key k LEFT JOIN api_key_usage_summary s ON s.api_key_id = k.id WHERE k.is_delete = 0) t";
@@ -165,12 +169,13 @@ public class ApiKeyUsageService extends DatabaseService {
         Mono<UsageOverviewRow> totalsMono = this.summaryRepository.globalTotals()
                 .defaultIfEmpty(new UsageOverviewRow(null, null, null, null,
                         null, null, null, 0L, 0L, 0L, 0L,
-                        null, null));
+                        null, null, null, null, null, null));
         String sql = """
                 select * from (SELECT k.id AS id, k.name AS name, k.key_prefix AS key_prefix,
                  k.tenant_code AS tenant_code, k.system_type AS system_type, k.enabled AS enabled, k.is_delete AS is_delete,
                  COALESCE(s.total_calls, 0) AS total_calls, COALESCE(s.prompt_tokens, 0) AS prompt_tokens,
                  COALESCE(s.completion_tokens, 0) AS completion_tokens, COALESCE(s.total_tokens, 0) AS total_tokens,
+                 COALESCE(s.input_cost, 0) AS input_cost, COALESCE(s.output_cost, 0) AS output_cost,
                  s.last_used_at AS last_used_at FROM api_key k LEFT JOIN api_key_usage_summary s ON
                  s.api_key_id = k.id order by COALESCE(s.total_tokens, 0) desc, id) t
                 """ + ContextUtil.applyPage(pageable);
@@ -203,6 +208,9 @@ public class ApiKeyUsageService extends DatabaseService {
                 result.put("promptTokens", g.promptTokens() == null ? 0L : g.promptTokens());
                 result.put("completionTokens", g.completionTokens() == null ? 0L : g.completionTokens());
                 result.put("totalTokens", g.totalTokens() == null ? 0L : g.totalTokens());
+                result.put("inputCost", g.inputCost() == null ? 0d : g.inputCost());
+                result.put("outputCost", g.outputCost() == null ? 0d : g.outputCost());
+                result.put("totalCost", (g.inputCost() == null ? 0d : g.inputCost()) + (g.outputCost() == null ? 0d : g.outputCost()));
                 // 当前页数据
                 result.put("content", list);
                 // 分页信息

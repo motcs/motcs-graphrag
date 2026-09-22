@@ -4,6 +4,7 @@ import com.motcs.commons.ContextUtil;
 import com.motcs.commons.utils.Utils;
 import com.motcs.core.auth.keys.ApiKeyService;
 import com.motcs.core.auth.keys.usage.ApiKeyUsageService;
+import com.motcs.core.auth.keys.usage.quota.ModelPricing;
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
 import lombok.RequiredArgsConstructor;
@@ -72,6 +73,9 @@ public class ApiChatController {
                 UUID.randomUUID().toString() : request.getSessionId();
 
         return this.apiKeyService.resolveApiKey(exchange).flatMapMany(apiKey -> {
+            if (!this.apiKeyService.hasQuota(apiKey)) {
+                return Flux.just(Utils.jsonEvent("error", Map.of("message", "非常抱歉，您的额度已用尽，不能正常对话！")));
+            }
             // 租户/系统类型由 API Key 绑定值赋值（生成时已禁止租户 0）
             request.setSessionId(sessionId);
             request.setApiKeyId(apiKey.getId());
@@ -118,6 +122,12 @@ public class ApiChatController {
                                     this.apiKeyUsageService.record(apiKey.getId(), request.getUserId(), sessionId,
                                             request.getModel(), usage.getPromptTokens(), usage.getCompletionTokens(),
                                             usage.getTotalTokens()).subscribe();
+                                    ModelPricing.Price price = ModelPricing.of(request.getModel());
+                                    usage.getPromptTokens();
+                                    usage.getCompletionTokens();
+                                    double cost = usage.getPromptTokens() / 1000.0 * price.inPerK()
+                                            + usage.getCompletionTokens() / 1000.0 * price.outPerK();
+                                    this.apiKeyService.consumeQuota(apiKey.getId(), cost).subscribe();
                                 }
                             }
                         });

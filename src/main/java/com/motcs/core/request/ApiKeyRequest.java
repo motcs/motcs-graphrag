@@ -30,4 +30,7 @@ public class ApiKeyRequest implements Serializable {
     @Schema(description = "绑定的系统类型（必填）：对话/上传文档归属", example = "other")
     private String systemType;
 
+    @Schema(description = "费用额度（元）：-1 无限制（默认）；0 禁止请求；>0 用尽后拒绝", example = "-1")
+    private Double quota;
+
 }

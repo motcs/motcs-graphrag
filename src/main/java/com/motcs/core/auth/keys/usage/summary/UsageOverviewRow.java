@@ -23,6 +23,10 @@ public record UsageOverviewRow(
         @Schema(description = "累计输入 token") Long promptTokens,
         @Schema(description = "累计输出 token") Long completionTokens,
         @Schema(description = "累计总 token") Long totalTokens,
+        @Schema(description = "累计输入花费（元）") Double inputCost,
+        @Schema(description = "累计输出花费（元）") Double outputCost,
         @Schema(description = "最近调用时间") LocalDateTime lastUsedAt,
+        @Schema(description = "费用额度（元，-1 无限制）") Double quota,
+        @Schema(description = "已用额度（元）") Double usedQuota,
         @Schema(description = "Key 创建时间（apikey 管理列表用，监控总览不使用）") LocalDateTime createdTime) {
 }
