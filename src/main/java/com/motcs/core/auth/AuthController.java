@@ -8,6 +8,7 @@ import com.motcs.core.auth.keys.usage.ApiKeyUsageRequest;
 import com.motcs.core.auth.keys.usage.ApiKeyUsageService;
 import com.motcs.core.auth.keys.usage.quota.ApiKeyQuotaLog;
 import com.motcs.core.auth.keys.usage.quota.ApiKeyQuotaLogRepository;
+import com.motcs.core.auth.keys.ApiKeyRepository;
 import com.motcs.core.auth.keys.usage.summary.UsageOverviewRow;
 import com.motcs.core.auth.token.AuthenticationToken;
 import com.motcs.core.auth.token.TokenStore;
@@ -47,6 +48,7 @@ public class AuthController {
     private final ApiKeyService apiKeyService;
     private final ApiKeyUsageService apiKeyUsageService;
     private final ApiKeyQuotaLogRepository apiKeyQuotaLogRepository;
+    private final ApiKeyRepository apiKeyRepository;
 
     /**
      * 超管登录（HTTP Basic Auth）：POST /auth/v1/login 携带
@@ -193,8 +195,17 @@ public class AuthController {
      */
     @GetMapping("/api-keys/{id}/quota-logs")
     @Operation(summary = "API Key 额度变更明细")
-    public Mono<ResponseEntity<List<ApiKeyQuotaLog>>> quotaLogs(@PathVariable Long id) {
-        return this.apiKeyQuotaLogRepository.findByApiKeyId(id).collectList().map(ResponseEntity::ok);
+    public Mono<ResponseEntity<Map<String, Object>>> quotaLogs(@PathVariable Long id) {
+        return this.apiKeyRepository.findById(id)
+                .flatMap(key -> this.apiKeyQuotaLogRepository.findByApiKeyId(id).collectList()
+                        .map(logs -> {
+                            Map<String, Object> body = new HashMap<>();
+                            body.put("quota", key.getQuota() == null ? -1.0 : key.getQuota());
+                            body.put("usedQuota", key.getUsedQuota() == null ? 0.0 : key.getUsedQuota());
+                            body.put("logs", logs);
+                            return ResponseEntity.ok(body);
+                        }))
+                .defaultIfEmpty(ResponseEntity.notFound().build());
     }
     /**
      * Key 使用监控汇总：调用次数 + 总 token 消耗（prompt/completion/total）

@@ -57,6 +57,7 @@ public class ApiKeyUsageService extends DatabaseService {
             log.debug("用量汇总表为空，开始从 api_key_usage 明细表重建...");
             return this.summaryRepository.truncate()
                     .then(this.summaryRepository.rebuildFromDetail())
+                .flatMap(n -> this.summaryRepository.syncUsedQuota().thenReturn(n))
                     .doOnSuccess(n -> log.debug("用量汇总表重建完成，共 {} 个 Key 的汇总记录", n))
                     .onErrorResume(e -> {
                         log.warn("用量汇总表重建失败（不影响主流程，后续 record 会继续累加）: {}", e.getMessage());
@@ -153,6 +154,7 @@ public class ApiKeyUsageService extends DatabaseService {
         log.debug("手动触发用量汇总表重建...");
         return this.summaryRepository.truncate()
                 .then(this.summaryRepository.rebuildFromDetail())
+                .flatMap(n -> this.summaryRepository.syncUsedQuota().thenReturn(n))
                 .doOnSuccess(n -> log.debug("用量汇总表重建完成，共 {} 个 Key", n));
     }
 

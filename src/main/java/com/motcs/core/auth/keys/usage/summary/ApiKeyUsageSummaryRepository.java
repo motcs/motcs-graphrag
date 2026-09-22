@@ -88,4 +88,14 @@ public interface ApiKeyUsageSummaryRepository extends ReactiveCrudRepository<Api
             """)
     Mono<Long> rebuildFromDetail();
 
+    /**
+     * 把汇总表里的历史花费（输入+输出成本）同步回 api_key.used_quota。
+     * 老数据升级后执行一次，让已有 Key 的已用额度等于历史总花费。
+     */
+    @Query("""
+            UPDATE api_key k SET used_quota = COALESCE(
+                (SELECT s.input_cost + s.output_cost FROM api_key_usage_summary s WHERE s.api_key_id = k.id), 0)
+            """)
+    Mono<Long> syncUsedQuota();
+
 }

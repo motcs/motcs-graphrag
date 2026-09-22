@@ -879,13 +879,6 @@ async function loadUsageOverview(page) {
                 : (k.enabled
                 ? '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-emerald-500/15 text-emerald-400">启用</span>'
                 : '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>');
-            const quota = (k.quota === null || k.quota === undefined) ? -1 : k.quota;
-            const usedQ = (k.usedQuota || 0);
-            const quotaText = quota < 0 ? '无限' : (quota === 0 ? '禁止' : '¥' + usedQ.toFixed(4) + ' / ¥' + quota.toFixed(2));
-            tr.dataset.keyId = k.id;
-            tr.dataset.quota = quota;
-            tr.dataset.used = usedQ;
-            tr.dataset.keyId = k.id; tr.dataset.quota = quota; tr.dataset.used = usedQ;
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 font-mono text-xs text-gray-300 hide-mobile">${escapeHtml(k.keyPrefix || k.prefix || 'sk-…')}…</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-300 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '-')}</td>
@@ -3226,13 +3219,18 @@ async function loadApiKeys(page) {
             const quota = (k.quota === null || k.quota === undefined) ? -1 : k.quota;
             const usedQ = (k.usedQuota || 0);
             const quotaText = quota < 0 ? '无限' : (quota === 0 ? '禁止' : '¥' + usedQ.toFixed(4) + ' / ¥' + quota.toFixed(2));
+            const quotaPct = quota > 0 ? Math.min(100, Math.max(0, Math.round(usedQ / quota * 100))) : 0;
+            const quotaBar = quota > 0 ? '<div class="w-24 h-1 mt-1 rounded bg-white/10"><div class="h-1 rounded ' + (quotaPct >= 100 ? 'bg-red-400' : 'bg-emerald-400') + '" style="width:' + quotaPct + '%"></div></div>' : '';
+            tr.dataset.keyId = k.id;
+            tr.dataset.quota = quota;
+            tr.dataset.used = usedQ;
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '')}</td>
                 <td class="py-2.5 pr-3 font-mono text-xs text-gray-400 hide-mobile">${escapeHtml(k.keyPrefix || '')}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(systemNameOf(k.systemType))}</td>
                 <td class="py-2.5 pr-3">${k.enabled ? '<span class="whitespace-nowrap text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400">启用</span>' : '<span class="whitespace-nowrap text-xs px-2.5 py-1 rounded-full bg-red-500/10 text-red-400">停用</span>'}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400" title="${usageTitle}">${usageText}</td>
-                <td class="py-2.5 pr-3 text-xs text-primary-400 cursor-pointer hover:underline" title="点击管理额度" onclick="openQuotaModal(${k.id})">${quotaText}</td>
+                <td class="py-2.5 pr-3 text-xs text-primary-400 cursor-pointer hover:underline" title="点击管理额度（已用 ${quotaPct}%）" onclick="openQuotaModal(${k.id})">${quotaText}${quotaBar}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400 hide-mobile">${k.createdTime ? formatTime(k.createdTime) : '-'}</td>
                 <td class="py-2.5 text-right whitespace-nowrap">
                     <button onclick="toggleApiKey(${k.id}, ${k.enabled})" class="text-xs px-2 py-1 rounded-lg ${k.enabled ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'} transition mr-1">${k.enabled ? '停用' : '启用'}</button>
@@ -3323,6 +3321,11 @@ async function loadApiKeyUsagePage(page) {
             const quota = (k.quota === null || k.quota === undefined) ? -1 : k.quota;
             const usedQ = (k.usedQuota || 0);
             const quotaText = quota < 0 ? '无限' : (quota === 0 ? '禁止' : '¥' + usedQ.toFixed(4) + ' / ¥' + quota.toFixed(2));
+            const quotaPct = quota > 0 ? Math.min(100, Math.max(0, Math.round(usedQ / quota * 100))) : 0;
+            const quotaBar = quota > 0 ? '<div class="w-24 h-1 mt-1 rounded bg-white/10"><div class="h-1 rounded ' + (quotaPct >= 100 ? 'bg-red-400' : 'bg-emerald-400') + '" style="width:' + quotaPct + '%"></div></div>' : '';
+            tr.dataset.keyId = k.id;
+            tr.dataset.quota = quota;
+            tr.dataset.used = usedQ;
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${formatTime(u.createdTime)}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(u.userId || '-')}</td>
@@ -3457,7 +3460,8 @@ async function refreshQuotaModal() {
     if (!quotaModalKeyId) return;
     try {
         const res = await fetch(`${AUTH_BASE}/api-keys/${quotaModalKeyId}/quota-logs`);
-        const logs = await res.json();
+        const data = await res.json();
+        const logs = data.logs || [];
         const quotaLogs = $('quotaLogList');
         quotaLogs.innerHTML = '';
         $('quotaLogEmpty').classList.toggle('hidden', logs.length > 0);
@@ -3473,15 +3477,8 @@ async function refreshQuotaModal() {
                 <td class="py-1.5 pr-3 text-xs text-gray-400 hide-mobile">${escapeHtml(l.remark || '-')}</td>`;
             quotaLogs.appendChild(tr);
         });
-        let q = -1, used = 0;
-        const row = document.querySelector(`#apiKeyList tr[data-key-id="${quotaModalKeyId}"]`);
-        if (row && row.dataset.quota !== undefined) {
-            q = parseFloat(row.dataset.quota);
-            used = parseFloat(row.dataset.used || '0');
-        } else if (logs.length > 0) {
-            q = logs[0].balanceAfter == null ? -1 : logs[0].balanceAfter;
-            used = logs[0].usedAfter || 0;
-        }
+        let q = (data.quota == null || isNaN(data.quota)) ? -1 : Number(data.quota);
+        let used = (data.usedQuota == null || isNaN(data.usedQuota)) ? 0 : Number(data.usedQuota);
         $('quotaCurrent').textContent = q < 0 ? '无限制' : ('¥' + (q || 0).toFixed(2));
         $('quotaUsed').textContent = '¥' + used.toFixed(4);
         $('quotaLeft').textContent = q < 0 ? '∞' : ('¥' + Math.max(0, q - used).toFixed(4));
