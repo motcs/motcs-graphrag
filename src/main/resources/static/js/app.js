@@ -673,6 +673,7 @@ function switchTab(tab) {
         loadApiKeys();
     }
     if (tab === 'monitor') loadUsageOverview();
+    if (tab === 'chatusage') loadChatUsage();
 }
 
 /* ---------- 列表列排序（正序/倒序/重置 三态） ---------- */
@@ -861,7 +862,7 @@ async function loadUsageOverview(page) {
         $('monTotalKeys').textContent = data.totalKeys ?? 0;
         $('monKeysBreakdown').textContent = `在用 ${data.activeKeys ?? 0} · 已删除 ${data.deletedKeys ?? 0}`;
         $('monTotalCost').textContent = '¥' + (data.totalCost ?? 0).toFixed(4);
-        $('monCostBreakdown').textContent = '输入 ¥' + (data.inputCost ?? 0).toFixed(4) + ' · 输出 ¥' + (data.outputCost ?? 0).toFixed(4);
+        $('monCostBreakdown').innerHTML = '输入 ¥' + (data.inputCost ?? 0).toFixed(4) + '<br>输出 ¥' + (data.outputCost ?? 0).toFixed(4);
         $('monTotalCalls').textContent = data.totalCalls ?? 0;
         $('monPrompt').textContent = (data.promptTokens ?? 0).toLocaleString();
         $('monCompletion').textContent = (data.completionTokens ?? 0).toLocaleString();
@@ -887,6 +888,7 @@ async function loadUsageOverview(page) {
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-300">${k.totalCalls ?? 0}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.promptTokens ?? 0).toLocaleString()}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.completionTokens ?? 0).toLocaleString()}</td>
+<td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.cacheTokens ?? 0).toLocaleString()}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-300 font-medium">${(k.totalTokens ?? 0).toLocaleString()}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">¥${(k.inputCost ?? 0).toFixed(4)}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">¥${(k.outputCost ?? 0).toFixed(4)}</td>
@@ -898,6 +900,49 @@ async function loadUsageOverview(page) {
         renderPagination($('monitorPagination'), data.number || 0, data.totalPages || 0, data.totalElements || 0, p => loadUsageOverview(p));
     } catch (e) {
         showToast('加载用量监控失败', 'error');
+    }
+}
+
+async function loadChatUsage(page) {
+    const tbody = $('chatUsageList');
+    const empty = $('chatUsageEmpty');
+    if (typeof page === 'number') state.chatUsagePage = page;
+    try {
+        const [sumRes, listRes] = await Promise.all([
+            fetch(`${AUTH_BASE}/chat-usage/summary`),
+            fetch(`${AUTH_BASE}/chat-usage/list?page=${state.chatUsagePage || 0}&size=${state.pageSize}`)
+        ]);
+        if (!listRes.ok) throw new Error('HTTP ' + listRes.status);
+        const sum = sumRes.ok ? await sumRes.json() : {};
+        const data = await listRes.json();
+        $('cuTotalCalls').textContent = (sum.totalCalls ?? 0).toLocaleString();
+        $('cuPrompt').textContent = (sum.promptTokens ?? 0).toLocaleString();
+        $('cuCompletion').textContent = (sum.completionTokens ?? 0).toLocaleString();
+        $('cuTotal').textContent = (sum.totalTokens ?? 0).toLocaleString();
+        $('cuInputCost').textContent = '¥' + (sum.inputCost ?? 0).toFixed(4);
+        $('cuTotalCost').textContent = '¥' + (sum.totalCost ?? 0).toFixed(4);
+        tbody.innerHTML = '';
+        const list = data.content || [];
+        empty.classList.toggle('hidden', list.length > 0);
+        list.forEach(u => {
+            const tr = document.createElement('tr');
+            tr.className = 'border-b border-white/5';
+            tr.innerHTML = `
+                <td class="py-2 pr-3 text-xs text-gray-300">${escapeHtml(u.title || '-')}</td>
+                <td class="py-2 pr-3 text-xs text-gray-400 hide-mobile">${escapeHtml(u.userId || '-')}</td>
+                <td class="py-2 pr-3 text-right text-xs text-gray-400">${u.chatCount || 0}</td>
+                <td class="py-2 pr-3 text-right text-xs text-gray-400">${(u.inputTokens || 0).toLocaleString()}</td>
+                <td class="py-2 pr-3 text-right text-xs text-gray-400">${(u.outputTokens || 0).toLocaleString()}</td>
+                                <td class="py-2 pr-3 text-right text-xs text-gray-400 hide-mobile">${(u.cacheTokens || 0).toLocaleString()}</td>
+                <td class="py-2 pr-3 text-right text-xs text-gray-300 font-medium">${(u.totalTokens || 0).toLocaleString()}</td>
+                <td class="py-2 pr-3 text-right text-xs text-gray-400">¥${(u.inputCost || 0).toFixed(4)}</td>
+                <td class="py-2 pr-3 text-right text-xs text-amber-400 font-medium">¥${(u.totalCost || 0).toFixed(4)}</td>
+                <td class="py-2 text-right text-xs text-gray-400 whitespace-nowrap">${u.updatedTime ? formatTime(u.updatedTime) : '-'}</td>`;
+            tbody.appendChild(tr);
+        });
+        renderPagination($('chatUsagePagination'), data.number || 0, data.totalPages || 0, data.totalElements || 0, p => loadChatUsage(p));
+    } catch (e) {
+        showToast('加载对话统计失败', 'error');
     }
 }
 
@@ -3325,6 +3370,7 @@ async function loadApiKeyUsagePage(page) {
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(u.model || '-')}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-400">${u.promptTokens || 0}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-400">${u.completionTokens || 0}</td>
+<td class="py-2.5 pr-3 text-right text-xs text-gray-400">${u.cacheTokens || 0}</td>
                 <td class="py-2.5 text-right text-xs text-gray-300 font-medium">${u.totalTokens || 0}</td>`;
             tbody.appendChild(tr);
         });
@@ -3411,6 +3457,7 @@ function initAuth() {
     $('apiKeyCreateBtn').addEventListener('click', createApiKey);
     $('apiKeyCopyBtn').addEventListener('click', copyNewKey);
     $('monitorRefreshBtn').addEventListener('click', loadUsageOverview);
+    chatUsageRefreshBtn.addEventListener('click', () => loadChatUsage(0));
     $('monitorRebuildBtn').addEventListener('click', async () => {
         const btn = $('monitorRebuildBtn');
         btn.disabled = true;

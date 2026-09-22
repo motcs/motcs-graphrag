@@ -248,7 +248,10 @@ public class DocumentController {
         StringBuilder answerBuilder = new StringBuilder(); // AI回答完整内容累积
         StringBuilder reasoningBuilder = new StringBuilder(); // AI思考过程累积（入库）
         AtomicReference<JsonNode> sourcesJson = new AtomicReference<>();
+        final java.util.concurrent.atomic.AtomicReference<org.springframework.ai.chat.metadata.Usage> usageRefHolder = new java.util.concurrent.atomic.AtomicReference<>();
+        final String usedModel = request.getModel();
         return this.graphRagService.graphRagQueryStream(request).flatMapMany(result -> {
+            usageRefHolder.set(result.usageRef().get());
             try {
                 sourcesJson.set(ContextUtil.OBJECT_MAPPER.convertValue(result.sources(), JsonNode.class));
             } catch (Exception e) {
@@ -265,6 +268,15 @@ public class DocumentController {
                     answerBuilder.append(ev.text());
                 }
             }).map(ev -> Utils.jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
+            // 流结束（非取消）时记录本次对话 token 用量到 chat_usage_record
+            answerMono = answerMono.publishOn(Schedulers.boundedElastic()).doFinally(sig -> {
+                if (sig != reactor.core.publisher.SignalType.CANCEL) {
+                    String titleText = ObjectUtils.isEmpty(request.getQuestion()) ? sessionId
+                            : (request.getQuestion().length() > 50 ? request.getQuestion().substring(0, 50) : request.getQuestion());
+                    this.graphRagService.recordChatUsage(request.getUserId(), sessionId,
+                            request.getModel(), titleText, result.usageRef().get()).subscribe();
+                }
+            });
             return Flux.concat(sessionMono, rewriteMono, sourcesMono, answerMono);
         }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
             // 取消时由前端手动保存（避免重复），正常完成/出错时保存（answer 可为空，确保提问不丢失）
@@ -275,6 +287,9 @@ public class DocumentController {
                 request.setSources(sourcesJson.get());
                 request.setReasoning(reasoningBuilder.toString());
                 this.graphRagService.saveConversation(request).subscribe();
+                String titleText = ObjectUtils.isEmpty(request.getQuestion()) ? sessionId : (request.getQuestion().length() > 50 ?
+                        request.getQuestion().substring(0, 50) : request.getQuestion());
+                this.graphRagService.recordChatUsage(request.getUserId(), sessionId, usedModel, titleText, usageRefHolder.get()).subscribe();
             }
         }).doOnError(e -> log.error("问答SSE流出错: {}", e.getMessage(), e));
     }

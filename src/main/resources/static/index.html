@@ -197,6 +197,14 @@
                 </svg>
                 用量监控
             </button>
+            <button data-tab="chatusage"
+                    class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                对话统计
+            </button>
             <button data-tab="graph"
                     class="nav-btn w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -677,12 +685,14 @@
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
                     <div>
-                        <label class="block text-xs text-gray-400 mb-1">用途备注 <span class="text-red-400">*</span></label>
+                        <label class="block text-xs text-gray-400 mb-1">用途备注 <span
+                                class="text-red-400">*</span></label>
                         <input id="apiKeyName" type="text" placeholder="如：第三方系统对接"
                                class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition placeholder-gray-500">
                     </div>
                     <div>
-                        <label class="block text-xs text-gray-400 mb-1">绑定租户 <span class="text-red-400">*</span></label>
+                        <label class="block text-xs text-gray-400 mb-1">绑定租户 <span
+                                class="text-red-400">*</span></label>
                         <!-- 租户可搜索下拉：原生 select 作为数据源与提交值载体（隐藏），搜索 UI 由 initSearchableSelect 动态渲染 -->
                         <select id="apiKeyTenant" class="hidden"
                                 title="该 Key 绑定的租户（对话/上传文档归属），不允许为 0（超管全局租户）">
@@ -690,7 +700,8 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block text-xs text-gray-400 mb-1">系统类型 <span class="text-red-400">*</span></label>
+                        <label class="block text-xs text-gray-400 mb-1">系统类型 <span
+                                class="text-red-400">*</span></label>
                         <select id="apiKeySystem"
                                 title="该 Key 绑定的系统类型（对话/上传文档归属）"
                                 class="w-full px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
@@ -771,7 +782,7 @@
                         <h2 class="text-2xl font-bold">用量监控</h2>
                         <p class="text-sm text-gray-400 mt-1">各 API Key 的调用次数与 token 消耗汇总（每次 /keys/v1/chat
                             对话自动记录，停用不再产生记录）<br>
-                            <span style="color: #ef4444">总花费中不计算缓存命中，只按没有命中缓存计算，故实际费用会比统计的费用少一些。</span>
+                            <span style="color: #ef4444">花费按当前对话模型单价估算，价格最后更新日期(2026-09-22)。</span>
                         </p>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
@@ -835,6 +846,9 @@
                         <th class="text-right py-2 font-medium hide-mobile sortable" data-sort-ns="monitor"
                             data-sort="completionTokens" data-label="输出 token">输出 token
                         </th>
+                        <th class="text-right py-2 font-medium hide-mobile sortable" data-sort-ns="monitor"
+                            data-sort="cacheTokens" data-label="缓存 token">缓存 token
+                        </th>
                         <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor" data-sort="totalTokens"
                             data-label="总 token">总 token
                         </th>
@@ -852,6 +866,73 @@
                 <div id="monitorUsageEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无 API Key
                     或调用记录
                 </div>
+            </div>
+        </section>
+
+        <!-- ===== 对话统计 ===== -->
+        <section id="tab-chatusage" class="tab-panel hidden">
+            <div class="bg-dark-900/60 rounded-2xl border border-white/5 p-5">
+                <div class="mb-5 flex items-start justify-between gap-4">
+                    <div>
+                        <h2 class="text-2xl font-bold">对话统计</h2>
+                        <p class="text-sm text-gray-400 mt-1">所有智能问答对话的 token
+                            消耗与花费明细（按对话时间倒序）<br>
+                            <span style="color: #ef4444">花费按当前对话模型单价估算，价格最后更新日期(2026-09-22)。</span>
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button id="chatUsageRefreshBtn"
+                                class="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition">
+                            刷新
+                        </button>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">总会话数</div>
+                        <div class="text-2xl font-bold" id="cuTotalCalls">-</div>
+                    </div>
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">总输入 token</div>
+                        <div class="text-2xl font-bold" id="cuPrompt">-</div>
+                    </div>
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">总输出 token</div>
+                        <div class="text-2xl font-bold" id="cuCompletion">-</div>
+                    </div>
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">总 token</div>
+                        <div class="text-2xl font-bold text-primary-400" id="cuTotal">-</div>
+                    </div>
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">输入花费</div>
+                        <div class="text-2xl font-bold text-amber-400" id="cuInputCost">-</div>
+                    </div>
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">总花费</div>
+                        <div class="text-2xl font-bold text-amber-400" id="cuTotalCost">-</div>
+                    </div>
+                </div>
+                <table class="w-full text-sm">
+                    <thead>
+                    <tr class="text-xs text-gray-400 border-b border-white/5">
+                        <th class="text-left py-2 font-medium">会话标题</th>
+                        <th class="text-left py-2 font-medium hide-mobile">用户</th>
+                        <th class="text-right py-2 font-medium">对话轮数</th>
+                        <th class="text-right py-2 font-medium">输入</th>
+                        <th class="text-right py-2 font-medium">输出</th>
+                        <th class="text-right py-2 font-medium hide-mobile">缓存</th>
+                        <th class="text-right py-2 font-medium">总token</th>
+                        <th class="text-right py-2 font-medium">输入花费</th>
+                        <th class="text-right py-2 font-medium">总花费</th>
+                        <th class="text-right py-2 font-medium">最近使用</th>
+                    </tr>
+                    </thead>
+                    <tbody id="chatUsageList"></tbody>
+                </table>
+                <div id="chatUsagePagination"
+                     class="mt-4 flex items-center justify-between text-xs text-gray-400"></div>
+                <div id="chatUsageEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无对话记录</div>
             </div>
         </section>
 
@@ -878,6 +959,7 @@
                             <th class="text-left py-2 font-medium">模型</th>
                             <th class="text-right py-2 font-medium">输入 token</th>
                             <th class="text-right py-2 font-medium">输出 token</th>
+                            <th class="text-right py-2 font-medium">缓存 token</th>
                             <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor"
                                 data-sort="totalTokens" data-label="总 token">总 token
                             </th>
@@ -905,14 +987,17 @@
         </div>
 
         <!-- ===== API Key 额度管理弹窗 ===== -->
-        <div id="quotaModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div id="quotaModal"
+             class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <div class="bg-dark-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[85vh] flex flex-col">
                 <div class="flex items-center justify-between px-5 py-4 border-b border-white/5">
                     <div>
                         <h3 class="text-lg font-bold">额度管理</h3>
                         <p class="text-xs text-gray-400 mt-0.5" id="quotaModalSub">-</p>
                     </div>
-                    <button onclick="closeQuotaModal()" class="text-gray-400 hover:text-gray-200 text-2xl leading-none px-2">&times;</button>
+                    <button onclick="closeQuotaModal()"
+                            class="text-gray-400 hover:text-gray-200 text-2xl leading-none px-2">&times;
+                    </button>
                 </div>
                 <div class="overflow-auto flex-1 px-5 py-4">
                     <div class="grid grid-cols-3 gap-3 mb-4 text-center">
@@ -932,12 +1017,18 @@
                     <div class="flex gap-2 mb-5">
                         <input id="quotaInput" type="number" step="0.01" placeholder="新额度（-1 无限制）"
                                class="flex-1 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
-                        <button onclick="saveQuota()" class="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition whitespace-nowrap">设置新额度</button>
+                        <button onclick="saveQuota()"
+                                class="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-sm font-medium transition whitespace-nowrap">
+                            设置新额度
+                        </button>
                     </div>
                     <div class="flex gap-2 mb-5">
                         <input id="quotaAddInput" type="number" step="0.01" placeholder="追加金额（>0）"
                                class="flex-1 px-3 py-2 text-sm bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition">
-                        <button onclick="addQuota()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-medium transition whitespace-nowrap">追加额度</button>
+                        <button onclick="addQuota()"
+                                class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-medium transition whitespace-nowrap">
+                            追加额度
+                        </button>
                     </div>
                     <div class="text-xs text-gray-400 mb-2">变更明细</div>
                     <table class="w-full text-sm">
@@ -1020,7 +1111,7 @@
 </div>
 
 <script src="js/config.js?v=1"></script>
-<script src="js/app.js?v=154"></script>
+<script src="js/app.js?v=161"></script>
 
 <!-- 替换文档弹窗 -->
 <div id="reuploadModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

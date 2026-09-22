@@ -61,6 +61,10 @@ public class ApiKeyUsage implements Serializable {
     @Column("total_tokens")
     private Integer totalTokens;
 
+    @Schema(description = "缓存命中 token 数")
+    @Column("cache_tokens")
+    private Integer cacheTokens;
+
     @Schema(description = "调用时间")
     @Column("created_time")
     private LocalDateTime createdTime;

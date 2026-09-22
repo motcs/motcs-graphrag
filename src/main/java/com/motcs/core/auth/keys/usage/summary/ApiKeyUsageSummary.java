@@ -58,6 +58,10 @@ public class ApiKeyUsageSummary implements Serializable {
     @Column("total_tokens")
     private Long totalTokens;
 
+    @Schema(description = "累计缓存命中 token")
+    @Column("cache_tokens")
+    private Long cacheTokens;
+
     @Schema(description = "最近调用时间")
     @Column("last_used_at")
     private LocalDateTime lastUsedAt;

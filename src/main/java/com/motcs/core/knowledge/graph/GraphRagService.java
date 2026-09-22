@@ -4,6 +4,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.motcs.commons.ContextUtil;
 import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.base.DatabaseService;
+import com.motcs.core.auth.keys.usage.record.ChatUsageRecord;
+import com.motcs.core.auth.keys.usage.record.ChatUsageRecordRepository;
+import com.motcs.core.auth.keys.usage.session.ChatSessionUsageRepository;
 import com.motcs.core.document.DocumentResponse;
 import com.motcs.core.document.DocumentService;
 import com.motcs.core.document.DocumentUploadRequest;
@@ -134,6 +137,8 @@ public class GraphRagService extends DatabaseService {
     private final ChatMessageRepository chatMessageRepository;
     private final ChatSessionRepository chatSessionRepository;
     private final ChatSessionSummaryRepository summaryRepository;
+    private final ChatUsageRecordRepository chatUsageRecordRepository;
+    private final ChatSessionUsageRepository chatSessionUsageRepository;
     @Value("${app.ai.provider:zhipu}")
     private String provider;
 
@@ -1005,6 +1010,7 @@ public class GraphRagService extends DatabaseService {
                     if (title.length() > 30) title = title.substring(0, 30);
                     this.chatMessageRepository.updateTitle(title, request.getSessionId()).subscribe();
                     this.chatSessionRepository.updateTitle(title, request.getSessionId()).subscribe();
+                    this.chatSessionUsageRepository.updateTitle(request.getSessionId(), title).subscribe();
                     log.debug("会话主题已生成并更新: sessionId={}, title={}", request.getSessionId(), title);
                 }
             } catch (Exception e) {
@@ -1113,6 +1119,7 @@ public class GraphRagService extends DatabaseService {
         }
         return this.chatMessageRepository.updateTitle(title.trim(), sessionId)
                 .then(this.chatSessionRepository.updateTitle(title.trim(), sessionId))
+                .flatMap(cnt -> this.chatSessionUsageRepository.updateTitle(sessionId, title.trim()).thenReturn(cnt))
                 .doOnSuccess(cnt -> log.debug("会话标题已更新: sessionId={}, title={}, 影响行数={}", sessionId, title, cnt));
     }
 
@@ -1169,6 +1176,59 @@ public class GraphRagService extends DatabaseService {
      * 查询结果封装：知识库来源 + SSE 事件流（思考/正文通过 type 字段区分）
      * rewriteQuery：优化后的检索查询词（供前端展示"搜索中"状态）
      */
+
+    /**
+     * 记录一次平台对话的 token 用量到 chat_usage_record。
+     * input=prompt，output=completion（含推理），reasoning=推理 token（从 nativeUsage 解析），
+     * cache=缓存命中 token。解析失败的字段按 0 计。
+     */
+    public Mono<Void> recordChatUsage(String userId, String sessionId, String model, String title, Usage usage) {
+        if (usage == null) {
+            return Mono.empty();
+        }
+        int input = usage.getPromptTokens();
+        int output = usage.getCompletionTokens();
+        int reasoning = 0; // 思考token暂不统计
+        int cache = usage.getCacheReadInputTokens() == null ? 0 : usage.getCacheReadInputTokens().intValue();
+        int total = input + output;
+        var price = com.motcs.core.auth.keys.usage.quota.ModelPricing.of(model);
+        // 百度千帆口径：未命中缓存的输入按输入价计，命中缓存的输入按缓存价计
+        int uncachedInput = Math.max(input - cache, 0);
+        double inputCost = uncachedInput / 1000.0 * price.inPerK() + cache / 1000.0 * price.cachePerK();
+        double outputCost = output / 1000.0 * price.outPerK();
+        double totalCost = inputCost + outputCost;
+        ChatUsageRecord record = ChatUsageRecord.builder()
+                .userId(userId).sessionId(sessionId).model(model)
+                .inputTokens(input).outputTokens(output)
+                .reasoningTokens(reasoning).cacheTokens(cache)
+                .createdTime(LocalDateTime.now()).build();
+        Mono<Void> detail = this.chatUsageRecordRepository.save(record).then();
+        Mono<Void> session = this.chatSessionUsageRepository.accumulate(sessionId, userId, title,
+                input, output, reasoning, cache, total, inputCost, outputCost, totalCost).then();
+        return Mono.when(detail, session)
+                .onErrorResume(e -> {
+                    log.warn("记录对话用量失败: {}", e.getMessage());
+                    return Mono.empty();
+                });
+    }
+
+    @SuppressWarnings("unchecked")
+    private int extractReasoningTokens(Object nativeUsage) {
+        try {
+            if (nativeUsage instanceof java.util.Map<?, ?> map) {
+                Object cd = ((java.util.Map<String, Object>) map).get("completion_tokens_details");
+                if (cd instanceof java.util.Map<?, ?> details) {
+                    Object r = details.get("reasoning_tokens");
+                    if (r instanceof Number n) {
+                        return n.intValue();
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return 0;
+    }
+
     public record QueryResult(List<Map<String, Object>> sources, Flux<ChatStreamEvent> answer,
                               AtomicReference<Usage> usageRef, String rewriteQuery) {
     }

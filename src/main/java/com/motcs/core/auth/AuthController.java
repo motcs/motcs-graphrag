@@ -2,13 +2,12 @@ package com.motcs.core.auth;
 
 import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.utils.Utils;
-import com.motcs.core.auth.keys.ApiKeyService;
-import com.motcs.core.auth.keys.usage.ApiKeyUsage;
-import com.motcs.core.auth.keys.usage.ApiKeyUsageRequest;
-import com.motcs.core.auth.keys.usage.ApiKeyUsageService;
-import com.motcs.core.auth.keys.usage.quota.ApiKeyQuotaLog;
-import com.motcs.core.auth.keys.usage.quota.ApiKeyQuotaLogRepository;
 import com.motcs.core.auth.keys.ApiKeyRepository;
+import com.motcs.core.auth.keys.ApiKeyService;
+import com.motcs.core.auth.keys.usage.*;
+import com.motcs.core.auth.keys.usage.quota.ApiKeyQuotaLogRepository;
+import com.motcs.core.auth.keys.usage.session.ChatUsageRow;
+import com.motcs.core.auth.keys.usage.session.ChatUsageSummaryRow;
 import com.motcs.core.auth.keys.usage.summary.UsageOverviewRow;
 import com.motcs.core.auth.token.AuthenticationToken;
 import com.motcs.core.auth.token.TokenStore;
@@ -30,7 +29,6 @@ import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -207,6 +205,7 @@ public class AuthController {
                         }))
                 .defaultIfEmpty(ResponseEntity.notFound().build());
     }
+
     /**
      * Key 使用监控汇总：调用次数 + 总 token 消耗（prompt/completion/total）
      */
@@ -236,6 +235,18 @@ public class AuthController {
     @Operation(summary = "用量监控总览（分页，按使用量降序，默认每页10条）")
     public Mono<ResponseEntity<Map<String, Object>>> apiKeyUsageOverview(Pageable pageable) {
         return this.apiKeyUsageService.overview(pageable).map(ResponseEntity::ok);
+    }
+
+    @GetMapping("/chat-usage/summary")
+    @Operation(summary = "全量对话用量汇总（总调用/总token/总花费）")
+    public Mono<ResponseEntity<ChatUsageSummaryRow>> chatUsageSummary() {
+        return this.apiKeyUsageService.chatUsageSummary().map(ResponseEntity::ok);
+    }
+
+    @GetMapping("/chat-usage/list")
+    @Operation(summary = "全量对话用量明细（每次对话一条，分页）")
+    public Mono<ResponseEntity<Page<ChatUsageRow>>> chatUsageList(Pageable pageable) {
+        return this.apiKeyUsageService.chatUsageList(pageable).map(ResponseEntity::ok);
     }
 
     /**

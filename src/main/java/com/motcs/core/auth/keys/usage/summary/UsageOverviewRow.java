@@ -23,6 +23,7 @@ public record UsageOverviewRow(
         @Schema(description = "累计输入 token") Long promptTokens,
         @Schema(description = "累计输出 token") Long completionTokens,
         @Schema(description = "累计总 token") Long totalTokens,
+        @Schema(description = "累计缓存命中 token") Long cacheTokens,
         @Schema(description = "累计输入花费（元）") Double inputCost,
         @Schema(description = "累计输出花费（元）") Double outputCost,
         @Schema(description = "最近调用时间") LocalDateTime lastUsedAt,

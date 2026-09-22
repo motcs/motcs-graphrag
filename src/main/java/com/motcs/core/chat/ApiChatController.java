@@ -127,12 +127,16 @@ public class ApiChatController {
                                 if (usage != null) {
                                     this.apiKeyUsageService.record(apiKey.getId(), request.getUserId(), sessionId,
                                             request.getModel(), usage.getPromptTokens(), usage.getCompletionTokens(),
-                                            usage.getTotalTokens()).subscribe();
+                                            usage.getTotalTokens(),
+                                            usage.getCacheReadInputTokens() == null ? 0 : usage.getCacheReadInputTokens().intValue()).subscribe();
                                     ModelPricing.Price price = ModelPricing.of(request.getModel());
-                                    usage.getPromptTokens();
-                                    usage.getCompletionTokens();
-                                    double cost = usage.getPromptTokens() / 1000.0 * price.inPerK()
-                                            + usage.getCompletionTokens() / 1000.0 * price.outPerK();
+                                    int prompt = usage.getPromptTokens() == null ? 0 : usage.getPromptTokens();
+                                    int completion = usage.getCompletionTokens() == null ? 0 : usage.getCompletionTokens();
+                                    int cache = usage.getCacheReadInputTokens() == null ? 0 : usage.getCacheReadInputTokens().intValue();
+                                    int uncached = Math.max(prompt - cache, 0);
+                                    double cost = uncached / 1000.0 * price.inPerK()
+                                            + cache / 1000.0 * price.cachePerK()
+                                            + completion / 1000.0 * price.outPerK();
                                     this.apiKeyService.consumeQuota(apiKey.getId(), cost).subscribe();
                                 }
                             }

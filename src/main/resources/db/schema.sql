@@ -220,6 +220,48 @@ CREATE TABLE IF NOT EXISTS api_key_quota_log
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='API Key 额度变更流水';
 
+CREATE TABLE IF NOT EXISTS chat_usage_record
+(
+    id             BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    user_id        VARCHAR(64)  DEFAULT NULL COMMENT '调用方用户编码',
+    session_id     VARCHAR(64)  DEFAULT NULL COMMENT '会话ID',
+    model          VARCHAR(128) DEFAULT NULL COMMENT '模型',
+    input_tokens   INT DEFAULT 0 COMMENT '输入 token',
+    output_tokens  INT DEFAULT 0 COMMENT '输出 token',
+    reasoning_tokens INT DEFAULT 0 COMMENT '推理 token',
+    cache_tokens   INT DEFAULT 0 COMMENT '缓存命中 token',
+    created_time   DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '调用时间',
+    KEY idx_cur_session (session_id),
+    KEY idx_cur_time (created_time)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='平台对话用量明细（每次对话）';
+
+CREATE TABLE IF NOT EXISTS chat_session_usage
+(
+    id             BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    session_id     VARCHAR(64) NOT NULL COMMENT '会话ID',
+    user_id        VARCHAR(64)  DEFAULT NULL COMMENT '用户编码',
+    title          VARCHAR(255) DEFAULT NULL COMMENT '会话标题',
+    chat_count     INT DEFAULT 0 COMMENT '对话轮数',
+    input_tokens   BIGINT DEFAULT 0 COMMENT '累计输入 token',
+    output_tokens  BIGINT DEFAULT 0 COMMENT '累计输出 token',
+    reasoning_tokens BIGINT DEFAULT 0 COMMENT '累计推理 token',
+    cache_tokens   BIGINT DEFAULT 0 COMMENT '累计缓存 token',
+    total_tokens   BIGINT DEFAULT 0 COMMENT '累计总 token',
+    input_cost     DECIMAL(14, 6) DEFAULT 0 COMMENT '累计输入花费',
+    output_cost    DECIMAL(14, 6) DEFAULT 0 COMMENT '累计输出花费',
+    total_cost     DECIMAL(14, 6) DEFAULT 0 COMMENT '累计总花费',
+    created_time   DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_time   DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '最近使用时间',
+    UNIQUE KEY uk_csu_session (session_id),
+    KEY idx_csu_user (user_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='平台对话会话用量总表';
+
 update api_key_usage
 set model ='deepseek-v4-flash-0731'
 where model is null;
+
+-- 老库补列：API Key 用量明细增加缓存 token（已存在时执行报错可忽略）
+ALTER TABLE api_key_usage ADD COLUMN cache_tokens INT DEFAULT 0 COMMENT '缓存命中 token';
+
+-- 老库补列：用量汇总表增加缓存 token（已存在时执行报错可忽略）
+ALTER TABLE api_key_usage_summary ADD COLUMN cache_tokens INT DEFAULT 0 COMMENT '累计缓存命中 token';
