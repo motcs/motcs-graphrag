@@ -76,7 +76,9 @@ public class ApiChatController {
             request.setSessionId(sessionId);
             request.setApiKeyId(apiKey.getId());
             request.setTenantCode(apiKey.getTenantCode());
-            request.setSystemType(apiKey.getSystemType());
+            if (ObjectUtils.isEmpty(request.getSystemType())) {
+                request.setSystemType(apiKey.getSystemType());
+            }
             StringBuilder answerBuilder = new StringBuilder();
             StringBuilder reasoningBuilder = new StringBuilder();
 
