@@ -1,5 +1,6 @@
 package com.motcs.config;
 
+import com.motcs.commons.annotation.ReactiveExceptionHandler;
 import com.motcs.commons.converters.TypesConverters;
 import io.r2dbc.spi.ConnectionFactories;
 import io.r2dbc.spi.ConnectionFactory;
@@ -9,6 +10,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.data.r2dbc.config.AbstractR2dbcConfiguration;
 import org.springframework.data.r2dbc.config.EnableR2dbcAuditing;
@@ -69,6 +71,7 @@ public class WebFluxConfiguration implements WebFluxConfigurer {
     @Configuration(proxyBeanMethods = false)
     @EnableR2dbcAuditing
     @ConditionalOnClass(name = "org.springframework.data.r2dbc.core.R2dbcEntityTemplate")
+    @Import({ReactiveExceptionHandler.class})
     @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.REACTIVE)
     public static class R2dbcConfiguration extends AbstractR2dbcConfiguration {
 

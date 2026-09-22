@@ -177,8 +177,4 @@ public class Utils {
         return ObjectUtils.isEmpty(v) ? 0 : v;
     }
 
-    public static String blankToNull(String s) {
-        return ObjectUtils.isEmpty(s) ? null : s;
-    }
-
 }
