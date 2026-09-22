@@ -130,8 +130,8 @@ public class ApiChatController {
                                             usage.getTotalTokens(),
                                             usage.getCacheReadInputTokens() == null ? 0 : usage.getCacheReadInputTokens().intValue()).subscribe();
                                     ModelPricing.Price price = ModelPricing.of(request.getModel());
-                                    int prompt = usage.getPromptTokens() == null ? 0 : usage.getPromptTokens();
-                                    int completion = usage.getCompletionTokens() == null ? 0 : usage.getCompletionTokens();
+                                    int prompt = usage.getPromptTokens();
+                                    int completion = usage.getCompletionTokens();
                                     int cache = usage.getCacheReadInputTokens() == null ? 0 : usage.getCacheReadInputTokens().intValue();
                                     int uncached = Math.max(prompt - cache, 0);
                                     double cost = uncached / 1000.0 * price.inPerK()
