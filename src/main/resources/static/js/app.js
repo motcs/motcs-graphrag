@@ -878,8 +878,8 @@ async function loadUsageOverview(page) {
             const enabledBadge = k.isDelete
                 ? '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-red-500/15 text-red-400">已删除</span>'
                 : (k.enabled
-                ? '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-emerald-500/15 text-emerald-400">启用</span>'
-                : '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>');
+                    ? '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-emerald-500/15 text-emerald-400">启用</span>'
+                    : '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>');
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 font-mono text-xs text-gray-300 hide-mobile">${escapeHtml(k.keyPrefix || k.prefix || 'sk-…')}…</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-300 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '-')}</td>
@@ -974,49 +974,49 @@ async function checkHealth() {
  */
 const WELCOME_CONFIG = {
     other: {
-        title: '您好，我是AI小智，平台知识库智能助手。',
+        title: '您好，我是小智，平台知识库智能助手。',
         subtitle: '已接入本单位文档知识库，支持：',
         capabilities: ['📄 文档问答（附引用来源）', '🔁 多轮对话（结合上下文）', '🔗 跨文档关联（知识图谱）'],
         coverage: '覆盖：人大 · 政协 · 党建 · 社会工作部 · 数智统战 · 综合平台',
         suggestions: ['人大代表建议怎么提交？', '党建工作的主要职责是什么？', '数智统战平台包含哪些功能？']
     },
     congress: {
-        title: '您好，我是AI小智，人大知识库智能助手',
+        title: '您好，我是小智，人大知识库智能助手',
         subtitle: '已接入人大系统文档知识库，支持：',
         capabilities: ['📄 建议议案问答', '📋 会议文件检索', '🔁 多轮对话（结合上下文）'],
         coverage: '范围：人大代表建议 · 议案办理 · 会议文件 · 政策法规',
         suggestions: ['人大代表建议怎么提交？', '议案和建议有什么区别？', '人大代表的职责是什么？']
     },
     cppcc: {
-        title: '您好，我是AI小智，政协知识库智能助手',
+        title: '您好，我是小智，政协知识库智能助手',
         subtitle: '已接入政协系统文档知识库，支持：',
         capabilities: ['📄 提案社情民意问答', '📋 会议文件检索', '🔁 多轮对话（结合上下文）'],
         coverage: '范围：政协提案 · 社情民意 · 会议文件 · 政策法规',
         suggestions: ['政协提案怎么提交？', '社情民意信息怎么写？', '政协委员的职责是什么？']
     },
     party: {
-        title: '您好，我是AI小智，党建知识库智能助手',
+        title: '您好，我是小智，党建知识库智能助手',
         subtitle: '已接入党建系统文档知识库，支持：',
         capabilities: ['📄 党建工作问答', '📋 组织建设文件检索', '🔁 多轮对话（结合上下文）'],
         coverage: '范围：党建工作 · 组织建设 · 党员管理 · 政策文件',
         suggestions: ['党建工作的主要职责是什么？', '党支部的组织生活有哪些？', '发展党员的流程是什么？']
     },
     msw: {
-        title: '您好，我是AI小智，社会工作部知识库智能助手',
+        title: '您好，我是小智，社会工作部知识库智能助手',
         subtitle: '已接入社会工作部文档知识库，支持：',
         capabilities: ['📄 基层治理问答', '📋 信访工作文件检索', '🔁 多轮对话（结合上下文）'],
         coverage: '范围：基层治理 · 社会工作 · 信访维稳 · 政策文件',
         suggestions: ['社会工作部的主要职责是什么？', '基层治理的重点工作有哪些？', '信访工作流程是什么？']
     },
     digital: {
-        title: '您好，我是AI小智，数智统战知识库智能助手',
+        title: '您好，我是小智，数智统战知识库智能助手',
         subtitle: '已接入数智统战文档知识库，支持：',
         capabilities: ['📄 统战工作问答', '📋 数字平台文件检索', '🔁 多轮对话（结合上下文）'],
         coverage: '范围：统战工作 · 数字平台 · 党外人士 · 政策文件',
         suggestions: ['数智统战平台包含哪些功能？', '统战工作的主要职责是什么？', '党外人士管理有哪些要求？']
     },
     mass: {
-        title: '您好，我是AI小智，群众服务知识库智能助手',
+        title: '您好，我是小智，群众服务知识库智能助手',
         subtitle: '已接入群众服务文档知识库，支持：',
         capabilities: ['📄 群众咨询问答', '📋 民生政策文件检索', '🔁 多轮对话（结合上下文）'],
         coverage: '范围：群众诉求 · 民生服务 · 政策咨询 · 办事指南',
@@ -3491,10 +3491,12 @@ async function openQuotaModal(id) {
     $('quotaModal').classList.remove('hidden');
     await refreshQuotaModal();
 }
+
 function closeQuotaModal() {
     $('quotaModal').classList.add('hidden');
     quotaModalKeyId = null;
 }
+
 async function refreshQuotaModal() {
     if (!quotaModalKeyId) return;
     try {
@@ -3526,10 +3528,14 @@ async function refreshQuotaModal() {
         showToast('加载额度明细失败', 'error');
     }
 }
+
 async function saveQuota() {
     if (!quotaModalKeyId) return;
     const v = parseFloat($('quotaInput').value);
-    if (isNaN(v) || v < -1) { showToast('额度不能小于 -1', 'error'); return; }
+    if (isNaN(v) || v < -1) {
+        showToast('额度不能小于 -1', 'error');
+        return;
+    }
     try {
         const res = await fetch(`${AUTH_BASE}/api-keys/${quotaModalKeyId}/quota`, {
             method: 'PUT', headers: {'Content-Type': 'application/json'},
@@ -3540,12 +3546,18 @@ async function saveQuota() {
         $('quotaInput').value = '';
         await loadApiKeys();
         await refreshQuotaModal();
-    } catch (e) { showToast('设置额度失败', 'error'); }
+    } catch (e) {
+        showToast('设置额度失败', 'error');
+    }
 }
+
 async function addQuota() {
     if (!quotaModalKeyId) return;
     const v = parseFloat($('quotaAddInput').value);
-    if (isNaN(v) || v <= 0) { showToast('追加金额必须大于 0', 'error'); return; }
+    if (isNaN(v) || v <= 0) {
+        showToast('追加金额必须大于 0', 'error');
+        return;
+    }
     try {
         const res = await fetch(`${AUTH_BASE}/api-keys/${quotaModalKeyId}/quota/add`, {
             method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -3556,5 +3568,7 @@ async function addQuota() {
         $('quotaAddInput').value = '';
         await loadApiKeys();
         await refreshQuotaModal();
-    } catch (e) { showToast('追加额度失败', 'error'); }
+    } catch (e) {
+        showToast('追加额度失败', 'error');
+    }
 }
