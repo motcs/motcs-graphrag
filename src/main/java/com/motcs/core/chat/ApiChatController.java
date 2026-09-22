@@ -10,6 +10,7 @@ import com.motcs.core.knowledge.graph.GraphRagService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
@@ -51,9 +52,11 @@ import java.util.concurrent.atomic.AtomicReference;
 @RequiredArgsConstructor
 public class ApiChatController {
 
+    @Value("${app.ai.default-chat-model:}")
+    private String defaultChatModel;
     private final ApiKeyService apiKeyService;
-    private final ApiKeyUsageService apiKeyUsageService;
     private final GraphRagService graphRagService;
+    private final ApiKeyUsageService apiKeyUsageService;
 
     /**
      * API Key 对话（SSE）：问题与用户编码必填，租户/系统来自 Key 绑定值；流结束后记录 token 消耗
@@ -80,6 +83,9 @@ public class ApiChatController {
             request.setSessionId(sessionId);
             request.setApiKeyId(apiKey.getId());
             request.setTenantCode(apiKey.getTenantCode());
+            if (ObjectUtils.isEmpty(request.getModel())) {
+                request.setModel(defaultChatModel);
+            }
             if (ObjectUtils.isEmpty(request.getSystemType())) {
                 request.setSystemType(apiKey.getSystemType());
             }

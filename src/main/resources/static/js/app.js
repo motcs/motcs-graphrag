@@ -3318,14 +3318,6 @@ async function loadApiKeyUsagePage(page) {
             const tr = document.createElement('tr');
             tr.className = 'border-b border-white/5';
 
-            const quota = (k.quota === null || k.quota === undefined) ? -1 : k.quota;
-            const usedQ = (k.usedQuota || 0);
-            const quotaText = quota < 0 ? '¥' + usedQ.toFixed(4) + ' / 无限' : (quota === 0 ? '禁止' : '¥' + usedQ.toFixed(4) + ' / ¥' + quota.toFixed(2));
-            const quotaPct = quota > 0 ? Math.min(100, Math.max(0, Math.round(usedQ / quota * 100))) : 0;
-            const quotaBar = quota > 0 ? '<div class="w-24 h-1 mt-1 rounded bg-white/10"><div class="h-1 rounded ' + (quotaPct >= 100 ? 'bg-red-400' : 'bg-emerald-400') + '" style="width:' + quotaPct + '%"></div></div>' : '';
-            tr.dataset.keyId = k.id;
-            tr.dataset.quota = quota;
-            tr.dataset.used = usedQ;
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${formatTime(u.createdTime)}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(u.userId || '-')}</td>

@@ -62,9 +62,9 @@ ALTER TABLE api_key
 ALTER TABLE api_key
     ADD COLUMN is_delete TINYINT(1) DEFAULT 0 COMMENT '是否已删除（软删除）：1 已删除，Key 失效且管理列表不可见';
 ALTER TABLE api_key
-    ADD COLUMN quota DECIMAL(12,6) DEFAULT -1 COMMENT '费用额度(元)：-1无限制 0禁止 >0用尽拒绝';
+    ADD COLUMN quota DECIMAL(12, 6) DEFAULT -1 COMMENT '费用额度(元)：-1无限制 0禁止 >0用尽拒绝';
 ALTER TABLE api_key
-    ADD COLUMN used_quota DECIMAL(12,6) DEFAULT 0 COMMENT '已用额度(元)';
+    ADD COLUMN used_quota DECIMAL(12, 6) DEFAULT 0 COMMENT '已用额度(元)';
 -- 老库兼容：用量汇总表补花费列（重复执行由 continue-on-error 吞掉）
 ALTER TABLE api_key_usage_summary
     ADD COLUMN input_cost DECIMAL(12, 6) DEFAULT 0 COMMENT '累计输入花费（元）';
@@ -79,14 +79,14 @@ CREATE TABLE IF NOT EXISTS api_key
     name         VARCHAR(100) NOT NULL COMMENT '用途备注',
     key_prefix   VARCHAR(40)  NOT NULL COMMENT 'Key前缀（展示掩码）',
     key_hash     CHAR(64)     NOT NULL COMMENT '完整Key的SHA-256哈希',
-    tenant_code  VARCHAR(64) DEFAULT NULL COMMENT '绑定的租户编码（对话/上传文档归属）',
-    system_type  VARCHAR(64) DEFAULT NULL COMMENT '绑定的系统类型（对话/上传文档归属）',
-    enabled      TINYINT(1)  DEFAULT 1 COMMENT '是否启用 1启用 0停用',
-    is_delete    TINYINT(1)  DEFAULT 0 COMMENT '是否已删除（软删除）：1 已删除',
-    quota        DECIMAL(12,6) DEFAULT -1 COMMENT '费用额度(元)：-1无限制 0禁止 >0用尽拒绝',
-    used_quota   DECIMAL(12,6) DEFAULT 0 COMMENT '已用额度(元)',
-    created_by   VARCHAR(64) DEFAULT 'admin' COMMENT '创建人',
-    created_time DATETIME    DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    tenant_code  VARCHAR(64)    DEFAULT NULL COMMENT '绑定的租户编码（对话/上传文档归属）',
+    system_type  VARCHAR(64)    DEFAULT NULL COMMENT '绑定的系统类型（对话/上传文档归属）',
+    enabled      TINYINT(1)     DEFAULT 1 COMMENT '是否启用 1启用 0停用',
+    is_delete    TINYINT(1)     DEFAULT 0 COMMENT '是否已删除（软删除）：1 已删除',
+    quota        DECIMAL(12, 6) DEFAULT -1 COMMENT '费用额度(元)：-1无限制 0禁止 >0用尽拒绝',
+    used_quota   DECIMAL(12, 6) DEFAULT 0 COMMENT '已用额度(元)',
+    created_by   VARCHAR(64)    DEFAULT 'admin' COMMENT '创建人',
+    created_time DATETIME       DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     UNIQUE KEY uk_key_hash (key_hash)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='API Key 表';
@@ -208,13 +208,18 @@ ALTER TABLE api_key
 -- ============================================================
 CREATE TABLE IF NOT EXISTS api_key_quota_log
 (
-    id             BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
-    api_key_id     BIGINT NOT NULL COMMENT 'API Key 主键ID',
-    type           VARCHAR(16) NOT NULL COMMENT 'SET设置/ADD追加',
-    amount         DECIMAL(12,6) DEFAULT 0 COMMENT '本次变更金额',
-    balance_after  DECIMAL(12,6) DEFAULT 0 COMMENT '变更后总额度',
-    used_after     DECIMAL(12,6) DEFAULT 0 COMMENT '变更后已用',
-    remark         VARCHAR(255) DEFAULT NULL COMMENT '备注',
-    created_time   DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '变更时间',
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    api_key_id    BIGINT      NOT NULL COMMENT 'API Key 主键ID',
+    type          VARCHAR(16) NOT NULL COMMENT 'SET设置/ADD追加',
+    amount        DECIMAL(12, 6) DEFAULT 0 COMMENT '本次变更金额',
+    balance_after DECIMAL(12, 6) DEFAULT 0 COMMENT '变更后总额度',
+    used_after    DECIMAL(12, 6) DEFAULT 0 COMMENT '变更后已用',
+    remark        VARCHAR(255)   DEFAULT NULL COMMENT '备注',
+    created_time  DATETIME       DEFAULT CURRENT_TIMESTAMP COMMENT '变更时间',
     KEY idx_quota_log_key (api_key_id)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='API Key 额度变更流水';
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='API Key 额度变更流水';
+
+update api_key_usage
+set model ='deepseek-v4-flash-0731'
+where model is null;

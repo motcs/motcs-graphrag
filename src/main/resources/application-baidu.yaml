@@ -107,8 +107,8 @@ app:
   ai:
     provider: ${AI_PROVIDER:baidu}
     provider-name: ${AI_PROVIDER_NAME:百度千帆}
-    chat-models: ${AI_CHAT_MODELS:deepseek-v4-flash-0731,glm-5.3-flash,ernie-4.5-turbo-20260402,ernie-4.5-turbo-128k}
-    default-chat-model: ${AI_CHAT_MODEL:deepseek-v4-flash-0731}
+    chat-models: ${AI_CHAT_MODELS:deepseek-v4.1-flash,deepseek-v4-flash-0731,glm-5.3-flash,ernie-4.5-turbo-20260402,ernie-4.5-turbo-128k}
+    default-chat-model: ${AI_CHAT_MODEL:deepseek-v4.1-flash}
 
   r2dbc:
     url: ${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:motcs}
