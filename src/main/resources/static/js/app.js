@@ -3218,7 +3218,7 @@ async function loadApiKeys(page) {
             const usageTitle = `输入 ${(k.promptTokens || 0).toLocaleString()} · 输出 ${(k.completionTokens || 0).toLocaleString()} token`;
             const quota = (k.quota === null || k.quota === undefined) ? -1 : k.quota;
             const usedQ = (k.usedQuota || 0);
-            const quotaText = quota < 0 ? '无限' : (quota === 0 ? '禁止' : '¥' + usedQ.toFixed(4) + ' / ¥' + quota.toFixed(2));
+            const quotaText = quota < 0 ? '¥' + usedQ.toFixed(4) + ' / 无限' : (quota === 0 ? '禁止' : '¥' + usedQ.toFixed(4) + ' / ¥' + quota.toFixed(2));
             const quotaPct = quota > 0 ? Math.min(100, Math.max(0, Math.round(usedQ / quota * 100))) : 0;
             const quotaBar = quota > 0 ? '<div class="w-24 h-1 mt-1 rounded bg-white/10"><div class="h-1 rounded ' + (quotaPct >= 100 ? 'bg-red-400' : 'bg-emerald-400') + '" style="width:' + quotaPct + '%"></div></div>' : '';
             tr.dataset.keyId = k.id;
@@ -3320,7 +3320,7 @@ async function loadApiKeyUsagePage(page) {
 
             const quota = (k.quota === null || k.quota === undefined) ? -1 : k.quota;
             const usedQ = (k.usedQuota || 0);
-            const quotaText = quota < 0 ? '无限' : (quota === 0 ? '禁止' : '¥' + usedQ.toFixed(4) + ' / ¥' + quota.toFixed(2));
+            const quotaText = quota < 0 ? '¥' + usedQ.toFixed(4) + ' / 无限' : (quota === 0 ? '禁止' : '¥' + usedQ.toFixed(4) + ' / ¥' + quota.toFixed(2));
             const quotaPct = quota > 0 ? Math.min(100, Math.max(0, Math.round(usedQ / quota * 100))) : 0;
             const quotaBar = quota > 0 ? '<div class="w-24 h-1 mt-1 rounded bg-white/10"><div class="h-1 rounded ' + (quotaPct >= 100 ? 'bg-red-400' : 'bg-emerald-400') + '" style="width:' + quotaPct + '%"></div></div>' : '';
             tr.dataset.keyId = k.id;
