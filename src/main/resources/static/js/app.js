@@ -920,6 +920,7 @@ async function loadChatUsage(page) {
         $('cuCompletion').textContent = (sum.completionTokens ?? 0).toLocaleString();
         $('cuTotal').textContent = (sum.totalTokens ?? 0).toLocaleString();
         $('cuInputCost').textContent = '¥' + (sum.inputCost ?? 0).toFixed(4);
+        $('cuOutputCost').textContent = '¥' + (sum.outputCost ?? 0).toFixed(4);
         $('cuTotalCost').textContent = '¥' + (sum.totalCost ?? 0).toFixed(4);
         tbody.innerHTML = '';
         const list = data.content || [];
@@ -936,6 +937,7 @@ async function loadChatUsage(page) {
                                 <td class="py-2 pr-3 text-right text-xs text-gray-400 hide-mobile">${(u.cacheTokens || 0).toLocaleString()}</td>
                 <td class="py-2 pr-3 text-right text-xs text-gray-300 font-medium">${(u.totalTokens || 0).toLocaleString()}</td>
                 <td class="py-2 pr-3 text-right text-xs text-gray-400">¥${(u.inputCost || 0).toFixed(4)}</td>
+                <td class="py-2 pr-3 text-right text-xs text-gray-400">¥${(u.outputCost || 0).toFixed(4)}</td>
                 <td class="py-2 pr-3 text-right text-xs text-amber-400 font-medium">¥${(u.totalCost || 0).toFixed(4)}</td>
                 <td class="py-2 text-right text-xs text-gray-400 whitespace-nowrap">${u.updatedTime ? formatTime(u.updatedTime) : '-'}</td>`;
             tbody.appendChild(tr);
