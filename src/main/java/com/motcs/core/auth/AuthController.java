@@ -233,7 +233,7 @@ public class AuthController {
      */
     @GetMapping("/usage-overview")
     @Operation(summary = "用量监控总览（分页，按使用量降序，默认每页10条）")
-    public Mono<ResponseEntity<Map<String, Object>>> apiKeyUsageOverview(Pageable pageable) {
+    public Mono<ResponseEntity<Map<String, Object>>> overview(Pageable pageable) {
         return this.apiKeyUsageService.overview(pageable).map(ResponseEntity::ok);
     }
 

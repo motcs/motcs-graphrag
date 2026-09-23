@@ -13,19 +13,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 /**
  * API Key 使用监控服务：
@@ -88,12 +84,13 @@ public class ApiKeyUsageService extends DatabaseService {
         ModelPricing.Price price = ModelPricing.of(model);
         double inputCost = uncached / 1000.0 * price.inPerK() + cache / 1000.0 * price.cachePerK();
         double outputCost = c / 1000.0 * price.outPerK();
+        double cacheCost = cache / 1000.0 * price.cachePerK();
         ApiKeyUsage usage = ApiKeyUsage.builder().apiKeyId(apiKeyId).userId(userId)
                 .sessionId(sessionId).model(model).promptTokens(p)
                 .completionTokens(c).totalTokens(t).cacheTokens(cache).createdTime(LocalDateTime.now()).build();
         // 明细落库 + 汇总累加，两者并行；任一项失败不影响另一个
         Mono<Void> detail = this.apiKeyUsageRepository.save(usage).then();
-        Mono<Void> summary = this.summaryRepository.incrementUsage(apiKeyId, p, c, t, cache, inputCost, outputCost, LocalDateTime.now()).then();
+        Mono<Void> summary = this.summaryRepository.incrementUsage(apiKeyId, p, c, t, cache, inputCost, outputCost, cacheCost, LocalDateTime.now()).then();
         return Mono.when(detail, summary).doOnSuccess(_ ->
                 log.debug("API Key 用量已记录并累加汇总: apiKeyId={}, userId={}, totalTokens={}", apiKeyId, userId, t));
     }
@@ -170,32 +167,28 @@ public class ApiKeyUsageService extends DatabaseService {
         String sql = """
                 SELECT COUNT(*) AS total_calls, COALESCE(SUM(s.input_tokens), 0) AS prompt_tokens,
                  COALESCE(SUM(s.output_tokens), 0) AS completion_tokens, COALESCE(SUM(s.total_tokens), 0) AS total_tokens,
-                 COALESCE(SUM(s.input_cost), 0) AS input_cost, COALESCE(SUM(s.output_cost), 0) AS output_cost
+                 COALESCE(SUM(s.cache_tokens), 0) AS cache_tokens, COALESCE(SUM(s.input_cost), 0) AS input_cost,
+                 COALESCE(SUM(s.output_cost), 0) AS output_cost, COALESCE(SUM(s.cache_cost), 0) AS cache_cost
                  FROM chat_session_usage s
                 """;
         return super.queryWith(sql, Map.of(), ChatUsageSummaryRow.class).next().map(row -> {
             double inputCost = row.getInputCost() == null ? 0d : row.getInputCost();
             double outputCost = row.getOutputCost() == null ? 0d : row.getOutputCost();
-            row.setTotalCost(inputCost + outputCost);
+            row.setTotalCost(inputCost + outputCost + (row.getCacheCost() == null ? 0d : row.getCacheCost()));
             return row;
-        }).defaultIfEmpty(new ChatUsageSummaryRow(0L, 0L, 0L, 0L, 0d, 0d, 0d));
+        }).defaultIfEmpty(new ChatUsageSummaryRow(0L, 0L, 0L, 0L, 0L, 0d, 0d, 0d, 0d));
     }
 
     /**
      * 平台对话会话用量分页：每个会话一行（按会话聚合的总消耗）。
      */
     public Mono<Page<ChatUsageRow>> chatUsageList(Pageable pageable) {
-        String sql = "SELECT s.id AS id, s.session_id AS session_id, s.user_id AS user_id, s.title AS title," +
-                " s.chat_count AS chat_count, s.input_tokens AS input_tokens, s.output_tokens AS output_tokens," +
-                " s.reasoning_tokens AS reasoning_tokens, s.cache_tokens AS cache_tokens, s.total_tokens AS total_tokens," +
-                " s.input_cost AS input_cost, s.output_cost AS output_cost, s.total_cost AS total_cost, s.updated_time AS updated_time" +
-                " FROM chat_session_usage s ORDER BY s.updated_time DESC, s.id DESC" + ContextUtil.applyPage(pageable);
-        String countSql = "SELECT COUNT(*) FROM chat_session_usage s";
+        String sql = "SELECT * FROM chat_session_usage " + ContextUtil.applyPage(pageable);
+        String countSql = "SELECT COUNT(*) FROM chat_session_usage ";
         Mono<List<ChatUsageRow>> listMono = super.queryWith(sql, Map.of(), ChatUsageRow.class).collectList();
         Mono<Long> countMono = super.countWith(countSql, Map.of()).defaultIfEmpty(0L);
         return Mono.zip(listMono, countMono).map(t -> new PageImpl<>(t.getT1(), pageable, t.getT2()));
     }
-
     /**
      * 用量监控总览：直接查汇总表 JOIN api_key，按 total_tokens 降序分页。
      * <p>
@@ -204,11 +197,19 @@ public class ApiKeyUsageService extends DatabaseService {
      * @param pageable 分页参数（默认 size=10，由 Controller 设定）
      */
     public Mono<Map<String, Object>> overview(Pageable pageable) {
+        List<Sort.Order> sorts = pageable.getSort().stream().map(s -> {
+            if (Objects.equals("totalCost", s.getProperty())) {
+                return Sort.Order.by("(output_cost + input_cost)").with(s.getDirection());
+            }
+            return s;
+        }).collect(Collectors.toList());
+        PageRequest pageRequest = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(sorts));
+
         String countQuery = "select sum(if(is_delete = 0, 1, 0)) as active_keys, sum(if(is_delete = 1, 1, 0)) as deleted_keys from api_key";
         Mono<List<ApiKeyUsageCount>> collectedList = super.queryWith(countQuery, Map.of(), ApiKeyUsageCount.class).collectList();
         Mono<UsageOverviewRow> totalsMono = this.summaryRepository.globalTotals()
                 .defaultIfEmpty(new UsageOverviewRow(null, null, null, null,
-                        null, null, null, 0L, 0L, 0L, 0L, 0L,
+                        null, null, null, 0L, 0L, 0L, 0L, 0L, 0d,
                         null, null, null, null, null, null));
         String sql = """
                 select * from (SELECT k.id AS id, k.name AS name, k.key_prefix AS key_prefix,
@@ -216,10 +217,11 @@ public class ApiKeyUsageService extends DatabaseService {
                  COALESCE(s.total_calls, 0) AS total_calls, COALESCE(s.prompt_tokens, 0) AS prompt_tokens,
                  COALESCE(s.completion_tokens, 0) AS completion_tokens, COALESCE(s.total_tokens, 0) AS total_tokens,
                  COALESCE(s.input_cost, 0) AS input_cost, COALESCE(s.output_cost, 0) AS output_cost,
-                 COALESCE(s.cache_tokens, 0)  AS cache_tokens,
+                 COALESCE(s.cache_tokens, 0) AS cache_tokens, COALESCE(s.cache_cost, 0) AS cache_cost,
                  s.last_used_at AS last_used_at FROM api_key k LEFT JOIN api_key_usage_summary s ON
                  s.api_key_id = k.id order by COALESCE(s.total_tokens, 0) desc, id) t
-                """ + ContextUtil.applyPage(pageable);
+                """ + ContextUtil.applyPage(pageRequest);
+        log.info("sql:{}",sql);
         Mono<List<UsageOverviewRow>> listMono = super.queryWith(sql, Map.of(), UsageOverviewRow.class).collectList();
         return Mono.zip(collectedList, totalsMono).flatMap(t -> {
             AtomicLong totalKeys = new AtomicLong(0);
@@ -254,15 +256,16 @@ public class ApiKeyUsageService extends DatabaseService {
                 double v1 = g.outputCost() == null ? 0d : g.outputCost();
                 result.put("outputCost", v1);
                 result.put("cacheTokens", g.cacheTokens());
+                result.put("cacheCost", g.cacheCost());
                 result.put("totalCost", v + v1);
                 // 当前页数据
                 result.put("content", list);
                 // 分页信息
-                result.put("number", pageable.getPageNumber());
-                result.put("size", pageable.getPageSize());
+                result.put("number", pageRequest.getPageNumber());
+                result.put("size", pageRequest.getPageSize());
                 result.put("totalElements", totalKeys.get());
-                int totalPages = pageable.getPageSize() == 0 ? 0
-                        : (int) ((totalKeys.get() + pageable.getPageSize() - 1) / pageable.getPageSize());
+                int totalPages = pageRequest.getPageSize() == 0 ? 0
+                        : (int) ((totalKeys.get() + pageRequest.getPageSize() - 1) / pageRequest.getPageSize());
                 result.put("totalPages", totalPages);
                 return result;
             });

@@ -60,6 +60,9 @@ public class ChatSessionUsage implements Serializable {
     @Column("output_cost")
     private Double outputCost;
 
+    @Column("cache_cost")
+    private Double cacheCost;
+
     @Column("total_cost")
     private Double totalCost;
 

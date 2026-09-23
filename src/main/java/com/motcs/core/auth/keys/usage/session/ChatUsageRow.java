@@ -21,6 +21,7 @@ public record ChatUsageRow(
         @Schema(description = "总 token") Long totalTokens,
         @Schema(description = "输入花费(元)") Double inputCost,
         @Schema(description = "输出花费(元)") Double outputCost,
+        @Schema(description = "缓存花费(元)") Double cacheCost,
         @Schema(description = "总花费(元)") Double totalCost,
         @Schema(description = "最近使用时间") LocalDateTime updatedTime
 ) {

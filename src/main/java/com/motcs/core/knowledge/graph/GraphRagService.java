@@ -1196,7 +1196,8 @@ public class GraphRagService extends DatabaseService {
         int uncachedInput = Math.max(input - cache, 0);
         double inputCost = uncachedInput / 1000.0 * price.inPerK() + cache / 1000.0 * price.cachePerK();
         double outputCost = output / 1000.0 * price.outPerK();
-        double totalCost = inputCost + outputCost;
+        double cacheCost = cache / 1000.0 * price.cachePerK();
+        double totalCost = inputCost + outputCost + cacheCost;
         ChatUsageRecord record = ChatUsageRecord.builder()
                 .userId(userId).sessionId(sessionId).model(model)
                 .inputTokens(input).outputTokens(output)
@@ -1204,7 +1205,7 @@ public class GraphRagService extends DatabaseService {
                 .createdTime(LocalDateTime.now()).build();
         Mono<Void> detail = this.chatUsageRecordRepository.save(record).then();
         Mono<Void> session = this.chatSessionUsageRepository.accumulate(sessionId, userId, title,
-                input, output, reasoning, cache, total, inputCost, outputCost, totalCost).then();
+                input, output, reasoning, cache, total, inputCost, outputCost, cacheCost, totalCost).then();
         return Mono.when(detail, session)
                 .onErrorResume(e -> {
                     log.warn("记录对话用量失败: {}", e.getMessage());

@@ -677,7 +677,12 @@ function switchTab(tab) {
 }
 
 /* ---------- 列表列排序（正序/倒序/重置 三态） ---------- */
-const sortState = {tenant: {field: '', dir: ''}, apikey: {field: '', dir: ''}, monitor: {field: '', dir: ''}};
+const sortState = {
+    tenant: {field: '', dir: ''},
+    apikey: {field: '', dir: ''},
+    monitor: {field: '', dir: ''},
+    chatUsage: {field: '', dir: ''}
+};
 
 function sortParam(ns, defaultSort) {
     const s = sortState[ns];
@@ -862,11 +867,14 @@ async function loadUsageOverview(page) {
         $('monTotalKeys').textContent = data.totalKeys ?? 0;
         $('monKeysBreakdown').textContent = `在用 ${data.activeKeys ?? 0} · 已删除 ${data.deletedKeys ?? 0}`;
         $('monTotalCost').textContent = '¥' + (data.totalCost ?? 0).toFixed(4);
-        $('monCostBreakdown').innerHTML = '输入 ¥' + (data.inputCost ?? 0).toFixed(4) + '<br>输出 ¥' + (data.outputCost ?? 0).toFixed(4);
+        $('monInputCost').textContent = '¥' + (data.inputCost ?? 0).toFixed(4);
+        $('monOutputCost').textContent = '¥' + (data.outputCost ?? 0).toFixed(4);
+        $('monCacheCost').textContent = '¥' + (data.cacheCost ?? 0).toFixed(4);
         $('monTotalCalls').textContent = data.totalCalls ?? 0;
-        $('monPrompt').textContent = (data.promptTokens ?? 0).toLocaleString();
-        $('monCompletion').textContent = (data.completionTokens ?? 0).toLocaleString();
-        $('monTotal').textContent = (data.totalTokens ?? 0).toLocaleString();
+        $('monPrompt').textContent = 'TK ' + (data.promptTokens ?? 0).toLocaleString();
+        $('monCompletion').textContent = 'TK ' + (data.completionTokens ?? 0).toLocaleString();
+        $('monTotal').textContent = 'TK ' + (data.totalTokens ?? 0).toLocaleString();
+        $('monCache').textContent = 'TK ' + (data.cacheTokens ?? 0).toLocaleString();
         // 表格
         tbody.innerHTML = '';
         const keys = data.content || [];
@@ -881,19 +889,19 @@ async function loadUsageOverview(page) {
                     ? '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-emerald-500/15 text-emerald-400">启用</span>'
                     : '<span class="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-xs bg-gray-500/15 text-gray-400">停用</span>');
             tr.innerHTML = `
-                <td class="py-2.5 pr-3 font-mono text-xs text-gray-300 hide-mobile">${escapeHtml(k.keyPrefix || k.prefix || 'sk-…')}…</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-300 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '-')}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(systemNameOf(k.systemType))}</td>
                 <td class="py-2.5 pr-3">${enabledBadge}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-300">${k.totalCalls ?? 0}</td>
-                <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.promptTokens ?? 0).toLocaleString()}</td>
-                <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.completionTokens ?? 0).toLocaleString()}</td>
-<td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">${(k.cacheTokens ?? 0).toLocaleString()}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400">${(k.promptTokens ?? 0).toLocaleString()}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400">${(k.completionTokens ?? 0).toLocaleString()}</td>
+<td class="py-2.5 pr-3 text-right text-xs text-gray-400">${(k.cacheTokens ?? 0).toLocaleString()}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-gray-300 font-medium">${(k.totalTokens ?? 0).toLocaleString()}</td>
-                <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">¥${(k.inputCost ?? 0).toFixed(4)}</td>
-                <td class="py-2.5 pr-3 text-right text-xs text-gray-400 hide-mobile">¥${(k.outputCost ?? 0).toFixed(4)}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400">¥${(k.inputCost ?? 0).toFixed(4)}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400">¥${(k.outputCost ?? 0).toFixed(4)}</td>
+                <td class="py-2.5 pr-3 text-right text-xs text-gray-400">¥${(k.cacheCost ?? 0).toFixed(4)}</td>
                 <td class="py-2.5 pr-3 text-right text-xs text-amber-400 font-medium">¥${((k.inputCost ?? 0) + (k.outputCost ?? 0)).toFixed(4)}</td>
-                <td class="py-2.5 pr-3 pl-6 text-xs text-gray-400 hide-mobile">${k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未使用'}</td>
+                <td class="py-2.5 pr-3 pl-6 text-xs text-gray-400">${k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未使用'}</td>
 `;
             tbody.appendChild(tr);
         });
@@ -910,17 +918,19 @@ async function loadChatUsage(page) {
     try {
         const [sumRes, listRes] = await Promise.all([
             fetch(`${AUTH_BASE}/chat-usage/summary`),
-            fetch(`${AUTH_BASE}/chat-usage/list?page=${state.chatUsagePage || 0}&size=${state.pageSize}`)
+            fetch(`${AUTH_BASE}/chat-usage/list?page=${state.chatUsagePage || 0}&size=${state.pageSize}${sortParam('chatUsage', 'updatedTime,id,desc')}`)
         ]);
         if (!listRes.ok) throw new Error('HTTP ' + listRes.status);
         const sum = sumRes.ok ? await sumRes.json() : {};
         const data = await listRes.json();
         $('cuTotalCalls').textContent = (sum.totalCalls ?? 0).toLocaleString();
-        $('cuPrompt').textContent = (sum.promptTokens ?? 0).toLocaleString();
-        $('cuCompletion').textContent = (sum.completionTokens ?? 0).toLocaleString();
-        $('cuTotal').textContent = (sum.totalTokens ?? 0).toLocaleString();
+        $('cuPrompt').textContent = 'TK ' + (sum.promptTokens ?? 0).toLocaleString();
+        $('cuCompletion').textContent = 'TK ' + (sum.completionTokens ?? 0).toLocaleString();
+        $('cuCache').textContent = 'TK ' + (sum.cacheTokens ?? 0).toLocaleString();
+        $('cuTotal').textContent = 'TK ' + (sum.totalTokens ?? 0).toLocaleString();
         $('cuInputCost').textContent = '¥' + (sum.inputCost ?? 0).toFixed(4);
         $('cuOutputCost').textContent = '¥' + (sum.outputCost ?? 0).toFixed(4);
+        $('cuCacheCost').textContent = '¥' + (sum.cacheCost ?? 0).toFixed(4);
         $('cuTotalCost').textContent = '¥' + (sum.totalCost ?? 0).toFixed(4);
         tbody.innerHTML = '';
         const list = data.content || [];
@@ -930,14 +940,15 @@ async function loadChatUsage(page) {
             tr.className = 'border-b border-white/5';
             tr.innerHTML = `
                 <td class="py-2 pr-3 text-xs text-gray-300">${escapeHtml(u.title || '-')}</td>
-                <td class="py-2 pr-3 text-xs text-gray-400 hide-mobile">${escapeHtml(u.userId || '-')}</td>
+                <td class="py-2 pr-3 text-xs text-gray-400">${escapeHtml(u.userId || '-')}</td>
                 <td class="py-2 pr-3 text-right text-xs text-gray-400">${u.chatCount || 0}</td>
                 <td class="py-2 pr-3 text-right text-xs text-gray-400">${(u.inputTokens || 0).toLocaleString()}</td>
                 <td class="py-2 pr-3 text-right text-xs text-gray-400">${(u.outputTokens || 0).toLocaleString()}</td>
-                                <td class="py-2 pr-3 text-right text-xs text-gray-400 hide-mobile">${(u.cacheTokens || 0).toLocaleString()}</td>
+                                <td class="py-2 pr-3 text-right text-xs text-gray-400">${(u.cacheTokens || 0).toLocaleString()}</td>
                 <td class="py-2 pr-3 text-right text-xs text-gray-300 font-medium">${(u.totalTokens || 0).toLocaleString()}</td>
                 <td class="py-2 pr-3 text-right text-xs text-gray-400">¥${(u.inputCost || 0).toFixed(4)}</td>
                 <td class="py-2 pr-3 text-right text-xs text-gray-400">¥${(u.outputCost || 0).toFixed(4)}</td>
+                <td class="py-2 pr-3 text-right text-xs text-gray-400">¥${(u.cacheCost || 0).toFixed(4)}</td>
                 <td class="py-2 pr-3 text-right text-xs text-amber-400 font-medium">¥${(u.totalCost || 0).toFixed(4)}</td>
                 <td class="py-2 text-right text-xs text-gray-400 whitespace-nowrap">${u.updatedTime ? formatTime(u.updatedTime) : '-'}</td>`;
             tbody.appendChild(tr);
@@ -3273,12 +3284,11 @@ async function loadApiKeys(page) {
             tr.dataset.used = usedQ;
             tr.innerHTML = `
                 <td class="py-2.5 pr-3 cursor-pointer text-primary-400 hover:underline" onclick="showApiKeyUsage(${k.id}, '${escapeHtml((k.name || '').replace(/'/g, "\'"))}')">${escapeHtml(k.name || '')}</td>
-                <td class="py-2.5 pr-3 font-mono text-xs text-gray-400 hide-mobile">${escapeHtml(k.keyPrefix || '')}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400">${escapeHtml(tenantNameOf(k.tenantCode))} / ${escapeHtml(systemNameOf(k.systemType))}</td>
                 <td class="py-2.5 pr-3">${k.enabled ? '<span class="whitespace-nowrap text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400">启用</span>' : '<span class="whitespace-nowrap text-xs px-2.5 py-1 rounded-full bg-red-500/10 text-red-400">停用</span>'}</td>
                 <td class="py-2.5 pr-3 text-xs text-gray-400" title="${usageTitle}">${usageText}</td>
                 <td class="py-2.5 pr-3 text-xs text-primary-400 cursor-pointer hover:underline" title="点击管理额度（已用 ${quotaPct}%）" onclick="openQuotaModal(${k.id})">${quotaText}${quotaBar}</td>
-                <td class="py-2.5 pr-3 text-xs text-gray-400 hide-mobile">${k.createdTime ? formatTime(k.createdTime) : '-'}</td>
+                <td class="py-2.5 pr-3 text-xs text-gray-400">${k.createdTime ? formatTime(k.createdTime) : '-'}</td>
                 <td class="py-2.5 text-right whitespace-nowrap">
                     <button onclick="toggleApiKey(${k.id}, ${k.enabled})" class="text-xs px-2 py-1 rounded-lg ${k.enabled ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'} transition mr-1">${k.enabled ? '停用' : '启用'}</button>
                     <button onclick="deleteApiKey(${k.id})" class="text-xs px-2 py-1 rounded-lg text-red-400 hover:bg-red-500/10 transition">删除</button>
@@ -3485,6 +3495,7 @@ initAuth();
 bindTableSort('tenant', loadTenants);
 bindTableSort('apikey', loadApiKeys);
 bindTableSort('monitor', loadUsageOverview);
+bindTableSort('chatUsage', loadChatUsage);
 
 let quotaModalKeyId = null;
 
@@ -3517,7 +3528,7 @@ async function refreshQuotaModal() {
                 <td class="py-1.5 pr-3 text-xs text-gray-400">${formatTime(l.createdTime)}</td>
                 <td class="py-1.5 pr-3 text-xs">${isSet ? '<span class="px-2 py-0.5 rounded bg-primary-500/15 text-primary-300">设置</span>' : '<span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400">追加</span>'}</td>
                 <td class="py-1.5 pr-3 text-xs text-right text-gray-300">¥${(l.amount || 0).toFixed(4)}</td>
-                <td class="py-1.5 pr-3 text-xs text-gray-400 hide-mobile">${escapeHtml(l.remark || '-')}</td>`;
+                <td class="py-1.5 pr-3 text-xs text-gray-400">${escapeHtml(l.remark || '-')}</td>`;
             quotaLogs.appendChild(tr);
         });
         let q = (data.quota == null || isNaN(data.quota)) ? -1 : Number(data.quota);

@@ -24,6 +24,12 @@ public class ChatUsageSummaryRow {
     @Schema(description = "总 token")
     private Long totalTokens;
 
+    @Schema(description = "缓存 token")
+    private Long cacheTokens;
+
+    @Schema(description = "缓存花费（元）")
+    private Double cacheCost;
+
     @Schema(description = "输入花费（元）")
     private Double inputCost;
 
@@ -32,4 +38,5 @@ public class ChatUsageSummaryRow {
 
     @Schema(description = "总花费（元）")
     private Double totalCost;
+
 }

@@ -28,6 +28,12 @@
             }
         }
     </script>
+<style>
+.table-container { display: block; width: 100%; min-width: 0; max-width: 100%; overflow-x: auto; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
+.table-container table { white-space: nowrap; width: 100%; }
+@media (max-width: 768px) { .table-container table { width: auto; min-width: max-content; } }
+
+</style>
 </head>
 <body class="bg-dark-950 text-gray-100 min-h-screen">
 
@@ -747,7 +753,6 @@
                         <th class="text-left py-2 font-medium sortable" data-sort-ns="apikey" data-sort="name"
                             data-label="备注">备注
                         </th>
-                        <th class="text-left py-2 font-medium hide-mobile">Key</th>
                         <th class="text-left py-2 font-medium sortable" data-sort-ns="apikey" data-sort="tenantCode"
                             data-label="租户/系统">租户/系统
                         </th>
@@ -757,7 +762,7 @@
                         <th class="text-left py-2 font-medium sortable" data-sort-ns="apikey" data-sort="totalTokens"
                             data-label="用量（次数/总token）">用量（次数/总token）
                         </th>
-                        <th class="text-left py-2 font-medium hide-mobile sortable">额度（已用/总额）
+                        <th class="text-left py-2 font-medium sortable">额度（已用/总额）
                         </th>
                         <th class="text-left py-2 font-medium whitespace-nowrap" data-sort-ns="apikey"
                             data-sort="createdTime" data-label="创建时间">创建时间
@@ -782,7 +787,7 @@
                         <h2 class="text-2xl font-bold">用量监控</h2>
                         <p class="text-sm text-gray-400 mt-1">各 API Key 的调用次数与 token 消耗汇总（每次 /keys/v1/chat
                             对话自动记录，停用不再产生记录）<br>
-                            <span style="color: #ef4444">花费按当前对话模型单价估算，价格最后更新日期(2026-09-22)。</span>
+                            <span style="color: #ef4444">花费按当前对话模型单价估算，价格最后更新日期(2026-09-22)，单位（元/人民币）。</span>
                         </p>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
@@ -807,27 +812,30 @@
                         <div class="text-2xl font-bold" id="monTotalCalls">-</div>
                     </div>
                     <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
-                        <div class="text-xs text-gray-400 mb-1">总输入 token</div>
-                        <div class="text-2xl font-bold" id="monPrompt">-</div>
+                        <div class="text-xs text-gray-400 mb-1">输入花费</div>
+                        <div class="text-2xl font-bold text-amber-400" id="monInputCost">-</div>
+                        <div class="text-xs text-cyan-400 mt-1" id="monPrompt">-</div>
                     </div>
                     <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
-                        <div class="text-xs text-gray-400 mb-1">总输出 token</div>
-                        <div class="text-2xl font-bold" id="monCompletion">-</div>
+                        <div class="text-xs text-gray-400 mb-1">输出花费</div>
+                        <div class="text-2xl font-bold text-amber-400" id="monOutputCost">-</div>
+                        <div class="text-xs text-cyan-400 mt-1" id="monCompletion">-</div>
                     </div>
                     <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
-                        <div class="text-xs text-gray-400 mb-1">总 token 消耗</div>
-                        <div class="text-2xl font-bold text-primary-400" id="monTotal">-</div>
+                        <div class="text-xs text-gray-400 mb-1">缓存花费</div>
+                        <div class="text-2xl font-bold text-amber-400" id="monCacheCost">-</div>
+                        <div class="text-xs text-cyan-400 mt-1" id="monCache">-</div>
                     </div>
                     <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
                         <div class="text-xs text-gray-400 mb-1">总花费</div>
                         <div class="text-2xl font-bold text-amber-400" id="monTotalCost">-</div>
-                        <div class="text-xs text-gray-400 mt-1" id="monCostBreakdown">-</div>
+                        <div class="text-xs text-primary-400 mt-1" id="monTotal">-</div>
                     </div>
                 </div>
-                <table class="w-full text-sm">
+                <div class="overflow-x-auto table-container">
+                <table class="text-sm">
                     <thead>
                     <tr class="text-xs text-gray-400 border-b border-white/5">
-                        <th class="text-left py-2 font-medium hide-mobile">Key</th>
                         <th class="text-left py-2 font-medium sortable" data-sort-ns="monitor" data-sort="name"
                             data-label="备注">备注
                         </th>
@@ -840,28 +848,30 @@
                         <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor" data-sort="totalCalls"
                             data-label="调用次数">调用次数
                         </th>
-                        <th class="text-right py-2 font-medium hide-mobile sortable" data-sort-ns="monitor"
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor"
                             data-sort="promptTokens" data-label="输入 token">输入 token
                         </th>
-                        <th class="text-right py-2 font-medium hide-mobile sortable" data-sort-ns="monitor"
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor"
                             data-sort="completionTokens" data-label="输出 token">输出 token
                         </th>
-                        <th class="text-right py-2 font-medium hide-mobile sortable" data-sort-ns="monitor"
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor"
                             data-sort="cacheTokens" data-label="缓存 token">缓存 token
                         </th>
                         <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor" data-sort="totalTokens"
                             data-label="总 token">总 token
                         </th>
-                        <th class="text-right py-2 font-medium hide-mobile">输入花费</th>
-                        <th class="text-right py-2 font-medium hide-mobile">输出花费</th>
-                        <th class="text-right py-2 font-medium">总花费</th>
-                        <th class="text-left py-2 pl-6 font-medium hide-mobile sortable" data-sort-ns="monitor"
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor" data-sort="inputCost" data-label="输入花费" class="">输入花费</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor" data-sort="outputCost" data-label="输出花费" class="">输出花费</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor" data-sort="cacheCost" data-label="缓存花费" class="">缓存花费</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor" data-sort="totalCost" data-label="总花费">总花费</th>
+                        <th class="text-left py-2 pl-6 font-medium sortable" data-sort-ns="monitor"
                             data-sort="lastUsedAt" data-label="最近使用">最近使用
                         </th>
                     </tr>
                     </thead>
                     <tbody id="monitorUsageList"></tbody>
                 </table>
+                </div>
                 <div id="monitorPagination" class="mt-4 flex items-center justify-between text-xs text-gray-400"></div>
                 <div id="monitorUsageEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无 API Key
                     或调用记录
@@ -877,7 +887,7 @@
                         <h2 class="text-2xl font-bold">对话统计</h2>
                         <p class="text-sm text-gray-400 mt-1">所有智能问答对话的 token
                             消耗与花费明细（按对话时间倒序）<br>
-                            <span style="color: #ef4444">花费按当前对话模型单价估算，价格最后更新日期(2026-09-22)。</span>
+                            <span style="color: #ef4444">花费按当前对话模型单价估算，价格最后更新日期(2026-09-22)，单位（元/人民币）。</span>
                         </p>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
@@ -887,58 +897,57 @@
                         </button>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 md:grid-cols-7 gap-3 mb-6">
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
                     <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
                         <div class="text-xs text-gray-400 mb-1">总会话数</div>
                         <div class="text-2xl font-bold" id="cuTotalCalls">-</div>
                     </div>
                     <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
-                        <div class="text-xs text-gray-400 mb-1">总输入 token</div>
-                        <div class="text-2xl font-bold" id="cuPrompt">-</div>
-                    </div>
-                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
-                        <div class="text-xs text-gray-400 mb-1">总输出 token</div>
-                        <div class="text-2xl font-bold" id="cuCompletion">-</div>
-                    </div>
-                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
-                        <div class="text-xs text-gray-400 mb-1">总 token</div>
-                        <div class="text-2xl font-bold text-primary-400" id="cuTotal">-</div>
-                    </div>
-                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
                         <div class="text-xs text-gray-400 mb-1">输入花费</div>
                         <div class="text-2xl font-bold text-amber-400" id="cuInputCost">-</div>
+                        <div class="text-xs text-cyan-400 mt-1" id="cuPrompt">-</div>
                     </div>
                     <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
                         <div class="text-xs text-gray-400 mb-1">输出花费</div>
                         <div class="text-2xl font-bold text-amber-400" id="cuOutputCost">-</div>
+                        <div class="text-xs text-cyan-400 mt-1" id="cuCompletion">-</div>
+                    </div>
+                    <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
+                        <div class="text-xs text-gray-400 mb-1">缓存花费</div>
+                        <div class="text-2xl font-bold text-amber-400" id="cuCacheCost">-</div>
+                        <div class="text-xs text-cyan-400 mt-1" id="cuCache">-</div>
                     </div>
                     <div class="rounded-xl bg-dark-850 border border-white/5 p-4">
                         <div class="text-xs text-gray-400 mb-1">总花费</div>
                         <div class="text-2xl font-bold text-amber-400" id="cuTotalCost">-</div>
+                        <div class="text-xs text-primary-400 mt-1" id="cuTotal">-</div>
                     </div>
                 </div>
-                <table class="w-full text-sm">
+                <div class="overflow-x-auto table-container">
+                <table class="text-sm">
                     <thead>
                     <tr class="text-xs text-gray-400 border-b border-white/5">
-                        <th class="text-left py-2 font-medium">会话标题</th>
-                        <th class="text-left py-2 font-medium hide-mobile">用户</th>
-                        <th class="text-right py-2 font-medium">对话轮数</th>
-                        <th class="text-right py-2 font-medium">输入</th>
-                        <th class="text-right py-2 font-medium">输出</th>
-                        <th class="text-right py-2 font-medium hide-mobile">缓存</th>
-                        <th class="text-right py-2 font-medium">总token</th>
-                        <th class="text-right py-2 font-medium">输入花费</th>
-                        <th class="text-right py-2 font-medium">输出花费</th>
-                        <th class="text-right py-2 font-medium">总花费</th>
-                        <th class="text-right py-2 font-medium">最近使用</th>
+                        <th class="text-left py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="title" data-label="会话标题">会话标题</th>
+                        <th class="text-left py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="userId" data-label="用户名">用户名</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="chatCount" data-label="对话轮数">对话轮数</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="inputTokens" data-label="输入">输入token</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="outputTokens" data-label="输出">输出token</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="cacheTokens" data-label="缓存">缓存token</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="totalTokens" data-label="总token">总token</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="inputCost" data-label="输入花费">输入花费</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="outputCost" data-label="输出花费">输出花费</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="cacheCost" data-label="缓存花费">缓存花费</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="totalCost" data-label="总花费">总花费</th>
+                        <th class="text-right py-2 font-medium sortable" data-sort-ns="chatUsage" data-sort="updatedTime" data-label="最近使用">最近使用</th>
                     </tr>
                     </thead>
                     <tbody id="chatUsageList"></tbody>
                 </table>
+                </div>
+                </div>
                 <div id="chatUsagePagination"
                      class="mt-4 flex items-center justify-between text-xs text-gray-400"></div>
                 <div id="chatUsageEmpty" class="text-center text-gray-500 text-sm py-8 hidden">暂无对话记录</div>
-            </div>
         </section>
 
         <!-- API Key 用量明细弹窗 -->
@@ -955,23 +964,25 @@
                     </button>
                 </div>
                 <div class="overflow-auto flex-1 px-5 py-4">
-                    <table class="w-full text-sm">
+                <div class="overflow-x-auto table-container">
+                <table class="text-sm">
                         <thead>
                         <tr class="text-xs text-gray-400 border-b border-white/5">
                             <th class="text-left py-2 font-medium">时间</th>
-                            <th class="text-left py-2 font-medium">用户</th>
+<th class="text-left py-2 font-medium  sortable" data-sort-ns="chatUsage" data-sort="userId" data-label="用户">用户</th>
                             <th class="text-left py-2 font-medium">会话</th>
                             <th class="text-left py-2 font-medium">模型</th>
                             <th class="text-right py-2 font-medium">输入 token</th>
                             <th class="text-right py-2 font-medium">输出 token</th>
                             <th class="text-right py-2 font-medium">缓存 token</th>
-                            <th class="text-right py-2 font-medium sortable" data-sort-ns="monitor"
+                            <th class="text-right py-2 font-medium sortable" data-sort-ns="chatUsage"
                                 data-sort="totalTokens" data-label="总 token">总 token
                             </th>
                         </tr>
                         </thead>
                         <tbody id="apiKeyUsageList"></tbody>
                     </table>
+                </div>
                     <div id="apiKeyUsageEmpty" class="text-center text-gray-500 text-sm py-6 hidden">暂无调用记录</div>
                 </div>
                 <div id="apiKeyUsagePagination"
@@ -1036,17 +1047,19 @@
                         </button>
                     </div>
                     <div class="text-xs text-gray-400 mb-2">变更明细</div>
-                    <table class="w-full text-sm">
+                <div class="overflow-x-auto table-container">
+                <table class="text-sm">
                         <thead>
                         <tr class="text-xs text-gray-400 border-b border-white/5">
                             <th class="text-left py-1.5 font-medium">时间</th>
                             <th class="text-left py-1.5 font-medium">类型</th>
                             <th class="text-right py-1.5 font-medium">金额</th>
-                            <th class="text-left py-1.5 font-medium hide-mobile">备注</th>
+                            <th class="text-left py-1.5 font-medium ">备注</th>
                         </tr>
                         </thead>
                         <tbody id="quotaLogList"></tbody>
                     </table>
+                </div>
                     <div id="quotaLogEmpty" class="text-center text-gray-500 text-sm py-6 hidden">暂无额度变更记录</div>
                 </div>
             </div>
@@ -1116,7 +1129,7 @@
 </div>
 
 <script src="js/config.js?v=1"></script>
-<script src="js/app.js?v=163"></script>
+<script src="js/app.js?v=177"></script>
 
 <!-- 替换文档弹窗 -->
 <div id="reuploadModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
