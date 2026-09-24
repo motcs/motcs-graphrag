@@ -14,10 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -57,6 +54,11 @@ public class ApiChatController {
     private final ApiKeyService apiKeyService;
     private final GraphRagService graphRagService;
     private final ApiKeyUsageService apiKeyUsageService;
+
+    @GetMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> chatGet(GraphRagRequest request, ServerWebExchange exchange) {
+        return this.chat(request, exchange);
+    }
 
     /**
      * API Key 对话（SSE）：问题与用户编码必填，租户/系统来自 Key 绑定值；流结束后记录 token 消耗
