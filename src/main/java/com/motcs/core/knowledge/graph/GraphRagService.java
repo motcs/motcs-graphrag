@@ -384,6 +384,7 @@ public class GraphRagService extends DatabaseService {
             src.put("fileName", meta.getOrDefault("source", "未知文件"));
             src.put("title", meta.getOrDefault("title", "未命名文档"));
             src.put("docCode", meta.get("docCode"));
+            src.put("tenantCode", meta.get("tenantCode"));
             src.put("chunkIndex", meta.get("chunkIndex"));
             src.put("pageNumber", meta.getOrDefault("pageNumber", 1));
             src.put("titleHierarchy", meta.get("titleHierarchy"));

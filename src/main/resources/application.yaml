@@ -30,3 +30,6 @@ app:
     api.key.length: ${API_KEY_LEN:40}
     # 登录 x-token 过期时间（秒），默认 2 小时；每次有效请求自动续期（滑动过期）
     token.ttl-seconds: ${AUTH_TOKEN_TTL:7200}
+  # 文件存储：upload-dir 为文件根目录（上传落盘 + 静态文件代理接口共用，由环境变量 FILE_UPLOAD_DIR 配置）
+  file:
+    upload-dir: ${FILE_UPLOAD_DIR:./uploads}

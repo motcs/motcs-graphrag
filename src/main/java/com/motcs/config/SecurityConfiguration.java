@@ -194,6 +194,9 @@ public class SecurityConfiguration {
                                 "/css/**", "/js/**", "/img/**", "/v3/api-docs/**", "/swagger-ui/**",
                                 "/swagger-ui.html", "/webjars/**").permitAll()
 
+                        // 静态文件代理接口（nginx 反向代理读取上传文件）：公开
+                        .pathMatchers("/files/v1/**").permitAll()
+
                         .pathMatchers("/auth/v1/login").permitAll()
                         // AI 平台探测（前端登录前即需调用，用于渲染模型下拉框）
                         .pathMatchers("/ai/v1/provider").hasAnyRole("ADMIN", "API_KEY")
