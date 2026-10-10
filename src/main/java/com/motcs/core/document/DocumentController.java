@@ -443,6 +443,79 @@ public class DocumentController {
     }
 
     /**
+     * 补充上传：仅把文件保存到 uploadDir/T{tenant}/{docCode.扩展名}，不做文档解析、不改任何数据，
+     * 支持覆盖原始文档。用于补上此前缺失/无法预览的文档源文件。
+     * <p>严格限制：上传文件的扩展名必须与该文档源文件格式一致，否则拒绝。
+     * <p>POST /documents/v1/supplement-upload  Content-Type: multipart/form-data
+     * 参数：file（必填）、docCode（必填）、tenantCode（可选，为空默认 0）
+     */
+    @PostMapping(value = "/supplement-upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Mono<ResponseEntity<Map<String, Object>>> supplementUpload(
+            @RequestPart("file") FilePart file,
+            @RequestPart(value = "docCode", required = false) String docCode,
+            @RequestPart(value = "tenantCode", required = false) String tenantCode) {
+        if (ObjectUtils.isEmpty(docCode)) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("message", "docCode 必填");
+            return Mono.just(ResponseEntity.badRequest().body(err));
+        }
+        String tc = StringUtils.hasLength(tenantCode) ? tenantCode.trim() : "0";
+        log.debug("收到补充上传请求: docCode={}, tenantCode={}, fileName={}", docCode, tc, file.filename());
+        // 读取源文档以校验格式：补充上传必须与源文件扩展名一致
+        return documentInfoRepository.findByDocCode(docCode)
+                .switchIfEmpty(Mono.error(RestServerException.withMsg("文档不存在: " + docCode)))
+                .flatMap(info -> file.content().collectList().map(buffers -> {
+                    byte[] fileBytes = Utils.concatenateBuffers(buffers);
+                    MediaType ct = file.headers().getContentType();
+                    return new ByteArrayMultipartFile("file", file.filename(),
+                            ct != null ? ct.toString() : "application/octet-stream", fileBytes);
+                }).flatMap(multipartFile -> {
+                    // 格式校验：源扩展名非空时必须一致（大小写不敏感）
+                    String srcExt = sourceExtOf(info);
+                    String upExt = Utils.getFileExtension(multipartFile.getOriginalFilename()).toLowerCase();
+                    if (srcExt != null && !upExt.equals(srcExt)) {
+                        Map<String, Object> err = new HashMap<>();
+                        err.put("success", false);
+                        err.put("message", "文件格式必须与源文件一致（." + srcExt + "），当前上传格式为 ." + upExt);
+                        return Mono.just(ResponseEntity.badRequest().body(err));
+                    }
+                    try {
+                        String stored = documentService.saveSupplementaryFile(multipartFile, tc, docCode);
+                        Map<String, Object> body = new HashMap<>();
+                        body.put("success", true);
+                        body.put("message", "补充上传成功（仅保存文件，未做解析）");
+                        body.put("docCode", docCode);
+                        body.put("tenantCode", tc);
+                        body.put("storedFileName", stored);
+                        return Mono.just(ResponseEntity.ok(body));
+                    } catch (Exception e) {
+                        log.error("补充上传失败: docCode={}, error={}", docCode, e.getMessage(), e);
+                        Map<String, Object> body = new HashMap<>();
+                        body.put("success", false);
+                        body.put("message", "补充上传失败: " + e.getMessage());
+                        return Mono.just(ResponseEntity.internalServerError().body(body));
+                    }
+                }));
+    }
+
+    /**
+     * 从文档元数据推导源文件扩展名（不带点，小写）。
+     * 优先取 storedFileName（docCode.扩展名），为空时回退到 fileName（原始名）。
+     *
+     * @return 扩展名，如 "docx"；无法确定时返回 null
+     */
+    private String sourceExtOf(DocumentInfo info) {
+        String name = StringUtils.hasLength(info.getStoredFileName())
+                ? info.getStoredFileName() : info.getFileName();
+        if (!StringUtils.hasLength(name)) {
+            return null;
+        }
+        int dot = name.lastIndexOf('.');
+        return dot >= 0 && dot < name.length() - 1 ? name.substring(dot + 1).toLowerCase() : null;
+    }
+
+    /**
      * 文档统计接口（轻量聚合，不返回明细）
      * GET /documents/v1/stats?tenantCode=xxx
      */

@@ -4,6 +4,9 @@
 
 const API_BASE = '/documents/v1';
 
+// 源文件预览：域名 + view 预览服务地址（nginx 将 /files/ 代理到后端 /files/v1/）
+const PREVIEW_HOST = 'https://ai.jinqiruanjian.com';
+
 /* ============================================================
  * 认证与 API Key 管理（登录 / 退出 / 401 处理 / API Key 管理）
  * ============================================================ */
@@ -1580,7 +1583,19 @@ $('historyBatchDelete').addEventListener('click', batchDeleteHistory);
 
 /* ---------- 知识库来源弹窗 ---------- */
 function openSourceModal(src) {
-    $('sourceModalTitle').textContent = src.title || src.fileName || '来源详情';
+    const name = src.title || src.fileName || '来源详情';
+    // 文档名称可点击：点击打开源文件预览（复用文档管理预览逻辑，iframe 内嵌 view/?u=base64）
+    const title = $('sourceModalTitle');
+    title.innerHTML = `<button type="button" class="src-preview-btn cursor-pointer text-primary-400 hover:text-primary-300 hover:underline text-left"
+        title="点击预览源文件">${escapeHtml(name)}</button>`;
+    title.querySelector('.src-preview-btn')?.addEventListener('click', ev => {
+        ev.stopPropagation();
+        // 关闭来源详情框，打开源文件预览
+        $('sourceModal').classList.add('hidden');
+        $('sourceModal').classList.remove('flex');
+        // source 已含 tenantCode/docCode/fileName，resolveStoredName 拼出磁盘存储名（docCode+扩展名）
+        openFilePreview({tenantCode: src.tenantCode, docCode: src.docCode, fileName: src.fileName, title: name});
+    });
     const page = src.pageNumber != null && src.pageNumber !== '' ? '第 ' + src.pageNumber + ' 页' : '-';
     const chunk = src.chunkIndex != null ? '第 ' + src.chunkIndex + ' 段' : '-';
     $('sourceModalMeta').innerHTML = `
@@ -2518,6 +2533,9 @@ async function loadDocuments(page) {
                         ${(doc.docCode && doc.status !== 'PROCESSING') ? `<button class="doc-edit-btn w-9 h-9 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 flex items-center justify-center transition" data-doc-code="${escapeHtml(doc.docCode)}" data-doc-title="${escapeHtml(doc.title || doc.fileName || '')}" title="重新上传最新版">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
                         </button>` : ''}
+                        ${doc.docCode ? `<button class="doc-supplement-btn w-9 h-9 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 flex items-center justify-center transition" data-doc-code="${escapeHtml(doc.docCode)}" title="补充上传（仅保存文件，不解析，可覆盖原文件）">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3V21"/></svg>
+                        </button>` : ''}
                         ${canDelete ? `<button class="doc-delete-btn w-9 h-9 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 flex items-center justify-center transition" data-doc-code="${escapeHtml(doc.docCode || '')}" data-file-name="${escapeHtml(doc.fileName || '')}" title="删除文档">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                         </button>` : ''}
@@ -2538,11 +2556,11 @@ async function loadDocuments(page) {
             </div>`;
         }).join('');
 
-        // 绑定：点击卡片预览、删除、重传
+        // 绑定：点击卡片预览、删除、重传、补充上传
         list.querySelectorAll('.doc-card').forEach(card => {
             card.addEventListener('click', (e) => {
                 if (e.target.closest('.doc-delete-btn') || e.target.closest('.doc-retry-btn')
-                    || e.target.closest('.doc-edit-btn')
+                    || e.target.closest('.doc-edit-btn') || e.target.closest('.doc-supplement-btn')
                     || e.target.closest('.doc-actions') || e.target.closest('.tag')) return;
                 showDocPreview(card.dataset.docCode, card.dataset.docName);
             });
@@ -2561,6 +2579,12 @@ async function loadDocuments(page) {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 replaceDocumentFile(btn.dataset.docCode, btn.dataset.docTitle || '', btn);
+            });
+        });
+        list.querySelectorAll('.doc-supplement-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                supplementUpload(btn.dataset.docCode);
             });
         });
         list.querySelectorAll('.doc-retry-btn').forEach(btn => {
@@ -2635,6 +2659,11 @@ function showDocPreview(docCode, docName) {
         showToast('未找到文档', 'error');
         return;
     }
+    // 能解析出源文件存储名时，打开源文件预览（iframe）；租户缺失时默认按 0 处理
+    if (resolveStoredName(doc)) {
+        openFilePreview(doc);
+        return;
+    }
     const statusText = doc.status === 'SUCCESS' ? '已完成' : doc.status === 'PROCESSING' ? '处理中' : doc.status === 'FAILED' ? '处理失败' : (doc.status || '-');
     const statusClass = doc.status === 'SUCCESS' ? 'text-green-400' : doc.status === 'PROCESSING' ? 'text-yellow-400' : doc.status === 'FAILED' ? 'text-red-400' : 'text-gray-400';
     const displayTitle = doc.title || doc.fileName || '未命名';
@@ -2655,6 +2684,125 @@ function showDocPreview(docCode, docName) {
     $('sourceModalContent').innerHTML = `<div class="text-xs text-gray-500 mb-2">文档描述</div><div class="text-sm text-gray-300 whitespace-pre-wrap leading-7">${desc}</div>`;
     $('sourceModal').classList.remove('hidden');
     $('sourceModal').classList.add('flex');
+}
+
+/**
+ * 解析源文件磁盘文件名：优先 storedFileName；为空时依次从 filePath 取 basename、
+ * 用 docCode + 扩展名（取自 fileName）推断。
+ * 历史文档（从 Neo4j 迁移）常缺 stored_file_name，需要兜底才能拼出预览 URL。
+ */
+function resolveStoredName(doc) {
+    let name = (doc.storedFileName || '').trim();
+    if (name) return name;
+    const fp = (doc.filePath || '').trim();
+    if (fp) {
+        const seg = fp.replace(/\\/g, '/').split('/').filter(Boolean);
+        if (seg.length) name = seg[seg.length - 1].trim();
+    }
+    if (name) return name;
+    const fn = (doc.fileName || '').trim();
+    const dot = fn.lastIndexOf('.');
+    const ext = dot > 0 ? fn.slice(dot) : '';
+    return (doc.docCode || '') + ext;
+}
+
+/**
+ * 源文件预览：将源文件访问 URL 转 base64，拼 view/?u= 预览地址，用 iframe 内嵌展示。
+ * 源文件地址：PREVIEW_HOST/files/T{租户编码}/{存储文件名}（nginx 代理到后端 /files/v1/）
+ */
+function openFilePreview(doc) {
+    // 对话历史/来源等场景租户可能缺失，缺失时默认按全局租户 0 处理
+    const tenant = (doc.tenantCode || '').trim() || '0';
+    const stored = resolveStoredName(doc);
+    if (!stored) {
+        showToast('该文档暂无源文件可预览', 'error');
+        return;
+    }
+    const fileUrl = `${PREVIEW_HOST}/files/T${encodeURIComponent(tenant)}/${encodeURIComponent(stored)}`;
+    const viewUrl = `${PREVIEW_HOST}/view/?u=${b64url(fileUrl)}`;
+    $('previewModalTitle').textContent = doc.title || doc.fileName || '源文件预览';
+    $('previewModalMeta').textContent = fileUrl;
+    const openNew = $('previewOpenNew');
+    if (openNew) openNew.href = viewUrl;
+    $('previewFrame').src = viewUrl;
+    const pm = $('previewModal');
+    pm.classList.remove('hidden');
+    pm.classList.add('flex');
+}
+
+/**
+ * URL 安全 base64：先转 UTF-8 字节再 base64，并对结果做 encodeURIComponent，
+ * 避免中文/特殊字符以及 base64 中 +/= 在 query 参数里被解析损坏。
+ */
+function b64url(input) {
+    const bytes = new TextEncoder().encode(input);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return encodeURIComponent(btoa(bin));
+}
+
+function closeFilePreview() {
+    const pm = $('previewModal');
+    pm.classList.add('hidden');
+    pm.classList.remove('flex');
+    const frame = $('previewFrame');
+    if (frame) frame.src = 'about:blank'; // 释放 iframe，避免播放/预览残留
+}
+
+$('previewModalClose')?.addEventListener('click', closeFilePreview);
+$('previewModal')?.addEventListener('click', e => {
+    if (e.target.id === 'previewModal') closeFilePreview();
+});
+
+/**
+ * 补充上传：仅把所选文件按 docCode+扩展名保存到对应租户目录（uploads/T{tenant}/），
+ * 不做解析、不改任何数据，可覆盖原文件。用于补上此前缺失/无法预览的文档源文件。
+ */
+async function supplementUpload(docCode) {
+    if (!docCode) {
+        showToast('缺少文档编码', 'error');
+        return;
+    }
+    const docs = Array.isArray(state.docsCache) ? state.docsCache : [];
+    const doc = docs.find(d => d.docCode === docCode);
+    // 源文件格式：优先 storedFileName（docCode.扩展名），回退 fileName；取扩展名（含点，小写）
+    const srcName = doc ? (doc.storedFileName || doc.fileName || '') : '';
+    const dot = srcName.lastIndexOf('.');
+    const srcExt = dot > 0 ? srcName.slice(dot).toLowerCase() : '';   // 如 ".docx"
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = srcExt ? srcExt : '*/*';   // 文件选择框限制为源文件格式
+    input.onchange = async () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        // 前端再次校验：上传文件扩展名必须与源文件一致
+        if (srcExt) {
+            const fName = file.name || '';
+            const fdot = fName.lastIndexOf('.');
+            const fileExt = fdot > 0 ? fName.slice(fdot).toLowerCase() : '';
+            if (fileExt !== srcExt) {
+                showToast(`文件格式必须与源文件一致（${srcExt}）`, 'error');
+                return;
+            }
+        }
+        const tenant = doc ? (doc.tenantCode || '0') : '0';
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('docCode', docCode);
+        fd.append('tenantCode', tenant);
+        try {
+            const res = await fetch(`${API_BASE}/supplement-upload`, {method: 'POST', body: fd});
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.success) {
+                showToast(data.message || '补充上传成功', 'success');
+            } else {
+                showToast(data.message || '补充上传失败', 'error');
+            }
+        } catch (err) {
+            showToast('补充上传失败: ' + err.message, 'error');
+        }
+    };
+    input.click();
 }
 
 /**

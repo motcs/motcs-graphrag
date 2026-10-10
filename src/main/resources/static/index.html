@@ -1089,6 +1089,38 @@
     </div>
 </div>
 
+<!-- 源文件预览弹窗（iframe 内嵌 view/?u=base64 预览） -->
+<div id="previewModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+    <div class="bg-dark-900 rounded-2xl border border-white/10 w-full max-w-6xl h-[88vh] flex flex-col m-4 shadow-2xl">
+        <div class="flex items-start justify-between px-6 py-4 border-b border-white/5">
+            <div class="flex-1 min-w-0 pr-4">
+                <h3 class="text-base font-semibold text-gray-100 truncate" id="previewModalTitle">源文件预览</h3>
+                <div id="previewModalMeta" class="mt-1 text-xs text-gray-500 truncate"></div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+                <a id="previewOpenNew" target="_blank" rel="noopener"
+                   class="text-gray-400 hover:text-white transition w-8 h-8 rounded-lg hover:bg-white/5 flex items-center justify-center"
+                   title="新窗口打开">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6v6m-11 5L21 3"/>
+                    </svg>
+                </a>
+                <button id="previewModalClose"
+                        class="text-gray-400 hover:text-white transition w-8 h-8 rounded-lg hover:bg-white/5 flex items-center justify-center"
+                        title="关闭">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <div class="flex-1 min-h-0">
+            <iframe id="previewFrame" class="w-full h-full border-0 rounded-b-2xl bg-white" src="about:blank"></iframe>
+        </div>
+    </div>
+</div>
+
 <!-- Toast 通知 -->
 <div id="toast" class="fixed bottom-6 right-6 z-50 hidden">
     <div class="px-5 py-3 rounded-xl shadow-2xl text-sm flex items-center gap-2" id="toastInner"></div>

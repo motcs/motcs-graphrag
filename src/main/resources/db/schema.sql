@@ -32,3 +32,12 @@ SET cache_cost = ROUND(
                                     ELSE 0 END, 6)
 WHERE cache_cost = 0
   AND cache_tokens > 0;
+
+-- 同步历史文档存储文件名：stored_file_name 为空时，用 docCode + fileName 扩展名拼接（幂等）
+-- 例：docCode=20260918D0032、fileName=委员移动端操作文档（政协）.doc -> 20260918D0032.doc
+UPDATE document_info
+SET stored_file_name = CONCAT(doc_code, '.', SUBSTRING_INDEX(file_name, '.', -1))
+WHERE (stored_file_name IS NULL OR stored_file_name = '')
+  AND doc_code IS NOT NULL AND doc_code <> ''
+  AND file_name IS NOT NULL AND file_name <> ''
+  AND file_name LIKE '%.%';

@@ -72,6 +72,28 @@ public class DocumentService extends DatabaseService {
      * 上传文档初始化（同步部分）：校验 → 清理旧数据 → 保存文件 → 创建占位分片(PROCESSING)
      * <p>
      * 不触发异步处理，返回 UploadContext 供调用方编排异步流程。
+     * 补充上传：仅把文件保存到 uploadDir/T{tenant}/{docCode.扩展名}，不做文档解析、不改任何数据。
+     * 用于补上此前缺失/无法预览的文档源文件；同名文件已存在时覆盖。
+     *
+     * @param file       上传的文件
+     * @param tenantCode 租户编码（为空时默认 0）
+     * @param docCode    文档业务编码（必填），用于拼存储文件名 docCode + 扩展名
+     * @return 存储文件名（basename）
+     */
+    public String saveSupplementaryFile(MultipartFile file, String tenantCode, String docCode) throws java.io.IOException {
+        String safeOriginal = Paths.get(Objects.requireNonNull(file.getOriginalFilename())).getFileName().toString();
+        String ext = Utils.getFileExtension(safeOriginal);
+        String storedFileName = ext.isBlank() ? docCode : docCode + "." + ext;
+        // 仅落盘（FileUtils.saveFileAs 内部 REPLACE_EXISTING 覆盖）；不建分片、不更新 document_info
+        FileUtils.saveFileAs(file, uploadDir, tenantCode, storedFileName);
+        log.debug("补充上传落盘: {} -> {}", storedFileName, Paths.get(uploadDir, "T" + tenantCode, storedFileName));
+        return storedFileName;
+    }
+
+    /**
+     * 上传文档初始化（同步部分）：校验 → 清理旧数据 → 保存文件 → 创建占位分片(PROCESSING)
+     * <p>
+     * 不触发异步处理，返回 UploadContext 供调用方编排异步流程。
      * 非 SUCCESS 文档不参与知识搜索（向量检索过滤 status=SUCCESS）。
      */
     public Mono<UploadContext> uploadDocument(DocumentUploadRequest request) {
@@ -636,7 +658,11 @@ public class DocumentService extends DatabaseService {
      */
     private void backfillStoredFileName() {
         try {
-            String sql = "update document_info set stored_file_name = file_path where stored_file_name is null;";
+            String sql = """
+                    UPDATE document_info SET stored_file_name = CONCAT(doc_code, '.', SUBSTRING_INDEX(file_name, '.', -1))
+                     WHERE (stored_file_name IS NULL OR stored_file_name = '') AND doc_code <> ''
+                     AND file_name IS NOT NULL AND file_name <> '' AND file_name LIKE '%.%'
+                    """;
             this.databaseClient.sql(sql).fetch().rowsUpdated().subscribe(res -> log.debug("同步数据条数：{}", res));
         } catch (Exception e) {
             log.warn("backfill stored_file_name failed: {}", e.getMessage());
