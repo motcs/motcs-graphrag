@@ -9,6 +9,8 @@ import com.motcs.core.document.info.DocumentInfoRepository;
 import com.motcs.core.knowledge.graph.GraphRagRequest;
 import com.motcs.core.knowledge.graph.GraphRagService;
 import com.motcs.core.knowledge.record.ChatMessage;
+import com.motcs.core.knowledge.record.unanswered.UnansweredQuestion;
+import com.motcs.core.knowledge.record.unanswered.UnansweredQuestionRepository;
 import com.motcs.core.knowledge.record.session.ChatSession;
 import com.motcs.core.knowledge.record.session.ChatSessionRequest;
 import com.motcs.core.request.FileUploadRequest;
@@ -18,6 +20,7 @@ import com.motcs.core.tenant.TenantConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -34,11 +37,10 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import tools.jackson.databind.JsonNode;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -58,6 +60,7 @@ public class DocumentController {
     private final WebClient.Builder webClientBuilder;
     private final TenantConfigService tenantConfigService;
     private final DocumentInfoRepository documentInfoRepository;
+    private final UnansweredQuestionRepository unansweredQuestionRepository;
 
     /**
      * 租户下拉列表：固定附加"0 - 全部租户（超管）"选项，其余取自租户配置表（启用中）
@@ -287,6 +290,8 @@ public class DocumentController {
                 request.setSources(sourcesJson.get());
                 request.setReasoning(reasoningBuilder.toString());
                 this.graphRagService.saveConversation(request).subscribe();
+                // 落库"本地无法回复"问题（含回答与思考；不依赖预判断，兜底检测）
+                this.graphRagService.recordUnansweredIfApplicable(request).subscribe();
                 String titleText = ObjectUtils.isEmpty(request.getQuestion()) ? sessionId : (request.getQuestion().length() > 50 ?
                         request.getQuestion().substring(0, 50) : request.getQuestion());
                 this.graphRagService.recordChatUsage(request.getUserId(), sessionId, usedModel, titleText, usageRefHolder.get()).subscribe();
@@ -513,6 +518,113 @@ public class DocumentController {
         }
         int dot = name.lastIndexOf('.');
         return dot >= 0 && dot < name.length() - 1 ? name.substring(dot + 1).toLowerCase() : null;
+    }
+
+    /**
+     * 本地知识库无法回复问题统计（数据库聚合）
+     * GET /documents/v1/unanswered/stats?tenantCode=&startTime=&endTime=
+     * startTime/endTime 格式 yyyy-MM-dd 或 yyyy-MM-dd HH:mm:ss，缺省默认最近7天
+     * 返回：total=累计提问次数、count=不同问题数、stats=按问题聚合列表
+     */
+    @GetMapping("/unanswered/stats")
+    public Mono<ResponseEntity<Map<String, Object>>> unansweredStats(
+            @RequestParam(value = "tenantCode", required = false) String tenantCode,
+            @RequestParam(value = "startTime", required = false) String startTime,
+            @RequestParam(value = "endTime", required = false) String endTime) {
+        LocalDateTime end = parseTime(endTime).orElse(LocalDateTime.now());
+        LocalDateTime start = parseTime(startTime).orElse(end.minusDays(7));
+        return this.unansweredQuestionRepository.statsByQuestion(blankToNull(tenantCode), start, end)
+                .collectList()
+                .map(stats -> {
+                    long total = stats.stream().mapToLong(s -> s.getCnt() == null ? 0L : s.getCnt()).sum();
+                    Map<String, Object> body = new HashMap<>();
+                    body.put("success", true);
+                    body.put("total", total);
+                    body.put("count", stats.size());
+                    body.put("stats", stats);
+                    return ResponseEntity.ok(body);
+                });
+    }
+
+    /**
+     * 本地知识库无法回复问题对话记录（明细分页，含 AI 回答与思考）
+     * GET /documents/v1/unanswered/list?tenantCode=&startTime=&endTime=&page=&size=
+     * 返回：content=明细列表、total、page、size、totalPages
+     */
+    @GetMapping("/unanswered/list")
+    public Mono<ResponseEntity<Page<UnansweredQuestion>>> unansweredList(
+            @RequestParam(value = "tenantCode", required = false) String tenantCode,
+            @RequestParam(value = "startTime", required = false) String startTime,
+            @RequestParam(value = "endTime", required = false) String endTime, Pageable pageable) {
+        int p = Math.max(pageable.getPageNumber(), 0);
+        int sz = Math.max(pageable.getPageSize(), 1);
+        long offset = (long) p * sz;
+        LocalDateTime end = parseTime(endTime).orElse(LocalDateTime.now());
+        LocalDateTime start = parseTime(startTime).orElse(end.minusDays(7));
+        String tc = blankToNull(tenantCode);
+        Mono<List<UnansweredQuestion>> listMono = this.unansweredQuestionRepository.pageInRange(tc, start, end, sz, offset).collectList();
+        Mono<Long> longMono = this.unansweredQuestionRepository.countInRange(tc, start, end);
+        return Mono.zip(longMono, listMono).map(t ->
+                ResponseEntity.ok(new PageImpl<>(t.getT2(), pageable, t.getT1())));
+    }
+
+    /**
+     * 本地知识库无法回复问题导出（仅 用户问题 + AI 回答，不导出思考内容）
+     * GET /documents/v1/unanswered/export?tenantCode=&startTime=&endTime=&ids=
+     * ids 为空导出该时间范围全部记录；ids 为逗号分隔的记录主键时仅导出勾选部分
+     */
+    @GetMapping("/unanswered/export")
+    public Mono<ResponseEntity<List<Map<String, Object>>>> unansweredExport(
+            @RequestParam(value = "tenantCode", required = false) String tenantCode,
+            @RequestParam(value = "startTime", required = false) String startTime,
+            @RequestParam(value = "endTime", required = false) String endTime,
+            @RequestParam(value = "ids", required = false) String ids) {
+        LocalDateTime end = parseTime(endTime).orElse(LocalDateTime.now());
+        LocalDateTime start = parseTime(startTime).orElse(end.minusDays(7));
+        String tc = blankToNull(tenantCode);
+        Flux<UnansweredQuestion> flux;
+        if (StringUtils.hasLength(ids)) {
+            List<Long> idList = new ArrayList<>();
+            for (String part : ids.split(",")) {
+                String t = part.trim();
+                if (!t.isEmpty()) {
+                    try {
+                        idList.add(Long.parseLong(t));
+                    } catch (NumberFormatException ignored) {
+                        // 忽略非法 id
+                    }
+                }
+            }
+            flux = idList.isEmpty() ? Flux.empty() : this.unansweredQuestionRepository.findAllById(idList);
+        } else {
+            flux = this.unansweredQuestionRepository.listInRange(tc, start, end);
+        }
+        return flux.map(q -> {
+            Map<String, Object> row = new HashMap<>();
+            row.put("id", q.getId());
+            row.put("question", q.getQuestion());
+            row.put("answer", q.getAnswer());
+            return row;
+        }).collectList().map(ResponseEntity::ok);
+    }
+
+    private Optional<LocalDateTime> parseTime(String s) {
+        if (!StringUtils.hasLength(s)) {
+            return Optional.empty();
+        }
+        String t = s.trim();
+        try {
+            if (t.length() <= 10) {
+                return Optional.of(LocalDate.parse(t, DateTimeFormatter.ofPattern("yyyy-MM-dd")).atStartOfDay());
+            }
+            return Optional.of(LocalDateTime.parse(t, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
+    private String blankToNull(String s) {
+        return StringUtils.hasLength(s) ? s.trim() : null;
     }
 
     /**

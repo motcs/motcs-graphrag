@@ -18,6 +18,8 @@ import com.motcs.core.knowledge.record.ChatMessage;
 import com.motcs.core.knowledge.record.ChatMessageRepository;
 import com.motcs.core.knowledge.record.ChatSessionSummary;
 import com.motcs.core.knowledge.record.ChatSessionSummaryRepository;
+import com.motcs.core.knowledge.record.unanswered.UnansweredQuestion;
+import com.motcs.core.knowledge.record.unanswered.UnansweredQuestionRepository;
 import com.motcs.core.knowledge.record.session.ChatSession;
 import com.motcs.core.knowledge.record.session.ChatSessionRepository;
 import com.motcs.core.knowledge.record.session.ChatSessionRequest;
@@ -67,6 +69,29 @@ public class GraphRagService extends DatabaseService {
      * 摘要时保留最近N轮原始对话
      */
     private static final int HISTORY_KEEP_RECENT = 10;
+
+    /**
+     * 本地知识库无法回复时，第三方 AI 直接回答的 Prompt（不依赖知识库上下文）
+     */
+    private static final String THIRD_PARTY_DIRECT_PROMPT = """
+            你是企业知识库问答助手。用户咨询的问题在当前数据库中暂无相关业务介绍。
+            请按以下要求回答：
+            1. 回答开头先提示：数据库暂无相关业务介绍，我现在联网搜索介绍。
+            2. 然后基于自身通用知识与能力，自主、认真地回答用户的问题，给出有价值、可操作的内容；尽量不要说"不知道"或"无法回答"，不要敷衍。
+            3. 若确实超出能力范围，也应尽力给出方向性建议或相关背景信息，而不是直接拒绝。
+            4. 回复使用 标准的Markdown 格式，简洁友好。
+            """;
+
+    /**
+     * 本地无命中且判断为闲聊/历史可答时的 Prompt（自然回复，不记录）
+     */
+    private static final String NO_RESULT_SMALLTALK_PROMPT = """
+            你是企业知识库问答助手，请根据历史对话理解用户意图。
+            1. 如果是打招呼、问候、闲聊（如"你好"、"谢谢"、"你是谁"等），请礼貌、自然地回复，不要提及知识库。
+            2. 如果历史对话中已存在用户要求重新回答、追问的问题及对应回答，请直接基于历史对话中的原回答重新组织语言作答，不要复述"知识库无相关内容"。
+            3. 你主要能力：分析文档，通过私有知识库回答问题。
+            4. 回复使用 标准的Markdown 格式，简洁友好，通常建议不超过100字。
+            """;
     /**
      * AI 实体+关系抽取 Prompt（用 __TEXT__ 占位，避免 StringTemplate 与 JSON 大括号冲突）
      */
@@ -99,7 +124,7 @@ public class GraphRagService extends DatabaseService {
     private static final String SYSTEM_PROMPT = """
             你是企业知识库问答助手，请优先依据下面提供的知识库上下文回答用户问题。
             如果知识库上下文没有相关内容，但【历史对话】中已存在用户要求重新回答的问题及对应回答，请直接基于历史对话中的原回答重新组织语言作答，不要复述"知识库无相关内容"。
-            只有知识库上下文与历史对话都没有相关内容时，才回复知识库无相关内容，不要编造信息。
+            若知识库上下文与用户问题不相关或不足以准确回答，请先提示：数据库暂无相关业务介绍，我现在联网搜索介绍；然后基于自身通用知识与能力自主回答，给出有价值、可操作的内容，坚决不要说"不知道""无法回答""没有检索到相关内容"等话术，不要编造信息。
             
             【回答要求】
             - 直接、自然地回答问题，只输出答案本身，不要复述或引用原文片段。
@@ -135,6 +160,7 @@ public class GraphRagService extends DatabaseService {
     private final DocumentChunkRepository chunkRepository;
     private final KnowledgeEntityRepository entityRepository;
     private final ChatMessageRepository chatMessageRepository;
+    private final UnansweredQuestionRepository unansweredQuestionRepository;
     private final ChatSessionRepository chatSessionRepository;
     private final ChatSessionSummaryRepository summaryRepository;
     private final ChatUsageRecordRepository chatUsageRecordRepository;
@@ -188,6 +214,19 @@ public class GraphRagService extends DatabaseService {
      */
     private Mono<QueryResult> buildAnswerQueryResult(GraphRagRequest ragQuery, ContextResult ctx, String rewriteDisplay) {
         return Mono.fromCallable(() -> {
+            // 检索有命中：先让 AI 判断知识库上下文能否准确回答；不能则视为"本地无法回复"，转第三方 AI 直接回答并记录
+            if (!canAnswerWithContext(ragQuery.getQuestion(), ctx.fullContext())) {
+                // 标记本次本地无法回复，回答完成后由 controller 统一落库（此时已含回答与思考）
+                ragQuery.setUnanswered(true);
+                ChatClient.ChatClientRequestSpec thirdSpec = this.chatClient.prompt()
+                        .system(s -> s.text(THIRD_PARTY_DIRECT_PROMPT)
+                                .param("history", ctx.historyContext())).user(ragQuery.getQuestion());
+                applyModelOptions(thirdSpec, ragQuery.getModel());
+                AtomicReference<Usage> usageRef = new AtomicReference<>();
+                Flux<ChatStreamEvent> thirdAnswer = streamChatEvents(thirdSpec, usageRef);
+                // 命中内容与问题无关，前端不展示引用来源
+                return new QueryResult(List.of(), thirdAnswer, usageRef, rewriteDisplay);
+            }
             ChatClient.ChatClientRequestSpec answerSpec = this.chatClient.prompt()
                     .system(s -> s.text(SYSTEM_PROMPT).param("context", ctx.fullContext())
                             .param("history", ctx.historyContext())).user(ragQuery.getQuestion());
@@ -204,26 +243,149 @@ public class GraphRagService extends DatabaseService {
      */
     private Mono<QueryResult> buildNoResultQueryResult(GraphRagRequest ragQuery, String historyContext, String rewriteDisplay) {
         return Mono.fromCallable(() -> {
-            String noResultPrompt = """
-                    你是企业知识库问答助手，请优先依据下面提供的知识库上下文回答用户问题。
-                    如果知识库上下文没有相关内容，但【历史对话】中已存在用户要求重新回答的问题及对应回答，请直接基于历史对话中的原回答重新组织语言作答，不要复述"知识库无相关内容"。
-                    只有知识库上下文与历史对话都没有相关内容时，才回复知识库无相关内容，不要编造信息。
-                    
-                    请根据用户问题判断：
-                    1. 如果是打招呼、问候、闲聊（如"你好"、"谢谢"、"你是谁"等），请礼貌、自然地回复，不要提及知识库。
-                    2. 如果是询问具体知识、文档内容、业务问题，请礼貌告知当前知识库中暂无相关内容，建议用户上传相关文档或换个问题。
-                    3. 你主要能力：分析文档，通过私有知识库回答问题。
-                    4. 回答的内容中不要带有文档原文这样的字眼，只需要根据文档内容回答即可，界面已经显示了引用的文档内容。
-                    
-                    回复使用 标准的Markdown 格式，简洁友好，通常建议不超过100字。""";
+            // 本地检索无命中：先分类该问题是闲聊/历史可答，还是知识问题。
+            // 知识问题 → 本地无法回复，转第三方 AI 直接回答并记录；闲聊/历史可答 → 自然回复，不记录。
+            boolean knowledge = isKnowledgeQuestion(ragQuery.getQuestion(), historyContext);
+            String prompt = knowledge ? THIRD_PARTY_DIRECT_PROMPT : NO_RESULT_SMALLTALK_PROMPT;
+            if (knowledge) {
+                // 标记本次本地无法回复，回答完成后由 controller 统一落库（此时已含回答与思考）
+                ragQuery.setUnanswered(true);
+            }
             ChatClient.ChatClientRequestSpec noResultSpec = this.chatClient.prompt()
-                    .system(s -> s.text(noResultPrompt).param("context", "无")
+                    .system(s -> s.text(prompt).param("context", "无")
                             .param("history", historyContext)).user(ragQuery.getQuestion());
             applyModelOptions(noResultSpec, ragQuery.getModel());
             AtomicReference<Usage> usageRef = new AtomicReference<>();
             Flux<ChatStreamEvent> answer = streamChatEvents(noResultSpec, usageRef);
             return new QueryResult(List.of(), answer, usageRef, rewriteDisplay);
         });
+    }
+
+    /**
+     * 快模型：用于改写/闲聊与可回答性判断，不跟随用户选择的重型思考模型
+     */
+    private void applyFastModel(ChatClient.ChatClientRequestSpec spec) {
+        if (Objects.equals(provider, "baidu")) {
+            spec.options(OpenAiChatOptions.builder().model("ernie-4.5-turbo-20260402"));
+        } else if (Objects.equals(provider, "zhipu")) {
+            spec.options(OpenAiChatOptions.builder().model("glm-4-flash"));
+        } else {
+            spec.options(OpenAiChatOptions.builder().model("deepseek-v3.2"));
+        }
+    }
+
+    /**
+     * 判断本地检索无命中时，用户问题是闲聊/历史可答，还是需要知识回答的知识问题。
+     * 返回 true = 知识问题（本地无法回复，需转第三方 AI 并记录）。
+     * 判断失败时保守按知识问题处理。
+     */
+    private boolean isKnowledgeQuestion(String question, String historyContext) {
+        try {
+            String judgePrompt = """
+                    你是企业知识库问答的问题分类器。结合历史对话判断用户当前问题属于哪一类：
+                    1. 闲聊问候（你好、谢谢、你是谁、在吗、打招呼等）→ 输出：闲聊
+                    2. 历史对话中已包含该问题的明确回答（用户是在要求重新回答、追问或引用之前内容）→ 输出：历史可答
+                    3. 需要知识或业务内容回答的知识/业务问题 → 输出：知识问题
+                    只输出三个词之一，不要解释。""";
+            ChatClient.ChatClientRequestSpec spec = chatClient.prompt()
+                    .system(judgePrompt)
+                    .user("【历史对话】\n" + (StringUtils.hasLength(historyContext) ? historyContext : "无")
+                            + "\n\n【当前问题】" + question);
+            applyFastModel(spec);
+            String text = spec.call().content();
+            return text != null && text.contains("知识问题");
+        } catch (Exception e) {
+            log.warn("问题分类判断失败，按知识问题处理: {}", e.getMessage());
+            return true;
+        }
+    }
+
+    /**
+     * 判断给定知识库上下文能否准确回答该问题。返回 true = 能依据上下文准确回答。
+     * 判断失败时保守按能回答处理（走原知识库回答，避免误转第三方 AI）。
+     */
+    private boolean canAnswerWithContext(String question, String context) {
+        try {
+            String judgePrompt = """
+                    你是严谨的判断器。判断提供的知识库上下文是否包含与用户问题【直接相关】的实质性内容，从而能够准确回答用户问题。
+                    判定规则：
+                    - 上下文包含与用户问题直接相关、足以准确回答的实质内容 → 输出：能回答
+                    - 上下文与用户问题无关、不相关、仅泛泛相关但不足以准确回答、或上下文为空 → 输出：不能回答
+                    请严格比对问题与上下文主题是否一致。例如：用户问"数智统战平台包含哪些功能"，而上下文中只有"人大代表职责"相关内容，属于明显无关，输出：不能回答。
+                    宁可保守判定"不能回答"，也不要误判"能回答"。
+                    只输出四个字：能回答 或 不能回答，不要解释。""";
+            ChatClient.ChatClientRequestSpec spec = chatClient.prompt()
+                    .system(judgePrompt)
+                    .user("【知识库上下文】\n" + context + "\n\n【用户问题】" + question);
+            applyFastModel(spec);
+            String text = spec.call().content();
+            return text != null && text.contains("能回答");
+        } catch (Exception e) {
+            log.warn("可回答性判断失败，按不能回答处理，转第三方AI并记录: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 记录"本地知识库无法回复"的问题（异步，不阻塞回答响应）
+     */
+    private void recordUnanswered(GraphRagRequest ragQuery) {
+        try {
+            UnansweredQuestion rec = UnansweredQuestion.builder()
+                    .question(ragQuery.getQuestion())
+                    .answer(ragQuery.getAnswer())
+                    .reasoning(ragQuery.getReasoning())
+                    .sources(ragQuery.getSources() != null ? ragQuery.getSources().toString() : null)
+                    .userId(ragQuery.getUserId())
+                    .sessionId(ragQuery.getSessionId())
+                    .tenantCode(ragQuery.getTenantCode())
+                    .systemType(ragQuery.getSystemType())
+                    .status("OPEN")
+                    .createTime(LocalDateTime.now())
+                    .build();
+            unansweredQuestionRepository.save(rec)
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .subscribe(
+                            r -> log.debug("记录本地无法回复问题: id={}, question={}", r.getId(), truncate(ragQuery.getQuestion())),
+                            e -> log.warn("记录本地无法回复问题失败: {}", e.getMessage()));
+        } catch (Exception e) {
+            log.warn("记录本地无法回复问题异常: {}", e.getMessage());
+        }
+    }
+
+    private String truncate(String s) {
+        return s == null ? "" : (s.length() > 50 ? s.substring(0, 50) + "..." : s);
+    }
+
+    /**
+     * 统一落库"本地无法回复"问题：优先依据服务层标记（unanswered=true），
+     * 同时兜底检查知识库回答路径是否含"无法回复"话术。
+     * 由 controller 在回答完成后调用，此时 request 已含完整回答与思考过程。
+     */
+    public Mono<Void> recordUnansweredIfApplicable(GraphRagRequest request) {
+        boolean flagged = Boolean.TRUE.equals(request.getUnanswered());
+        var sources = request.getSources();
+        boolean hasSource = sources != null && sources.isArray() && !sources.isEmpty();
+        if (!flagged && (!hasSource || !containsNegativeAnswer(request.getAnswer()))) {
+            return Mono.empty();
+        }
+        log.debug("记录本地无法回复问题: {}", truncate(request.getQuestion()));
+        recordUnanswered(request);
+        return Mono.empty();
+    }
+
+    private boolean containsNegativeAnswer(String answer) {
+        if (!StringUtils.hasLength(answer)) {
+            return false;
+        }
+        String[] markers = {"暂无相关业务", "数据库暂无", "没有检索到", "没有找到", "未检索到", "未找到",
+                "无法回答", "无法提供", "暂无相关", "没有相关内容", "没有查询到", "没有收录"};
+        for (String m : markers) {
+            if (answer.contains(m)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1174,11 +1336,6 @@ public class GraphRagService extends DatabaseService {
     }
 
     /**
-     * 查询结果封装：知识库来源 + SSE 事件流（思考/正文通过 type 字段区分）
-     * rewriteQuery：优化后的检索查询词（供前端展示"搜索中"状态）
-     */
-
-    /**
      * 记录一次平台对话的 token 用量到 chat_usage_record。
      * input=prompt，output=completion（含推理），reasoning=推理 token（从 nativeUsage 解析），
      * cache=缓存命中 token。解析失败的字段按 0 计。
@@ -1212,23 +1369,6 @@ public class GraphRagService extends DatabaseService {
                     log.warn("记录对话用量失败: {}", e.getMessage());
                     return Mono.empty();
                 });
-    }
-
-    @SuppressWarnings("unchecked")
-    private int extractReasoningTokens(Object nativeUsage) {
-        try {
-            if (nativeUsage instanceof java.util.Map<?, ?> map) {
-                Object cd = ((java.util.Map<String, Object>) map).get("completion_tokens_details");
-                if (cd instanceof java.util.Map<?, ?> details) {
-                    Object r = details.get("reasoning_tokens");
-                    if (r instanceof Number n) {
-                        return n.intValue();
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return 0;
     }
 
     public record QueryResult(List<Map<String, Object>> sources, Flux<ChatStreamEvent> answer,

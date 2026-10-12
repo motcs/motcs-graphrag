@@ -677,6 +677,7 @@ function switchTab(tab) {
     }
     if (tab === 'monitor') loadUsageOverview();
     if (tab === 'chatusage') loadChatUsage();
+    if (tab === 'unanswered') { loadUnansweredStats(); loadUnansweredList(0); }
 }
 
 /* ---------- 列表列排序（正序/倒序/重置 三态） ---------- */
@@ -965,6 +966,190 @@ async function loadChatUsage(page) {
 document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
+
+/* ---------- 无法回复统计 ---------- */
+function unansweredMonthRange(m) {
+    const [y, mo] = m.split('-').map(Number);
+    const start = `${m}-01`;
+    const next = new Date(y, mo, 1);
+    const end = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-01`;
+    return {start, end, label: `${y}年${mo}月`};
+}
+
+// 统计数字：数据库聚合接口（不同问题数 / 累计提问次数）
+async function loadUnansweredStats() {
+    const monthEl = $('unansweredMonth');
+    if (monthEl && !monthEl.value) {
+        const now = new Date();
+        monthEl.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+    const m = monthEl ? monthEl.value : '';
+    if (!m) {
+        showToast('请选择统计月份', 'error');
+        return;
+    }
+    const {start, end, label} = unansweredMonthRange(m);
+    if ($('uaMonthLabel')) $('uaMonthLabel').textContent = label;
+    try {
+        const res = await fetch(`${API_BASE}/unanswered/stats?startTime=${start}&endTime=${end}`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if ($('uaCount')) $('uaCount').textContent = (data.count ?? 0).toLocaleString();
+        if ($('uaTotal')) $('uaTotal').textContent = (data.total ?? 0).toLocaleString();
+    } catch (e) {
+        showToast('加载统计失败', 'error');
+    }
+}
+
+// 对话记录列表：明细分页接口（含 AI 回答与思考）
+async function loadUnansweredList(page) {
+    const monthEl = $('unansweredMonth');
+    const m = monthEl ? monthEl.value : '';
+    if (!m) return;
+    const {start, end} = unansweredMonthRange(m);
+    const p = typeof page === 'number' ? page : (state.unansweredPage || 0);
+    state.unansweredPage = p;
+    const size = 20;
+    try {
+        const res = await fetch(`${API_BASE}/unanswered/list?startTime=${start}&endTime=${end}&page=${p}&size=${size}`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const list = Array.isArray(data.content) ? data.content : [];
+        const tbody = $('unansweredList');
+        const empty = $('unansweredEmpty');
+        const pagination = $('unansweredPagination');
+        tbody.innerHTML = '';
+        empty.classList.toggle('hidden', list.length > 0);
+        if (pagination) pagination.innerHTML = '';
+        state.unansweredSelected = state.unansweredSelected || new Set();
+        list.forEach(rec => {
+            const ans = rec.answer || '';
+            const ansShow = ans ? (ans.length > 40 ? ans.slice(0, 40) + '…' : ans) : '-';
+            const rea = rec.reasoning || '';
+            const reaShow = rea ? (rea.length > 30 ? rea.slice(0, 30) + '…' : rea) : '-';
+            const id = rec.id;
+            const tr = document.createElement('tr');
+            tr.className = 'border-b border-white/5 cursor-pointer hover:bg-white/5 transition';
+            tr.innerHTML = `
+                <td class="py-2 pr-2 w-8">
+                    <input type="checkbox" class="accent-primary-500 ua-row-check" data-id="${id}" ${state.unansweredSelected.has(id) ? 'checked' : ''}>
+                </td>
+                <td class="py-2 pr-3 text-xs text-gray-400 whitespace-nowrap">${rec.createTime ? formatTime(rec.createTime) : '-'}</td>
+                <td class="py-2 pr-3 text-xs text-gray-200 max-w-[280px] truncate">${escapeHtml(rec.question || '-')}</td>
+                <td class="py-2 pr-3 text-xs text-gray-400 max-w-[260px] truncate">${escapeHtml(ansShow)}</td>
+                <td class="py-2 text-xs text-gray-500 max-w-[200px] truncate">${escapeHtml(reaShow)}</td>`;
+            tr.querySelector('.ua-row-check').addEventListener('click', e => {
+                e.stopPropagation();
+                if (e.target.checked) state.unansweredSelected.add(id);
+                else state.unansweredSelected.delete(id);
+                updateSelectAll();
+            });
+            tr.addEventListener('click', () => openUnansweredDetail(rec));
+            tbody.appendChild(tr);
+        });
+        updateSelectAll();
+        renderPagination(pagination, data.number || 0, data.totalPages || 0, data.totalElements || 0, p2 => loadUnansweredList(p2));
+    } catch (e) {
+        showToast('加载对话记录失败', 'error');
+    }
+}
+
+// 点击问题弹窗：与智能对话窗口一致的对话格式展示完整对话与回答片段（含思考）
+function openUnansweredDetail(rec) {
+    const modal = $('unansweredDetailModal');
+    if (!modal) return;
+    $('unansweredDetailSub').textContent =
+        rec.createTime ? `${formatTime(rec.createTime)} · 本地知识库无法回复` : '本地知识库无法回复';
+    const body = $('unansweredDetailBody');
+    body.innerHTML = '';
+    // 用户消息（与对话窗口一致）
+    const userRow = document.createElement('div');
+    userRow.className = 'msg-row user';
+    userRow.innerHTML = `<div class="msg-avatar">U</div><div class="msg-bubble">${escapeHtml(rec.question || '')}</div>`;
+    body.appendChild(userRow);
+    // AI 消息（与对话窗口一致，含思考折叠块 + markdown 回答）
+    const aiRow = document.createElement('div');
+    aiRow.className = 'msg-row ai';
+    aiRow.innerHTML = `
+        <div class="msg-avatar">AI</div>
+        <div class="msg-bubble">
+            <div class="ai-content">${renderMarkdown(rec.answer || '')}</div>
+            <div class="msg-sources hidden"></div>
+        </div>`;
+    if (rec.reasoning && rec.reasoning.trim()) {
+        renderReasoningBlock(aiRow.querySelector('.msg-bubble'), rec.reasoning);
+    }
+    // 引用文档（与对话窗口一致）
+    if (rec.sources) {
+        let srcs = rec.sources;
+        if (typeof srcs === 'string') {
+            try { srcs = JSON.parse(srcs); } catch (e) { srcs = null; }
+        }
+        if (Array.isArray(srcs) && srcs.length) {
+            renderSourcesInMessage(aiRow.querySelector('.msg-sources'), srcs);
+        }
+    }
+    body.appendChild(aiRow);
+    modal.classList.remove('hidden');
+}
+
+function closeUnansweredDetail() {
+    const modal = $('unansweredDetailModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+// 全选状态与表头全选框同步
+function updateSelectAll() {
+    const all = $('unansweredSelectAll');
+    if (!all) return;
+    const boxes = document.querySelectorAll('.ua-row-check');
+    const checked = document.querySelectorAll('.ua-row-check:checked');
+    all.checked = boxes.length > 0 && checked.length === boxes.length;
+}
+
+// 导出：勾选非空则导出勾选项，否则导出当前月份全部（仅 用户问题 + AI 回答）
+async function exportUnanswered() {
+    const selected = Array.from(state.unansweredSelected || []);
+    const monthEl = $('unansweredMonth');
+    const m = monthEl ? monthEl.value : '';
+    if (!m) { showToast('请选择统计月份', 'error'); return; }
+    const {start, end, label} = unansweredMonthRange(m);
+    try {
+        const base = `${API_BASE}/unanswered/export?startTime=${start}&endTime=${end}`;
+        // 未勾选 => 不传 ids，后端导出当前月份全部；勾选 => 仅导出勾选项
+        const url = selected.length ? `${base}&ids=${selected.join(',')}` : base;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const rows = await res.json();
+        if (!Array.isArray(rows) || rows.length === 0) {
+            showToast('没有可导出的记录', 'info');
+            return;
+        }
+        downloadCsv(rows, `${label}无法回复记录.csv`);
+        showToast(`已导出 ${rows.length} 条记录`, 'success');
+    } catch (e) {
+        showToast('导出失败', 'error');
+    }
+}
+
+// 生成 CSV（UTF-8 BOM 兼容 Excel，仅 用户问题 + AI 回答）并触发下载
+function downloadCsv(rows, filename) {
+    const esc = v => {
+        const s = v == null ? '' : String(v);
+        return '"' + s.replace(/"/g, '""') + '"';
+    };
+    const header = esc('用户问题') + ',' + esc('AI回答') + '\n';
+    const body = rows.map(r => esc(r.question) + ',' + esc(r.answer)).join('\n');
+    const blob = new Blob(['\uFEFF' + header + body], {type: 'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
 
 /* ---------- 健康检查 ---------- */
 async function checkHealth() {
@@ -3618,6 +3803,21 @@ function initAuth() {
     $('apiKeyCopyBtn').addEventListener('click', copyNewKey);
     $('monitorRefreshBtn').addEventListener('click', loadUsageOverview);
     chatUsageRefreshBtn.addEventListener('click', () => loadChatUsage(0));
+    const uaRefreshBtn = $('unansweredRefreshBtn');
+    if (uaRefreshBtn) uaRefreshBtn.addEventListener('click', () => { loadUnansweredStats(); loadUnansweredList(0); });
+    const uaMonth = $('unansweredMonth');
+    if (uaMonth) uaMonth.addEventListener('change', () => { loadUnansweredStats(); loadUnansweredList(0); });
+    const uaExport = $('unansweredExportBtn');
+    if (uaExport) uaExport.addEventListener('click', exportUnanswered);
+    const uaSelectAll = $('unansweredSelectAll');
+    if (uaSelectAll) uaSelectAll.addEventListener('change', () => {
+        const checked = uaSelectAll.checked;
+        document.querySelectorAll('.ua-row-check').forEach(cb => {
+            cb.checked = checked;
+            if (checked) state.unansweredSelected.add(Number(cb.dataset.id));
+            else state.unansweredSelected.delete(Number(cb.dataset.id));
+        });
+    });
     $('monitorRebuildBtn').addEventListener('click', async () => {
         const btn = $('monitorRebuildBtn');
         btn.disabled = true;

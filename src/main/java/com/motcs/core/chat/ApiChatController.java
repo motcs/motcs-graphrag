@@ -124,6 +124,8 @@ public class ApiChatController {
                                 request.setSources(finalSourcesJson);
                                 request.setReasoning(reasoningBuilder.toString());
                                 this.graphRagService.saveConversation(request).subscribe();
+                                // 落库"本地无法回复"问题（含回答与思考；不依赖预判断，兜底检测）
+                                this.graphRagService.recordUnansweredIfApplicable(request).subscribe();
                                 // 记录 token 用量（用量监控）
                                 Usage usage = usageRef.get();
                                 if (usage != null) {

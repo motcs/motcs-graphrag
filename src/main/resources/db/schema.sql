@@ -41,3 +41,28 @@ WHERE (stored_file_name IS NULL OR stored_file_name = '')
   AND doc_code IS NOT NULL AND doc_code <> ''
   AND file_name IS NOT NULL AND file_name <> ''
   AND file_name LIKE '%.%';
+
+-- 无法回复问题明细表：记录本地知识库无法回答的问题（供后台定期统计）
+CREATE TABLE IF NOT EXISTS unanswered_question (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    question TEXT NOT NULL COMMENT '无法回答的用户问题',
+    user_id VARCHAR(128) DEFAULT NULL COMMENT '用户ID',
+    session_id VARCHAR(64) DEFAULT NULL COMMENT '会话ID',
+    tenant_code VARCHAR(64) DEFAULT NULL COMMENT '租户编码',
+    system_type VARCHAR(64) DEFAULT NULL COMMENT '系统类型',
+    status VARCHAR(16) DEFAULT 'OPEN' COMMENT '状态：OPEN=待处理 ANSWERED=已解决',
+    answer TEXT DEFAULT NULL COMMENT 'AI回答内容',
+    reasoning TEXT DEFAULT NULL COMMENT 'AI思考过程',
+    sources TEXT DEFAULT NULL COMMENT 'AI回答引用文档(JSON数组)',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '记录时间',
+    KEY idx_uq_tenant_time (tenant_code, create_time),
+    KEY idx_uq_time (create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='本地知识库无法回复的问题';
+
+-- 老库补列：AI回答内容与思考过程（已存在时执行报错可忽略）
+ALTER TABLE unanswered_question
+    ADD COLUMN answer TEXT DEFAULT NULL COMMENT 'AI回答内容';
+ALTER TABLE unanswered_question
+    ADD COLUMN reasoning TEXT DEFAULT NULL COMMENT 'AI思考过程';
+ALTER TABLE unanswered_question
+    ADD COLUMN sources TEXT DEFAULT NULL COMMENT 'AI回答引用文档(JSON数组)';

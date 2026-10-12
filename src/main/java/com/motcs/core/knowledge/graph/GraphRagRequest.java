@@ -58,6 +58,9 @@ public class GraphRagRequest implements Serializable {
     @Schema(description = "创建该对话的 API Key ID（空=登录用户创建）", example = "1")
     private Long apiKeyId;
 
+    @Schema(description = "本次是否本地无法回复（由服务层判定标记，回答完成后统一落库）", example = "false")
+    private Boolean unanswered;
+
     public Double getThreshold() {
         return threshold == null ? 0.5d : threshold;
     }
