@@ -237,22 +237,23 @@ public class GraphRagService extends DatabaseService {
                     return Flux.concat(
                             Flux.just(new ChatStreamEvent("stage", "向量检索：命中 " + vectorDocs.size() + " 条候选文档")),
                             Flux.defer(() -> {
-                                List<Document> reranked;
+                                RerankOutcome out;
                                 try {
-                                    reranked = rerankDocs(ragQuery, queries, vectorDocs);
+                                    out = rerankDocs(ragQuery, queries, vectorDocs);
                                 } catch (Exception e) {
                                     log.error("相关度精排失败: {}", e.getMessage(), e);
                                     return Flux.concat(
                                             Flux.just(new ChatStreamEvent("stage_error", "相关度精排：失败")),
                                             buildNoResultStream(ragQuery, historyContext, rewriteDisplay, usageRef));
                                 }
+                                List<Document> reranked = out.documents();
                                 if (reranked.isEmpty()) {
                                     return Flux.concat(
-                                            Flux.just(new ChatStreamEvent("stage", "相关度精排：无相关文档（低于阈值）")),
+                                            Flux.just(new ChatStreamEvent("stage", "相关度精排（" + out.source() + "）：无相关文档（低于阈值）")),
                                             buildNoResultStream(ragQuery, historyContext, rewriteDisplay, usageRef));
                                 }
                                 return Flux.concat(
-                                        Flux.just(new ChatStreamEvent("stage", "相关度精排：保留 " + reranked.size() + " 条")),
+                                        Flux.just(new ChatStreamEvent("stage", "相关度精排（" + out.source() + "）：保留 " + reranked.size() + " 条")),
                                         buildFromReranked(ragQuery, reranked, historyContext, rewriteDisplay, usageRef));
                             }));
                 }));
@@ -745,27 +746,35 @@ public class GraphRagService extends DatabaseService {
      * 仅靠分数不可靠（embedding 会把"人大代表职责"与"党建职责"判成高分），需再验证主题一致；
      * 精排后为空则视为未检索到。
      */
-    private List<Document> rerankDocs(GraphRagRequest request, List<String> queries, List<Document> vectorDocs) {
+    record RerankOutcome(List<Document> documents, String source) {}
+
+    private RerankOutcome rerankDocs(GraphRagRequest request, List<String> queries, List<Document> vectorDocs) {
         if (vectorDocs.isEmpty()) {
-            return vectorDocs;
+            return new RerankOutcome(vectorDocs, "本地精排");
         }
         final int finalTopN = Math.max(1, request.getTopK());
         String primaryQuery = queries.getFirst();
         double semanticThreshold = Math.max(request.getThreshold(), DEFAULT_SEMANTIC_THRESHOLD);
+        String source;
         try {
-            vectorDocs = (rerankerService != null)
-                    ? rerankerService.rerank(primaryQuery, vectorDocs, finalTopN)
-                    : localRerank(vectorDocs, queries, finalTopN, semanticThreshold);
+            if (rerankerService != null) {
+                vectorDocs = rerankerService.rerank(primaryQuery, vectorDocs, finalTopN);
+                source = "外部 Reranker";
+            } else {
+                vectorDocs = localRerank(vectorDocs, queries, finalTopN, semanticThreshold);
+                source = "本地精排";
+            }
         } catch (Exception e) {
             // 外部 Reranker 调用失败/超时：回退本地精排，保证检索不中断
             log.warn("外部 Reranker 调用失败，回退本地精排: {}", e.getMessage());
             vectorDocs = localRerank(vectorDocs, queries, finalTopN, semanticThreshold);
+            source = "本地精排(回退)";
         }
         if (vectorDocs.isEmpty()) {
             log.debug("精排后无相关文档，前端不再返回引用");
-            return List.of();
+            return new RerankOutcome(List.of(), source);
         }
-        log.debug("精排后保留 {} 个文档（Reranker={}）", vectorDocs.size(), rerankerService != null);
+        log.debug("精排后保留 {} 个文档（{}）", vectorDocs.size(), source);
         // 租户自定义优先：指定租户（非0）的文档排在前，超管默认文档（租户0）排在后
         if (!request.getTenantCode().equals("0")) {
             vectorDocs = vectorDocs.stream().sorted(Comparator.comparingInt(d -> {
@@ -774,7 +783,7 @@ public class GraphRagService extends DatabaseService {
             })).toList();
         }
         log.debug("向量检索找到 {} 个相关文档（查询词{}个，租户{}优先）", vectorDocs.size(), queries.size(), request.getTenantCode());
-        return vectorDocs;
+        return new RerankOutcome(vectorDocs, source);
     }
 
     /**

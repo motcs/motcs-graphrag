@@ -48,6 +48,6 @@ app:
     chat-models: ${AI_CHAT_MODELS:deepseek-v4.1-flash,deepseek-v4-flash-0731,ernie-4.5-turbo-20260402,ernie-4.5-turbo-128k}
     default-chat-model: ${AI_CHAT_MODEL:deepseek-v4.1-flash}
     reranker:
-      enabled: true
-      url: http://127.0.0.1:8000
-      timeout-ms: 2000
+      enabled:  ${AI_RERANKER_ENABLED:true}
+      url: ${AI_RERANKER_URL:http://127.0.0.1:8000}
+      timeout-ms: ${AI_RERANKER_TIMEOUT:2000}
