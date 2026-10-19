@@ -101,6 +101,9 @@ dependencies {
     implementation 'commons-fileupload:commons-fileupload:1.6.0'
     implementation 'commons-io:commons-io:2.18.0'
 
+    // 本地中文分词（查询词优化：毫秒级、零远程、不失败，替代远程 LLM 改写）
+    implementation 'com.huaban:jieba-analysis:1.0.2'
+
     // 文档处理（可扩展）
     implementation 'org.apache.pdfbox:pdfbox:2.0.29'
     implementation 'org.apache.poi:poi:5.4.0'

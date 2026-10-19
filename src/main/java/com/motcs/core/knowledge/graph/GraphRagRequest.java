@@ -46,6 +46,9 @@ public class GraphRagRequest implements Serializable {
     @Schema(description = "AI模型名称（前端选择，空则用配置默认模型）", example = "deepseek-v3.2")
     private String model;
 
+    @Schema(description = "是否开启思考（默认关闭；开启后展示并记录 AI 思考过程）", example = "false")
+    private Boolean enableThinking;
+
     @Schema(description = "AI 回答", example = "ai内容...")
     private String answer;
 
@@ -62,11 +65,15 @@ public class GraphRagRequest implements Serializable {
     private Boolean unanswered;
 
     public Double getThreshold() {
-        return threshold == null ? 0.5d : threshold;
+        return threshold == null ? 0.85d : threshold;
     }
 
     public Integer getTopK() {
         return topK == null ? 5 : topK;
+    }
+
+    public Boolean getEnableThinking() {
+        return enableThinking != null && enableThinking;
     }
 
 }

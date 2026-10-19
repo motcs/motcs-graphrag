@@ -1492,6 +1492,7 @@ async function askQuestion() {
     let thinkingEl = null;      // 思考过程区块（有思考内容时才创建）
     let reasoningText = '';     // 已收到的思考内容
     state.currentReasoning = ''; // 当前思考内容（供新对话/中断保存用）
+    let stageEl = null;         // 后端处理阶段区块（滚动展示处理链路）
 
     try {
         // POST /query 使用 JSON body 传参
@@ -1504,7 +1505,8 @@ async function askQuestion() {
                 systemType: getSystem(),
                 userId: getUser(),
                 sessionId: state.sessionId,
-                model: $('modelSelect').value
+                model: $('modelSelect').value,
+                enableThinking: ($('enableThinking') && $('enableThinking').checked) || ($('enableThinkingMobile') && $('enableThinkingMobile').checked)
             }),
             signal: state.abortController.signal
         });
@@ -1580,6 +1582,22 @@ async function askQuestion() {
                     // 思考内容超出容器后始终滚动到底部，保证最新部分可见
                     const tb = thinkingEl.querySelector('.thinking-body');
                     if (tb) tb.scrollTop = tb.scrollHeight;
+                    scrollToBottom();
+                } else if (ev.type === 'stage' || ev.type === 'stage_error') {
+                    // 后端处理阶段：滚动展示处理链路；stage_error 为某步骤失败，打叉标红
+                    const isErr = ev.type === 'stage_error';
+                    if (!stageEl) {
+                        stageEl = document.createElement('div');
+                        stageEl.style.cssText = 'border-left:2px solid #e5e7eb;margin:4px 0 8px;padding:2px 0 2px 10px;font-size:12px;color:#6b7280;';
+                        bubble.insertBefore(stageEl, aiContentEl);
+                    }
+                    const stageRow = document.createElement('div');
+                    stageRow.style.cssText = 'padding:1px 0;display:flex;align-items:center;gap:6px;';
+                    const iconColor = isErr ? '#e5484d' : '#10b981';
+                    const icon = isErr ? '✗' : '✓';
+                    const textColor = isErr ? '#e5484d' : '#6b7280';
+                    stageRow.innerHTML = '<span style="color:' + iconColor + ';flex-shrink:0;">' + icon + '</span><span style="color:' + textColor + ';">' + escapeHtml(ev.text || '') + '</span>';
+                    stageEl.appendChild(stageRow);
                     scrollToBottom();
                 } else if (ev.type === 'content') {
                     // 正文片段：按 type 字段识别；思考结束进入正文时折叠思考窗口

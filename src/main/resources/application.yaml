@@ -1,10 +1,17 @@
+logging:
+  register-shutdown-hook: true
+  level:
+    web: debug
+    com.motcs.*: debug
+
 server:
+  port: ${SERVER_PORT:8080}
   shutdown: graceful
   http2.enabled: true
   compression.enabled: true
 
 spring:
-  profiles.active: ${SPRING_PROFILES_ACTIVE:prod}
+  profiles.active: ${SPRING_PROFILES_ACTIVE:baidu}
   threads.virtual.enabled: true
   application.name: motcs-commons
   jackson:
@@ -14,6 +21,49 @@ spring:
     mode: always
     continue-on-error: true
     schema-locations: classpath:/db/schema.sql
+
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
+  neo4j:
+    uri: ${NEO4J_URI:bolt://127.0.0.1:7687}
+    authentication:
+      username: ${NEO4J_AUTH_USERNAME:neo4j}
+      password: ${NEO4J_AUTH_PASSWORD:sx2011++}
+
+  r2dbc:
+    url: r2dbc:mysql://${app.r2dbc.url}?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: ${app.r2dbc.username}
+    password: ${app.r2dbc.password}
+    pool:
+      max-size: 20
+      initial-size: 5
+
+  ai:
+    openai:
+      # 千帆 OpenAI 兼容接口鉴权：Bearer <API Key>，key 以 bce-v3/ 开头
+      api-key: ${app.ai.api-key}
+      # https://qianfan.baidubce.com/v2
+      #   chat  → /v2/chat/completions
+      #   embed → /v2/embeddings
+      base-url: ${app.ai.url}
+      timeout: ${AI_TIMEOUT:300s}   # 思考模型+高峰期易流超时，保持 5 分钟
+      chat:
+        # 免费档推荐 ernie-speed-128k（128k 上下文，不会被 RAG 上下文撑爆）；
+        # 要质量/更稳的 JSON 抽取换 ernie-4.5-turbo-128k
+        # model: ${AI_CHAT_MODEL:deepseek-v3.2}
+        model: ${app.ai.default-chat-model}
+        temperature: ${AI_CHAT_TEMPERATURE:0.1}
+    vectorstore:
+      neo4j:
+        index-name: knowledge_vector_index
+        embedding-dimension: ${app.ai.embedding.dimension}
+        label: DocumentChunk
+        distance-type: cosine
+        initialize-schema: true
 
 springdoc:
   api-docs:
@@ -33,3 +83,8 @@ app:
   # 文件存储：upload-dir 为文件根目录（上传落盘 + 静态文件代理接口共用，由环境变量 FILE_UPLOAD_DIR 配置）
   file:
     upload-dir: ${FILE_UPLOAD_DIR:./uploads}
+
+  r2dbc:
+    url: ${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:motcs}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:sx2011++}

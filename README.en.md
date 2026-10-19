@@ -113,6 +113,73 @@ and citation traceability. Ships with **admin login + API Key authentication** a
 
 ---
 
+## Overall Flow & Design Philosophy
+
+### Overall Flow (the full chain of one Q&A turn)
+
+From question to answer, the system advances step by step in actual execution order, and each step is pushed to the frontend in real time via an SSE event.
+
+```mermaid
+flowchart LR
+    A[User question] --> B[Query optimization<br/>Jieba tokenizer rewrite<br/>multiple queries]
+    B --> C[Vector search<br/>Neo4j Top-K recall<br/>tenant / system filter]
+    C --> D[Re-ranking<br/>external Reranker / local rerank<br/>threshold filter]
+    D --> E[Context completion<br/>link parent coarse chunks]
+    E --> F[Graph multi-hop recall<br/>Neo4j relation expansion]
+    F --> G{Answerability check<br/>can KB answer?}
+    G -- Yes --> H[Emit sources]
+    H --> I[AI answer<br/>reasoning / content]
+    G -- Insufficient --> J[Fallback to third-party AI<br/>record unanswered]
+```
+
+**SSE event order (JSON, distinguished by `type`):**
+
+| Event         | Meaning                                                                                          |
+|---------------|--------------------------------------------------------------------------------------------------|
+| `session`     | Session ID                                                                                       |
+| `rewrite`     | Optimized query terms (frontend shows "searching the knowledge base…")                           |
+| `stage`       | Backend processing stage (emitted as each step completes: query opt / vector search / re-rank / completion / graph / answerability) |
+| `stage_error` | A step failed (frontend shows a red cross; degrades and continues, the session is not interrupted) |
+| `sources`     | This turn's cited fragments (emitted after "answerability check" and before the answer)          |
+| `reasoning`   | AI thinking process                                                                              |
+| `content`     | Answer body (Markdown)                                                                           |
+
+### Design Philosophy
+
+**1. Multi-hop GraphRAG: beyond vector similarity**
+
+Vector search handles lexical/semantic similarity, but enterprise Q&A often needs associated knowledge (e.g., "which department is affected by policy X"). The system layers Neo4j graph multi-hop recall on top of vector recall, expanding related chunks along relations and fusing both paths into the context for a more complete answer.
+
+**2. Two-layer chunking: fine-grained retrieval + coarse-grained completion**
+
+Fine-grained chunks (384–512 tokens) are used for vector retrieval to ensure precise recall; each fine chunk is bound to a parent coarse chunk (1024–1536 tokens). After retrieval the parent context is linked in automatically, bridging cross-section context to support multi-hop reasoning.
+
+**3. Re-ranking beats hard-coding a threshold**
+
+BGE similarity score distributions cannot be judged by a single rule; simply raising the threshold kills relevant documents and lowers recall. The system uses a two-stage strategy — "recall Top-K (low threshold, maximize recall) → re-rank (external Reranker / local rerank + topic-consistency filter, default 0.85)": guarantee recall first, then precision.
+
+**4. Answerability check + third-party fallback: do not mislead**
+
+After retrieval, the system first checks whether the knowledge base can answer accurately; if insufficient, it falls back to a third-party AI direct answer and records "unanswerable locally" instead of answering with irrelevant KB content. If the check itself fails, it conservatively falls back to third-party.
+
+**5. Processing progress visible in real time**
+
+Each step of the retrieval chain is emitted as an SSE stage event (`stage`), and the frontend scrolls "what the backend is doing", so users are not left waiting blindly during long processing. On failure, a `stage_error` shows a red cross and the chain degrades and continues instead of interrupting the whole session.
+
+**6. Citation traceability: every answer is verifiable**
+
+`sources` fragments are emitted before the answer; the frontend can click to view the original document (with page navigation), so every answer can be traced back to its KB source.
+
+**7. Tenant isolation and global sharing**
+
+Tenant `0` is the admin global tenant whose documents are open to all tenants; a specific tenant search hits both "its own docs + global docs", with own content ranked first. Documents, conversations and API keys are each isolated by tenant/system.
+
+**8. Multi-turn re-answer and history fallback**
+
+Conversation history is always passed along with the request; when the user says "re-answer the previous question", even if the current turn finds no result, the system re-answers based on the original Q&A in history.
+
+---
+
 ## Tech Stack
 
 | Category            | Technology                                                             |
@@ -463,6 +530,34 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
   "sessionId": "xxx"
 }
 {
+  "type": "rewrite",
+  "query": "optimized query terms"
+}
+{
+  "type": "stage",
+  "text": "Query optimization: done"
+}
+{
+  "type": "stage",
+  "text": "Vector search: N candidate documents hit"
+}
+{
+  "type": "stage",
+  "text": "Re-ranking: N kept"
+}
+{
+  "type": "stage",
+  "text": "Context completion: done"
+}
+{
+  "type": "stage",
+  "text": "Graph multi-hop recall: N related chunks"
+}
+{
+  "type": "stage",
+  "text": "Answerability check: KB can answer"
+}
+{
   "type": "sources",
   "sources": [
     {
@@ -479,6 +574,11 @@ curl -X POST http://localhost:8080/auth/v1/api-keys \
   "text": "answer (Markdown)"
 }
 ```
+
+> Retrieval stages are emitted **one by one** in real execution order (`stage`); if a step fails, a `stage_error`
+> event is emitted (frontend shows a red cross; the chain degrades and continues without interrupting the session).
+> When the answerability check is "insufficient / failed", no `sources` is emitted and the turn falls back to a
+> third-party AI answer.
 
 ### Conversation History (Admin session)
 

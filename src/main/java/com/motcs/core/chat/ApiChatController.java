@@ -97,31 +97,42 @@ public class ApiChatController {
             return graphRagService.graphRagQueryStream(request).flatMapMany(result -> {
                 // 直接持有 QueryResult 内部的 usage 引用（流结束时可读到最终 token 用量）
                 AtomicReference<Usage> usageRef = result.usageRef();
-                JsonNode sourcesJson;
-                try {
-                    sourcesJson = ContextUtil.OBJECT_MAPPER.convertValue(result.sources(), JsonNode.class);
-                } catch (Exception e) {
-                    sourcesJson = ContextUtil.OBJECT_MAPPER.createArrayNode();
-                }
+                // sources 由检索链在"相关度精排"之后以 type=sources 事件下发（text=JSON 数组），初始为空、事件到达时覆盖
+                AtomicReference<JsonNode> sourcesJson = new AtomicReference<>(ContextUtil.OBJECT_MAPPER.createArrayNode());
                 Mono<String> sessionMono = Mono.just(Utils.jsonEvent("session", Map.of("sessionId", sessionId)));
                 Mono<String> rewriteMono = Mono.just(Utils.jsonEvent("rewrite", Map.of("query", result.rewriteQuery())));
-                Mono<String> sourcesMono = Mono.just(Utils.jsonEvent("sources", Map.of("sources", result.sources())));
                 Flux<String> answerMono = result.answer().doOnNext(ev -> {
                     if ("reasoning".equals(ev.type())) {
                         reasoningBuilder.append(ev.text());
                     } else if ("content".equals(ev.type())) {
                         answerBuilder.append(ev.text());
+                    } else if ("sources".equals(ev.type())) {
+                        try {
+                            sourcesJson.set(ContextUtil.OBJECT_MAPPER.readTree(ev.text()));
+                        } catch (Exception e) {
+                            sourcesJson.set(ContextUtil.OBJECT_MAPPER.createArrayNode());
+                        }
                     }
-                }).map(ev -> Utils.jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
-                JsonNode finalSourcesJson = sourcesJson;
-                return Flux.concat(sessionMono, rewriteMono, sourcesMono, answerMono)
+                }).map(ev -> {
+                    if ("sources".equals(ev.type())) {
+                        try {
+                            return Utils.jsonEvent("sources", Map.of("sources",
+                                    ContextUtil.OBJECT_MAPPER.readTree(ev.text())));
+                        } catch (Exception e) {
+                            return Utils.jsonEvent("sources", Map.of("sources",
+                                    ContextUtil.OBJECT_MAPPER.createArrayNode()));
+                        }
+                    }
+                    return Utils.jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text()));
+                });
+                return Flux.concat(sessionMono, rewriteMono, answerMono)
                         .publishOn(Schedulers.boundedElastic())
                         .doFinally(signal -> {
                             if (signal == SignalType.CANCEL) return;
                             if (StringUtils.hasLength(request.getQuestion())) {
                                 request.setAnswer(answerBuilder.toString());
                                 request.setSessionId(sessionId);
-                                request.setSources(finalSourcesJson);
+                                request.setSources(sourcesJson.get());
                                 request.setReasoning(reasoningBuilder.toString());
                                 this.graphRagService.saveConversation(request).subscribe();
                                 // 落库"本地无法回复"问题（含回答与思考；不依赖预判断，兜底检测）

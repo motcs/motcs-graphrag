@@ -328,12 +328,20 @@
                                     <option value="deepseek-v3.2-think">deepseek-v3.2-think</option>
                                     <option value="deepseek-v4-flash-0731">deepseek-v4-flash-0731</option>
                                 </select>
+                                <label class="flex items-center gap-1.5 text-gray-400" title="开启思考后展示并记录 AI 思考过程">
+                                    <input type="checkbox" id="enableThinking" class="accent-primary-500">
+                                    思考
+                                </label>
                                 <span id="aiProviderLabel"
                                       class="px-2 py-1 rounded-md bg-primary-600/10 text-primary-300 border border-primary-500/20"
                                       title="当前启用的 AI 平台">检测中…</span>
                                 <span>会话: <span id="currentSessionId" class="text-primary-400 font-mono">未开始</span></span>
                             </div>
-                            <!-- 小屏：模型下拉 + 发送按钮一行 -->
+                            <!-- 小屏：模型下拉 + 思考开关 + 发送按钮一行 -->
+                            <label class="md:hidden flex items-center gap-1 text-gray-400 text-xs shrink-0" title="开启思考后展示并记录 AI 思考过程">
+                                <input type="checkbox" id="enableThinkingMobile" class="accent-primary-500">
+                                思考
+                            </label>
                             <select id="modelSelectMobile" title="选择AI模型"
                                     class="md:hidden flex-1 px-2 py-1.5 text-xs bg-dark-850 border border-white/10 rounded-lg focus:border-primary-500 focus:outline-none transition text-gray-300">
                             </select>

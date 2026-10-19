@@ -15,13 +15,13 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class AiConfiguration {
 
-    @Value("${app.zhipu.api-key}")
+    @Value("${app.ai.api-key}")
     private String zhiPuApiKey;
 
     @Value("${spring.ai.openai.base-url}")
     private String baseUrl;
 
-    @Value("${app.zhipu.embedding.model}")
+    @Value("${app.ai.embedding.model}")
     private String model;
 
     /**

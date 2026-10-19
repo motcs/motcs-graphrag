@@ -1,6 +1,8 @@
 package com.motcs.core.knowledge.graph;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.huaban.analysis.jieba.JiebaSegmenter;
+import com.huaban.analysis.jieba.SegToken;
 import com.motcs.commons.ContextUtil;
 import com.motcs.commons.annotation.RestServerException;
 import com.motcs.commons.base.DatabaseService;
@@ -18,11 +20,11 @@ import com.motcs.core.knowledge.record.ChatMessage;
 import com.motcs.core.knowledge.record.ChatMessageRepository;
 import com.motcs.core.knowledge.record.ChatSessionSummary;
 import com.motcs.core.knowledge.record.ChatSessionSummaryRepository;
-import com.motcs.core.knowledge.record.unanswered.UnansweredQuestion;
-import com.motcs.core.knowledge.record.unanswered.UnansweredQuestionRepository;
 import com.motcs.core.knowledge.record.session.ChatSession;
 import com.motcs.core.knowledge.record.session.ChatSessionRepository;
 import com.motcs.core.knowledge.record.session.ChatSessionRequest;
+import com.motcs.core.knowledge.record.unanswered.UnansweredQuestion;
+import com.motcs.core.knowledge.record.unanswered.UnansweredQuestionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.jspecify.annotations.NonNull;
@@ -33,6 +35,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -45,13 +48,17 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import static com.huaban.analysis.jieba.JiebaSegmenter.SegMode.SEARCH;
 
 /**
  * GraphRAG知识库服务
@@ -105,19 +112,23 @@ public class GraphRagService extends DatabaseService {
             __TEXT__
             """;
     /**
-     * 检索查询词优化 Prompt：把口语化问题改写为适合向量检索的查询词（1~3 个，每行一个）
+     * 本地中文分词器（查询词优化专用）：毫秒级、零远程调用、永不失败
      */
-    private static final String REWRITE_PROMPT = """
-            你是检索查询优化助手。请把用户的问题改写为最适合知识库向量检索的查询词。
-            要求：
-            1. 保留核心实体与真实意图，把口语化表达改写为标准术语（如"怎么提交"改写为"提交流程"、"办理程序"、"提交渠道"）；
-            2. 必要时补充该领域的关键词，让检索更精准；
-            3. 只输出 1~3 个查询词，每行一个，不要序号、引号、解释或Markdown格式。
-            """;
+    private static final JiebaSegmenter JIEBA_SEGMENTER = new JiebaSegmenter();
     /**
-     * 检索改写预算（毫秒）：超时立即回退原始问题检索，保证响应速度不因改写而降级
+     * 查询词优化要去除的噪声词（语气词/疑问词/人称/助词/介词/量词）。
+     * 注意：不放"流程/功能/制度"等有业务含义的词，避免误删关键检索词。
      */
-    private static final long REWRITE_TIMEOUT_MS = 800;
+    private static final Set<String> REWRITE_NOISE = Set.of(
+            "请问", "怎么", "如何", "什么", "哪些", "哪个", "多少", "为什么", "是否", "是不是",
+            "能否", "可以", "能", "请", "帮", "咱", "咱们", "我们", "你们", "他们", "它",
+            "的吗", "呢", "吧", "啊", "么", "啥", "的", "了", "是", "有", "都", "要", "想",
+            "在", "与", "和", "及", "或", "一下", "个", "种", "上", "下", "里面", "相关", "当中");
+    /**
+     * 语义相关性过滤下限：向量相似度分数低于该值视为"语义无关"文档，不返回给前端。
+     * 0.5 偏松会把仅共用一个泛词（如"职责"）的文档误召回，取 0.6 作为语义分界（可调）。
+     */
+    private static final double DEFAULT_SEMANTIC_THRESHOLD = 0.85;
     /**
      * 系统提示词（含多轮历史和知识库上下文）
      */
@@ -149,10 +160,6 @@ public class GraphRagService extends DatabaseService {
             【知识库上下文】
             {context}
             """;
-    /**
-     * 改写结果缓存（问题 → 查询词），重复问题不再重复调用 AI；简单防膨胀（>200 清空）
-     */
-    private final Map<String, List<String>> rewriteCache = new ConcurrentHashMap<>();
     private final ChatClient chatClient;
     private final Neo4jClient neo4jClient;
     private final VectorStore vectorStore;
@@ -165,8 +172,23 @@ public class GraphRagService extends DatabaseService {
     private final ChatSessionSummaryRepository summaryRepository;
     private final ChatUsageRecordRepository chatUsageRecordRepository;
     private final ChatSessionUsageRepository chatSessionUsageRepository;
-    @Value("${app.ai.provider:zhipu}")
+    @Value("${app.ai.provider:baidu}")
     private String provider;
+    /**
+     * 初始召回候选数（Top-N 召回，默认 20，精排后再取最终 topK）
+     */
+    @Value("${app.ai.recall.top-k:20}")
+    private int recallTopK;
+    /**
+     * 召回阶段相似度阈值（默认 0.0=不过滤，交给精排阶段过滤，便于观察完整分数分布）
+     */
+    @Value("${app.ai.recall.threshold:0.0}")
+    private double recallThreshold;
+    /**
+     * 外部精排服务（可选）；未配置任何 RerankerService 实现时用本地精排兜底
+     */
+    @Autowired(required = false)
+    private RerankerService rerankerService;
 
     /**
      * GraphRAG 问答（含多轮上下文 + 来源返回）
@@ -181,86 +203,196 @@ public class GraphRagService extends DatabaseService {
         log.debug("收到GraphRAG查询: question={}, userId={}, sessionId={}, tenant={}, system={}",
                 ragQuery.getQuestion(), ragQuery.getUserId(), ragQuery.getSessionId(),
                 ragQuery.getTenantCode(), ragQuery.getSystemType());
-        Mono<String> context = buildHistoryContext(ragQuery.getSessionId());
-
-        return context.flatMap(historyContext -> {
-            // 1. 改写问题为检索查询词：异步 + 限时预算（REWRITE_TIMEOUT_MS），
-            //    超时/失败立即回退原始问题，避免改写拖慢响应；结果随 SSE 下发前端展示"搜索中"
-            Mono<List<String>> rewriteMono = Mono.fromCallable(() -> rewriteQuery(ragQuery.getQuestion()))
-                    .subscribeOn(Schedulers.boundedElastic())
-                    .timeout(Duration.ofMillis(REWRITE_TIMEOUT_MS))
-                    .onErrorReturn(List.of(ragQuery.getQuestion()));
-            return rewriteMono.map(queries -> {
-                String rewriteDisplay = queries.getFirst();
-                // 2. 用改写后的查询词做向量检索 + 图谱召回，同时提取来源
-                ContextResult ctx = buildContextWithSources(ragQuery, queries);
-                if (!ObjectUtils.isEmpty(ctx)) {
-                    ContextResult contextResult = new ContextResult(ctx.fullContext(), ctx.sources(), historyContext);
-                    return new Enriched(contextResult, historyContext, rewriteDisplay);
-                }
-                return new Enriched(null, historyContext, rewriteDisplay);
-            });
-        }).flatMap(enriched -> {
-            // 3. 有结果：直接回答；无结果：保留历史对话，AI 可依据多轮历史理解"重新回答上个问题"等指令
-            if (!ObjectUtils.isEmpty(enriched.ctx())) {
-                return buildAnswerQueryResult(ragQuery, enriched.ctx(), enriched.rewriteDisplay());
-            }
-            return buildNoResultQueryResult(ragQuery, enriched.historyContext(), enriched.rewriteDisplay());
+        return buildHistoryContext(ragQuery.getSessionId()).map(historyContext -> {
+            // 1. 本地 Jieba 分词改写查询词（毫秒级、零远程、不失败），首词作为展示用改写词
+            List<String> queries = rewriteQuery(ragQuery.getQuestion());
+            String rewriteDisplay = queries.getFirst();
+            // 2. 惰性完整事件流：订阅时按后端实际执行顺序逐步 emit 各阶段（见 buildStream）
+            AtomicReference<Usage> usageRef = new AtomicReference<>();
+            Flux<ChatStreamEvent> answer = buildStream(ragQuery, queries, rewriteDisplay, historyContext, usageRef);
+            // sources 由事件流中 type=sources 事件携带（controller 从流收集，顺序在精排后）
+            return new QueryResult(List.of(), answer, usageRef, rewriteDisplay);
         }).doOnError(e -> log.error("GraphRAG查询出错: {}", e.getMessage(), e));
+    }
+
+    /**
+     * 惰性完整事件流：订阅时按实际执行顺序逐步下发。
+     * 事件顺序：查询词优化 → 向量检索 → 相关度精排 → sources(引用) → 推理补全 → 图谱召回 → 回答(reasoning/content)。
+     * 每个 Flux.defer 段在订阅到它时才执行，从而"每操作一步下发一条"，前端可滚动实时看到后端在做什么。
+     */
+    private Flux<ChatStreamEvent> buildStream(GraphRagRequest ragQuery, List<String> queries, String rewriteDisplay,
+                                              String historyContext, AtomicReference<Usage> usageRef) {
+        return Flux.concat(
+                Flux.just(new ChatStreamEvent("stage", "查询词优化：已完成")),
+                Flux.defer(() -> {
+                    List<Document> vectorDocs;
+                    try {
+                        vectorDocs = vectorRetrieve(ragQuery, queries);
+                    } catch (Exception e) {
+                        log.error("向量检索失败: {}", e.getMessage(), e);
+                        return Flux.concat(
+                                Flux.just(new ChatStreamEvent("stage_error", "向量检索：失败")),
+                                buildNoResultStream(ragQuery, historyContext, rewriteDisplay, usageRef));
+                    }
+                    return Flux.concat(
+                            Flux.just(new ChatStreamEvent("stage", "向量检索：命中 " + vectorDocs.size() + " 条候选文档")),
+                            Flux.defer(() -> {
+                                List<Document> reranked;
+                                try {
+                                    reranked = rerankDocs(ragQuery, queries, vectorDocs);
+                                } catch (Exception e) {
+                                    log.error("相关度精排失败: {}", e.getMessage(), e);
+                                    return Flux.concat(
+                                            Flux.just(new ChatStreamEvent("stage_error", "相关度精排：失败")),
+                                            buildNoResultStream(ragQuery, historyContext, rewriteDisplay, usageRef));
+                                }
+                                if (reranked.isEmpty()) {
+                                    return Flux.concat(
+                                            Flux.just(new ChatStreamEvent("stage", "相关度精排：无相关文档（低于阈值）")),
+                                            buildNoResultStream(ragQuery, historyContext, rewriteDisplay, usageRef));
+                                }
+                                return Flux.concat(
+                                        Flux.just(new ChatStreamEvent("stage", "相关度精排：保留 " + reranked.size() + " 条")),
+                                        buildFromReranked(ragQuery, reranked, historyContext, rewriteDisplay, usageRef));
+                            }));
+                }));
+    }
+
+    /**
+     * 精排命中后的后续链路：提取来源 → 推理上下文补全 → 图谱召回 → 可回答性判断 → 回答。
+     * 各步骤独立 try-catch：失败发 stage_error（前端标红）并用降级值继续，不中断整个 SSE 流。
+     */
+    private Flux<ChatStreamEvent> buildFromReranked(GraphRagRequest ragQuery, List<Document> reranked,
+                                                    String historyContext, String rewriteDisplay, AtomicReference<Usage> usageRef) {
+        return Flux.defer(() -> {
+            List<Map<String, Object>> sources = extractSourcesQuietly(reranked);
+            return buildCoarseGraphAnswer(ragQuery, reranked, sources, historyContext, rewriteDisplay, usageRef);
+        });
+    }
+
+    /**
+     * 提取来源（失败静默降级为空，不影响后续）。
+     */
+    private List<Map<String, Object>> extractSourcesQuietly(List<Document> reranked) {
+        try {
+            return extractSources(reranked);
+        } catch (Exception e) {
+            log.error("提取来源失败: {}", e.getMessage(), e);
+            return List.of();
+        }
+    }
+
+    /**
+     * 推理上下文补全（失败发 stage_error 并降级为空）→ 图谱召回与回答。
+     */
+    private Flux<ChatStreamEvent> buildCoarseGraphAnswer(GraphRagRequest ragQuery, List<Document> reranked, List<Map<String, Object>> sources,
+                                                         String historyContext, String rewriteDisplay, AtomicReference<Usage> usageRef) {
+        return Flux.defer(() -> {
+            String coarseContext;
+            try {
+                coarseContext = buildCoarseContext(reranked);
+            } catch (Exception e) {
+                log.error("推理上下文补全失败: {}", e.getMessage(), e);
+                coarseContext = "";
+                return Flux.concat(
+                        Flux.just(new ChatStreamEvent("stage_error", "推理上下文补全：失败")),
+                        buildGraphAndAnswer(ragQuery, reranked, sources, coarseContext, historyContext, rewriteDisplay, usageRef));
+            }
+            return Flux.concat(
+                    Flux.just(new ChatStreamEvent("stage", "推理上下文补全：已完成")),
+                    buildGraphAndAnswer(ragQuery, reranked, sources, coarseContext, historyContext, rewriteDisplay, usageRef));
+        });
+    }
+
+    /**
+     * 图谱多跳召回 + 回答分支。图谱召回失败时降级为空，不影响后续回答。
+     */
+    private Flux<ChatStreamEvent> buildGraphAndAnswer(GraphRagRequest ragQuery, List<Document> reranked,
+                                                      List<Map<String, Object>> sources, String coarseContext,
+                                                      String historyContext, String rewriteDisplay, AtomicReference<Usage> usageRef) {
+        return Flux.defer(() -> {
+            List<GraphRagResult> multiHop;
+            try {
+                multiHop = graphRecall(reranked, ragQuery);
+            } catch (Exception e) {
+                log.error("图谱多跳召回失败: {}", e.getMessage(), e);
+                multiHop = List.of();
+                return Flux.concat(
+                        Flux.just(new ChatStreamEvent("stage_error", "图谱多跳召回：失败")),
+                        buildHitAnswerStream(ragQuery, assembleContextFinal(reranked, sources, coarseContext, multiHop, historyContext),
+                                rewriteDisplay, usageRef, sources));
+            }
+            return Flux.concat(
+                    Flux.just(new ChatStreamEvent("stage", "图谱多跳召回：" + multiHop.size() + " 个关联块")),
+                    buildHitAnswerStream(ragQuery, assembleContextFinal(reranked, sources, coarseContext, multiHop, historyContext),
+                            rewriteDisplay, usageRef, sources));
+        });
+    }
+
+    /**
+     * 检索命中分支：先做可回答性判断，能答走知识库回答，不能答转第三方 AI 并记录；阶段事件逐步下发。
+     */
+    private Flux<ChatStreamEvent> buildHitAnswerStream(GraphRagRequest ragQuery, ContextResult ctx, String rewriteDisplay,
+                                                       AtomicReference<Usage> usageRef, List<Map<String, Object>> sources) {
+        return Flux.defer(() -> {
+            boolean can;
+            try {
+                can = canAnswerWithContext(ragQuery.getQuestion(), ctx.fullContext());
+            } catch (Exception e) {
+                log.error("可回答性判断失败: {}", e.getMessage(), e);
+                // 判断失败：保守转第三方直接回答，不展示引用
+                ragQuery.setUnanswered(true);
+                ChatClient.ChatClientRequestSpec thirdSpec = this.chatClient.prompt()
+                        .system(s -> s.text(THIRD_PARTY_DIRECT_PROMPT).param("history", ctx.historyContext()))
+                        .user(ragQuery.getQuestion());
+                applyModelOptions(thirdSpec, ragQuery.getModel(), ragQuery.getEnableThinking());
+                return Flux.concat(Flux.just(new ChatStreamEvent("stage_error", "可回答性判断：失败，转联网/第三方")),
+                        streamChatEvents(thirdSpec, usageRef));
+            }
+            if (!can) {
+                // 标记本次本地无法回复，回答完成后由 controller 统一落库；不展示引用
+                ragQuery.setUnanswered(true);
+                ChatClient.ChatClientRequestSpec thirdSpec = this.chatClient.prompt()
+                        .system(s -> s.text(THIRD_PARTY_DIRECT_PROMPT).param("history", ctx.historyContext()))
+                        .user(ragQuery.getQuestion());
+                applyModelOptions(thirdSpec, ragQuery.getModel(), ragQuery.getEnableThinking());
+                return Flux.concat(Flux.just(new ChatStreamEvent("stage", "可回答性判断：知识库不充分，转联网/第三方")),
+                        streamChatEvents(thirdSpec, usageRef));
+            }
+            ChatClient.ChatClientRequestSpec answerSpec = this.chatClient.prompt()
+                    .system(s -> s.text(SYSTEM_PROMPT).param("context", ctx.fullContext())
+                            .param("history", ctx.historyContext())).user(ragQuery.getQuestion());
+            applyModelOptions(answerSpec, ragQuery.getModel(), ragQuery.getEnableThinking());
+            return Flux.concat(Flux.just(new ChatStreamEvent("stage", "可回答性判断：知识库可回答")),
+                    // 引用在可回答性判断之后下发，回答开始前展示
+                    Flux.just(new ChatStreamEvent("sources", toJsonArray(sources))),
+                    streamChatEvents(answerSpec, usageRef));
+        });
+    }
+
+    /**
+     * 检索无结果分支：分类闲聊/历史可答（自然回复）或知识问题（转第三方 AI 并记录）。
+     */
+    private Flux<ChatStreamEvent> buildNoResultStream(GraphRagRequest ragQuery, String historyContext, String rewriteDisplay,
+                                                      AtomicReference<Usage> usageRef) {
+        return Flux.defer(() -> {
+            boolean knowledge = isKnowledgeQuestion(ragQuery.getQuestion(), historyContext);
+            String prompt = knowledge ? THIRD_PARTY_DIRECT_PROMPT : NO_RESULT_SMALLTALK_PROMPT;
+            if (knowledge) {
+                // 标记本次本地无法回复，回答完成后由 controller 统一落库
+                ragQuery.setUnanswered(true);
+            }
+            ChatClient.ChatClientRequestSpec noResultSpec = this.chatClient.prompt()
+                    .system(s -> s.text(prompt).param("context", "无").param("history", historyContext))
+                    .user(ragQuery.getQuestion());
+            applyModelOptions(noResultSpec, ragQuery.getModel(), ragQuery.getEnableThinking());
+            return streamChatEvents(noResultSpec, usageRef);
+        });
     }
 
     /**
      * 检索命中分支：组装回答 SSE 流
      */
-    private Mono<QueryResult> buildAnswerQueryResult(GraphRagRequest ragQuery, ContextResult ctx, String rewriteDisplay) {
-        return Mono.fromCallable(() -> {
-            // 检索有命中：先让 AI 判断知识库上下文能否准确回答；不能则视为"本地无法回复"，转第三方 AI 直接回答并记录
-            if (!canAnswerWithContext(ragQuery.getQuestion(), ctx.fullContext())) {
-                // 标记本次本地无法回复，回答完成后由 controller 统一落库（此时已含回答与思考）
-                ragQuery.setUnanswered(true);
-                ChatClient.ChatClientRequestSpec thirdSpec = this.chatClient.prompt()
-                        .system(s -> s.text(THIRD_PARTY_DIRECT_PROMPT)
-                                .param("history", ctx.historyContext())).user(ragQuery.getQuestion());
-                applyModelOptions(thirdSpec, ragQuery.getModel());
-                AtomicReference<Usage> usageRef = new AtomicReference<>();
-                Flux<ChatStreamEvent> thirdAnswer = streamChatEvents(thirdSpec, usageRef);
-                // 命中内容与问题无关，前端不展示引用来源
-                return new QueryResult(List.of(), thirdAnswer, usageRef, rewriteDisplay);
-            }
-            ChatClient.ChatClientRequestSpec answerSpec = this.chatClient.prompt()
-                    .system(s -> s.text(SYSTEM_PROMPT).param("context", ctx.fullContext())
-                            .param("history", ctx.historyContext())).user(ragQuery.getQuestion());
-            applyModelOptions(answerSpec, ragQuery.getModel());
-            AtomicReference<Usage> usageRef = new AtomicReference<>();
-            Flux<ChatStreamEvent> answer = streamChatEvents(answerSpec, usageRef);
-            return new QueryResult(ctx.sources(), answer, usageRef, rewriteDisplay);
-        });
-    }
-
-    /**
-     * 检索无结果分支：仍调用 AI，让其判断是打招呼/闲聊还是知识问题；
-     * 保留历史对话，AI 可依据多轮历史理解"重新回答上个问题"等指令
-     */
-    private Mono<QueryResult> buildNoResultQueryResult(GraphRagRequest ragQuery, String historyContext, String rewriteDisplay) {
-        return Mono.fromCallable(() -> {
-            // 本地检索无命中：先分类该问题是闲聊/历史可答，还是知识问题。
-            // 知识问题 → 本地无法回复，转第三方 AI 直接回答并记录；闲聊/历史可答 → 自然回复，不记录。
-            boolean knowledge = isKnowledgeQuestion(ragQuery.getQuestion(), historyContext);
-            String prompt = knowledge ? THIRD_PARTY_DIRECT_PROMPT : NO_RESULT_SMALLTALK_PROMPT;
-            if (knowledge) {
-                // 标记本次本地无法回复，回答完成后由 controller 统一落库（此时已含回答与思考）
-                ragQuery.setUnanswered(true);
-            }
-            ChatClient.ChatClientRequestSpec noResultSpec = this.chatClient.prompt()
-                    .system(s -> s.text(prompt).param("context", "无")
-                            .param("history", historyContext)).user(ragQuery.getQuestion());
-            applyModelOptions(noResultSpec, ragQuery.getModel());
-            AtomicReference<Usage> usageRef = new AtomicReference<>();
-            Flux<ChatStreamEvent> answer = streamChatEvents(noResultSpec, usageRef);
-            return new QueryResult(List.of(), answer, usageRef, rewriteDisplay);
-        });
-    }
-
     /**
      * 快模型：用于改写/闲聊与可回答性判断，不跟随用户选择的重型思考模型
      */
@@ -314,9 +446,8 @@ public class GraphRagService extends DatabaseService {
                     请严格比对问题与上下文主题是否一致。例如：用户问"数智统战平台包含哪些功能"，而上下文中只有"人大代表职责"相关内容，属于明显无关，输出：不能回答。
                     宁可保守判定"不能回答"，也不要误判"能回答"。
                     只输出四个字：能回答 或 不能回答，不要解释。""";
-            ChatClient.ChatClientRequestSpec spec = chatClient.prompt()
-                    .system(judgePrompt)
-                    .user("【知识库上下文】\n" + context + "\n\n【用户问题】" + question);
+            ChatClient.ChatClientRequestSpec spec = chatClient.prompt().system(judgePrompt)
+                    .user("【知识库上下文】\n%s\n\n【用户问题】%s".formatted(context, question));
             applyFastModel(spec);
             String text = spec.call().content();
             return text != null && text.contains("能回答");
@@ -389,54 +520,69 @@ public class GraphRagService extends DatabaseService {
     }
 
     /**
-     * 检索查询词优化：调用 AI 把口语化问题改写为适合向量检索的查询词（1~3 个）。
-     * 失败/超时自动回退原始问题，保证不影响检索主流程。
+     * 检索查询词优化：本地 Jieba 分词 + 规则组装，毫秒级完成、不依赖远程、永不失败。
      *
      * @return 查询词列表（首个为展示用改写词），至少包含原始问题
      */
     private List<String> rewriteQuery(String question) {
-        List<String> cached = rewriteCache.get(question);
-        if (cached != null) return cached;
-        try {
-            ChatClient.ChatClientRequestSpec spec = this.chatClient.prompt().system(REWRITE_PROMPT)
-                    .user("用户问题：" + question);
-            // 固定用快模型改写，不跟随用户选择的重型思考模型
-            if (Objects.equals(provider, "baidu")) {
-                spec.options(OpenAiChatOptions.builder().model("ernie-4.5-turbo-20260402"));
-            } else if (Objects.equals(provider, "zhipu")) {
-                spec.options(OpenAiChatOptions.builder().model("glm-4-flash"));
-            } else {
-                spec.options(OpenAiChatOptions.builder().model("deepseek-v3.2"));
+        List<String> queries = buildLocalQueries(question);
+        if (ObjectUtils.isEmpty(queries)) queries = List.of(question);
+        log.debug("检索查询词优化(本地分词): {} → {}", question, queries);
+        return queries;
+    }
+
+    /**
+     * 本地查询词组装：原问题 + 去语气词版 + Jieba 关键词短语，最多 3 个
+     */
+    private List<String> buildLocalQueries(String question) {
+        String raw = question == null ? "" : question.trim();
+        if (raw.isEmpty()) {
+            if (question != null) {
+                return List.of(question);
             }
-            String text = spec.call().content();
-            if (ObjectUtils.isEmpty(text)) return List.of(question);
-            List<String> queries = Arrays.stream(text.split("\\R"))
-                    .map(String::trim).filter(s -> !s.isEmpty())
-                    .map(s -> s.replaceAll("^[\\[\\]\"'`0-9.、\\-\\s]+", "")
-                            .replaceAll("[\"'`]$", "").trim())
-                    .filter(s -> !s.isEmpty()).limit(3).distinct().toList();
-            if (ObjectUtils.isEmpty(queries)) return List.of(question);
-            // 改写词 + 原始问题兜底（去重），多查询提高召回
-            List<String> merged = new ArrayList<>(queries);
-            if (!merged.contains(question)) merged.add(question);
-            log.debug("检索查询词优化: {} → {}", question, merged);
-            if (rewriteCache.size() > 200) rewriteCache.clear();
-            rewriteCache.put(question, merged);
-            return merged;
-        } catch (Exception e) {
-            log.warn("检索查询词优化失败，使用原始问题: {}", e.getMessage());
-            return List.of(question);
+            return List.of();
         }
+
+        // 1) 去首尾语气/疑问词的标准查询词；注意"么"是"什么/怎么/为什么"的构词语素，绝不能删
+        String standard = raw.replaceAll("^(请问|能不能|可否|能否|能|请|麻烦|帮我|帮|我想|我需要|可以告诉我)+", "")
+                .replaceAll("[？?！!。.，,、；;：:\"'\\s]+$", "")
+                .replaceAll("[呢吗吧啊呀嘛哦]$", "").trim();
+        if (standard.isEmpty()) standard = raw;
+
+        // 2) Jieba 分词（SEARCH 模式），剔除噪声词与单字，保留有信息量的词
+        List<String> keywords = new ArrayList<>();
+        for (SegToken tok : JIEBA_SEGMENTER.process(raw, SEARCH)) {
+            String w = tok.word.trim();
+            if (w.length() < 2 || REWRITE_NOISE.contains(w)) continue;
+            if (!keywords.contains(w)) keywords.add(w);
+        }
+        if (keywords.isEmpty()) keywords.add(standard);
+
+        // 3) 组装查询词：标准版 + 原问题 + 关键词组合，去重限 3 个
+        List<String> queries = new ArrayList<>();
+        queries.add(standard);
+        if (!queries.contains(raw)) queries.add(raw);
+        String joined = String.join(" ", keywords);
+        if (!queries.contains(joined)) queries.add(joined);
+        if (keywords.size() >= 2) {
+            String focus = String.join(" ", keywords.subList(0, Math.min(3, keywords.size())));
+            if (!queries.contains(focus)) queries.add(focus);
+        }
+        List<String> result = queries.stream().filter(StringUtils::hasLength).distinct().limit(3).toList();
+        return ObjectUtils.isEmpty(result) ? List.of(raw) : result;
     }
 
     /**
      * 按用户前端选择的模型动态覆盖 ChatClient 请求（per-request options），
      * 不传或空白时使用配置文件里的默认模型。
      */
-    private void applyModelOptions(ChatClient.ChatClientRequestSpec spec, String model) {
+    private void applyModelOptions(ChatClient.ChatClientRequestSpec spec, String model, boolean enableThinking) {
         if (StringUtils.hasLength(model)) {
-            spec.options(OpenAiChatOptions.builder().model(model));
-            log.debug("本次问答使用用户选择模型: {}", model);
+            OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder().model(model);
+            // 思考开关：开启 thinking.type=enabled，关闭 thinking.type=disabled（默认关闭）
+            builder.extraBody(Map.of("thinking", Map.of("type", enableThinking ? "enabled" : "disabled")));
+            spec.options(builder);
+            log.debug("本次问答使用用户选择模型: {}, 思考: {}", model, enableThinking ? "开启" : "关闭");
         }
     }
 
@@ -493,27 +639,95 @@ public class GraphRagService extends DatabaseService {
      * 构建 GraphRAG 查询上下文（含来源提取）
      *
      * @return ContextResult；向量检索无结果时返回 null
+     * 提取文本的主题词（Jieba 分词，忽略噪声词与泛词，只保留真实主题实体）
      */
-    private ContextResult buildContextWithSources(GraphRagRequest request, List<String> queries) {
-        // 1、向量检索（按租户/系统/启用状态过滤）
-        // 租户0 = 超管上传的全局默认文档，对所有租户开放：检索时同时命中指定租户与租户0；
-        // 当查询租户本身为 0 时不过滤租户，检索所有租户的全部文档（超管全局视角）
+    private Set<String> extractTopicWords(String text) {
+        if (!StringUtils.hasLength(text)) return Set.of();
+        Set<String> topics = new HashSet<>();
+        for (SegToken tok : JIEBA_SEGMENTER.process(text, JiebaSegmenter.SegMode.SEARCH)) {
+            String w = tok.word.trim();
+            if (w.length() >= 2 && !REWRITE_NOISE.contains(w)) {
+                topics.add(w);
+            }
+        }
+        return topics;
+    }
+
+    /**
+     * 合并多个查询词的主题词
+     */
+    private Set<String> extractQueryTopics(List<String> queries) {
+        Set<String> topics = new HashSet<>();
+        for (String q : queries) {
+            topics.addAll(extractTopicWords(q));
+        }
+        return topics;
+    }
+
+    /**
+     * 主题一致性判定（不依赖任何预设泛词表，自适应）：文档主题词与查询主题词
+     * 重叠 ≥2 个词，或查询主题词很少（≤2）且全部命中，才视为主题相关。
+     * 查询/文档无可判定主题词时视为通过（交给语义分数）。
+     * 用于拦截 embedding 高分但主题不同的误召回（如"党建职责"vs"人大职责"仅共享极少数通用词）。
+     */
+    private boolean topicOverlap(Document doc, Set<String> queryTopics) {
+        if (queryTopics.isEmpty()) return true;
+        Set<String> docTopics = extractTopicWords(doc.getText());
+        if (docTopics.isEmpty()) return true;
+        int overlap = 0;
+        for (String t : queryTopics) {
+            if (docTopics.contains(t)) overlap++;
+        }
+        if (overlap >= 2) return true;
+        return queryTopics.size() <= 2 && overlap == queryTopics.size();
+    }
+
+    /**
+     * 本地精排兜底：语义分数达标 + 主题一致性过滤，按相似度降序取最相关的 topN 条。
+     * 未配置外部 Reranker 时使用。
+     *
+     * @param semanticThreshold 精排阶段语义分数下限（低于视为无关）
+     */
+    private List<Document> localRerank(List<Document> docs, List<String> queries, int topN, double semanticThreshold) {
+        Set<String> queryTopics = extractQueryTopics(queries);
+        List<Document> kept = docs.stream()
+                .filter(doc -> {
+                    Double score = doc.getScore();
+                    // 语义分数达标（或不可判）且主题一致（或无法主题判定）才保留
+                    boolean semanticOk = score == null || score >= semanticThreshold;
+                    return semanticOk && topicOverlap(doc, queryTopics);
+                })
+                // 相似度分数从高到低排序（无分数排最后）
+                .sorted(Comparator.comparingDouble((Document d) ->
+                        d.getScore() != null ? -d.getScore() : Double.MAX_VALUE))
+                .limit(topN)
+                .toList();
+        if (kept.size() != docs.size()) {
+            log.debug("本地精排剔除 {} 个无关文档，保留 {} 个（阈值 {}）",
+                    docs.size() - kept.size(), kept.size(), semanticThreshold);
+        }
+        return kept;
+    }
+
+    /**
+     * 步骤1：向量检索（按租户/系统/启用状态过滤 + 多查询词去重召回）。
+     * 租户0 = 超管上传的全局默认文档，对所有租户开放；查询租户为 0 时不过滤租户。
+     * 召回阶段：Top-K 候选 + 低阈值（默认不过滤），尽量召回交给精排阶段过滤。
+     */
+    private List<Document> vectorRetrieve(GraphRagRequest request, List<String> queries) {
         if (!StringUtils.hasLength(request.getTenantCode())) {
             throw RestServerException.withMsg("租户编码必填");
         } else if (!StringUtils.hasLength(request.getSystemType())) {
             throw RestServerException.withMsg("系统类型必填");
         }
-
-        // 租户0（超管全局文档）不限系统类型；指定租户的文档按系统类型过滤
         String filterExpr = getFilterExpr(request);
         log.debug("搜索条件：{}", filterExpr);
-        // 多查询词逐一检索（改写词 + 原始问题），按 文档+分片 去重合并，提高召回
         List<Document> vectorDocs = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (String q : queries) {
             SearchRequest searchRequest = SearchRequest.builder()
-                    .query(q).topK(request.getTopK())
-                    .similarityThreshold(request.getThreshold())
+                    .query(q).topK(recallTopK)
+                    .similarityThreshold(recallThreshold)
                     .filterExpression(filterExpr).build();
             List<Document> docs = this.vectorStore.similaritySearch(searchRequest);
             for (Document doc : docs) {
@@ -523,14 +737,36 @@ public class GraphRagService extends DatabaseService {
                 vectorDocs.add(doc);
             }
         }
+        return vectorDocs;
+    }
 
+    /**
+     * 步骤2：精排（优先外部 Reranker，否则本地精排）+ 租户自定义优先排序。
+     * 仅靠分数不可靠（embedding 会把"人大代表职责"与"党建职责"判成高分），需再验证主题一致；
+     * 精排后为空则视为未检索到。
+     */
+    private List<Document> rerankDocs(GraphRagRequest request, List<String> queries, List<Document> vectorDocs) {
         if (vectorDocs.isEmpty()) {
-            log.debug("向量检索未找到相关文档");
-            return null;
+            return vectorDocs;
         }
-
-        // 租户自定义优先：指定租户（非0）的文档排在前，超管默认文档（租户0）排在后，
-        // 二者内容有出入时让 AI 优先参考租户自定义内容；租户0 查询全部时保持相似度排序
+        final int finalTopN = Math.max(1, request.getTopK());
+        String primaryQuery = queries.getFirst();
+        double semanticThreshold = Math.max(request.getThreshold(), DEFAULT_SEMANTIC_THRESHOLD);
+        try {
+            vectorDocs = (rerankerService != null)
+                    ? rerankerService.rerank(primaryQuery, vectorDocs, finalTopN)
+                    : localRerank(vectorDocs, queries, finalTopN, semanticThreshold);
+        } catch (Exception e) {
+            // 外部 Reranker 调用失败/超时：回退本地精排，保证检索不中断
+            log.warn("外部 Reranker 调用失败，回退本地精排: {}", e.getMessage());
+            vectorDocs = localRerank(vectorDocs, queries, finalTopN, semanticThreshold);
+        }
+        if (vectorDocs.isEmpty()) {
+            log.debug("精排后无相关文档，前端不再返回引用");
+            return List.of();
+        }
+        log.debug("精排后保留 {} 个文档（Reranker={}）", vectorDocs.size(), rerankerService != null);
+        // 租户自定义优先：指定租户（非0）的文档排在前，超管默认文档（租户0）排在后
         if (!request.getTenantCode().equals("0")) {
             vectorDocs = vectorDocs.stream().sorted(Comparator.comparingInt(d -> {
                 Object t = d.getMetadata().get("tenantCode");
@@ -538,9 +774,14 @@ public class GraphRagService extends DatabaseService {
             })).toList();
         }
         log.debug("向量检索找到 {} 个相关文档（查询词{}个，租户{}优先）", vectorDocs.size(), queries.size(), request.getTenantCode());
+        return vectorDocs;
+    }
 
-        // 2、提取知识库来源（供前端展示和点击查看原文）
-        List<Map<String, Object>> sources = vectorDocs.stream().map(doc -> {
+    /**
+     * 步骤3：从精排后的文档提取知识库来源（供前端展示和点击查看原文）。
+     */
+    private List<Map<String, Object>> extractSources(List<Document> vectorDocs) {
+        return vectorDocs.stream().map(doc -> {
             Map<String, Object> src = new LinkedHashMap<>();
             Map<String, Object> meta = doc.getMetadata();
             src.put("fileName", meta.getOrDefault("source", "未知文件"));
@@ -554,48 +795,73 @@ public class GraphRagService extends DatabaseService {
             src.put("deleted", false);
             return src;
         }).toList();
+    }
 
-        // 2.5、联动父级粗粒度切片，补全推理上下文（多跳 RAG 核心）
+    /**
+     * 步骤4：联动父级粗粒度切片，补全推理上下文（多跳 RAG 核心）。
+     */
+    private String buildCoarseContext(List<Document> vectorDocs) {
         Set<String> parentIds = vectorDocs.stream()
                 .map(doc -> doc.getMetadata().get("parentChunkId"))
                 .filter(Objects::nonNull).map(Object::toString)
                 .filter(id -> !id.isBlank()).collect(Collectors.toSet());
-        String coarseContext = "";
-        if (!parentIds.isEmpty()) {
-            List<DocumentChunk> chunkList = chunkRepository.findAllById(parentIds);
-            List<DocumentChunk> parentChunks = new ArrayList<>(chunkList);
-            if (!parentChunks.isEmpty()) {
-                coarseContext = parentChunks.stream().map(DocumentChunk::getContent)
-                        .filter(Objects::nonNull).distinct().collect(Collectors.joining("\n---\n"));
-                log.debug("联动 {} 个父级粗粒度切片补全上下文", parentChunks.size());
-            }
+        if (parentIds.isEmpty()) {
+            return "";
         }
+        List<DocumentChunk> parentChunks = new ArrayList<>(chunkRepository.findAllById(parentIds));
+        if (parentChunks.isEmpty()) {
+            return "";
+        }
+        log.debug("联动 {} 个父级粗粒度切片补全上下文", parentChunks.size());
+        return parentChunks.stream().map(DocumentChunk::getContent)
+                .filter(Objects::nonNull).distinct().collect(Collectors.joining("\n---\n"));
+    }
 
-        // 3、多跳图谱召回（限制数量，避免 prompt 过大触发限流/超时）
+    /**
+     * 步骤5：多跳图谱召回（限制数量，避免 prompt 过大触发限流/超时）。
+     */
+    private List<GraphRagResult> graphRecall(List<Document> vectorDocs, GraphRagRequest request) {
         List<String> chunkIds = vectorDocs.stream().map(Document::getId).toList();
         List<GraphRagResult> multiHopResults =
                 this.chunkRepository.multiHopRetrieve(chunkIds, request.getTenantCode(), request.getSystemType(), 30);
         log.debug("多跳图谱召回找到 {} 个关联文档块", multiHopResults.size());
+        return multiHopResults;
+    }
 
-        // 4、拼接上下文（细粒度检索 + 粗粒度推理补全 + 图谱多跳），限制总长度避免 token 超限
+    /**
+     * 步骤6：拼接上下文（细粒度检索 + 粗粒度推理补全 + 图谱多跳），限制总长度避免 token 超限。
+     */
+    private ContextResult assembleContextFinal(List<Document> vectorDocs, List<Map<String, Object>> sources,
+                                               String coarseContext, List<GraphRagResult> multiHopResults,
+                                               String historyContext) {
         String vectorContext = vectorDocs.stream().map(Document::getText)
                 .collect(Collectors.joining("\n---\n"));
         String graphContext = multiHopResults.stream()
                 .flatMap(result -> Stream.of(result.getSourceContent(), result.getOtherContent()))
                 .filter(Objects::nonNull).distinct().collect(Collectors.joining("\n***\n"));
-
         // 限制图谱上下文最大 6000 字符，防止 prompt 爆炸
         final int MAX_GRAPH_CTX = 6000;
         if (graphContext.length() > MAX_GRAPH_CTX) {
             graphContext = graphContext.substring(0, MAX_GRAPH_CTX) + "\n...（图谱关联内容已截断）";
         }
-
         StringBuilder fullContext = new StringBuilder("【向量检索片段】\n").append(vectorContext);
         if (!coarseContext.isBlank()) {
             fullContext.append("\n【推理上下文补全（父级粗粒度切片）】\n").append(coarseContext);
         }
         fullContext.append("\n【图谱多跳关联信息】\n").append(graphContext);
-        return new ContextResult(fullContext.toString(), sources, null);
+        return new ContextResult(fullContext.toString(), sources, historyContext);
+    }
+
+    /**
+     * 将 sources 序列化为 JSON 数组字符串，作为 type=sources 事件的 text 载荷。
+     */
+    private String toJsonArray(List<Map<String, Object>> sources) {
+        try {
+            return ContextUtil.OBJECT_MAPPER.writeValueAsString(sources);
+        } catch (Exception e) {
+            log.warn("序列化 sources 失败: {}", e.getMessage());
+            return "[]";
+        }
     }
 
     private @NonNull String getFilterExpr(GraphRagRequest request) {
@@ -1310,7 +1576,8 @@ public class GraphRagService extends DatabaseService {
     /**
      * 检索上下文 + 改写展示词 内部封装（供两个分支共用）
      */
-    private record Enriched(ContextResult ctx, String historyContext, String rewriteDisplay) {
+    private record Enriched(ContextResult ctx, String historyContext, String rewriteDisplay,
+                            List<ChatStreamEvent> stageEvents) {
     }
 
     /**

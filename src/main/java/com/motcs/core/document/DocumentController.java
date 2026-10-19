@@ -255,22 +255,36 @@ public class DocumentController {
         final String usedModel = request.getModel();
         return this.graphRagService.graphRagQueryStream(request).flatMapMany(result -> {
             usageRefHolder.set(result.usageRef().get());
-            try {
-                sourcesJson.set(ContextUtil.OBJECT_MAPPER.convertValue(result.sources(), JsonNode.class));
-            } catch (Exception e) {
-                sourcesJson.set(ContextUtil.OBJECT_MAPPER.createArrayNode());
-            }
-            // 发送顺序：1.session 2.rewrite(优化后检索词,前端渲染"搜索中") 3.sources 4.思考/正文事件
+            // sources 由检索链在"相关度精排"之后以 type=sources 事件下发（text=JSON 数组），在此初始为空、事件到达时覆盖
+            sourcesJson.set(ContextUtil.OBJECT_MAPPER.createArrayNode());
+            // 发送顺序：1.session 2.rewrite(优化后检索词) 3.后端处理阶段(stage)与引用(sources) 4.思考/正文事件
             Mono<String> sessionMono = Mono.just(Utils.jsonEvent("session", Map.of("sessionId", sessionId)));
             Mono<String> rewriteMono = Mono.just(Utils.jsonEvent("rewrite", Map.of("query", result.rewriteQuery())));
-            Mono<String> sourcesMono = Mono.just(Utils.jsonEvent("sources", Map.of("sources", result.sources())));
             Flux<String> answerMono = result.answer().doOnNext(ev -> {
                 if ("reasoning".equals(ev.type())) {
                     reasoningBuilder.append(ev.text());
                 } else if ("content".equals(ev.type())) {
                     answerBuilder.append(ev.text());
+                } else if ("sources".equals(ev.type())) {
+                    // 收集来源（落库用）
+                    try {
+                        sourcesJson.set(ContextUtil.OBJECT_MAPPER.readTree(ev.text()));
+                    } catch (Exception e) {
+                        sourcesJson.set(ContextUtil.OBJECT_MAPPER.createArrayNode());
+                    }
                 }
-            }).map(ev -> Utils.jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text())));
+            }).map(ev -> {
+                if ("sources".equals(ev.type())) {
+                    try {
+                        return Utils.jsonEvent("sources", Map.of("sources",
+                                ContextUtil.OBJECT_MAPPER.readTree(ev.text())));
+                    } catch (Exception e) {
+                        return Utils.jsonEvent("sources", Map.of("sources",
+                                ContextUtil.OBJECT_MAPPER.createArrayNode()));
+                    }
+                }
+                return Utils.jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text()));
+            });
             // 流结束（非取消）时记录本次对话 token 用量到 chat_usage_record
             answerMono = answerMono.publishOn(Schedulers.boundedElastic()).doFinally(sig -> {
                 if (sig != reactor.core.publisher.SignalType.CANCEL) {
@@ -280,7 +294,7 @@ public class DocumentController {
                             request.getModel(), titleText, result.usageRef().get()).subscribe();
                 }
             });
-            return Flux.concat(sessionMono, rewriteMono, sourcesMono, answerMono);
+            return Flux.concat(sessionMono, rewriteMono, answerMono);
         }).publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
             // 取消时由前端手动保存（避免重复），正常完成/出错时保存（answer 可为空，确保提问不丢失）
             if (signal == reactor.core.publisher.SignalType.CANCEL) return;
