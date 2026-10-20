@@ -485,6 +485,9 @@ async function initTenantSystemSelects() {
     }
     const akSystem = $('apiKeySystem');
     if (akSystem) akSystem.value = getSystem();
+    // 首屏按当前系统类型渲染完整欢迎语（替代 index.html 里写死的兜底空状态），
+    // 必须放在 globalSystem 从 localStorage 恢复之后，避免用错系统的欢迎文案。
+    clearChat();
 }
 
 /* ---------- 工具函数 ---------- */
