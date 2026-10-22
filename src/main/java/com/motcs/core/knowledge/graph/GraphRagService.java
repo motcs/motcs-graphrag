@@ -35,7 +35,6 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -83,10 +82,11 @@ public class GraphRagService extends DatabaseService {
     private static final String THIRD_PARTY_DIRECT_PROMPT = """
             你是企业知识库问答助手。用户咨询的问题在当前数据库中暂无相关业务介绍。
             请按以下要求回答：
-            1. 回答开头先提示：数据库暂无相关业务介绍，我现在联网搜索介绍。
-            2. 然后基于自身通用知识与能力，自主、认真地回答用户的问题，给出有价值、可操作的内容；尽量不要说"不知道"或"无法回答"，不要敷衍。
-            3. 若确实超出能力范围，也应尽力给出方向性建议或相关背景信息，而不是直接拒绝。
-            4. 回复使用 标准的Markdown 格式，简洁友好。
+            1. 当别人问你可以干什么时，你不要随便回答，你是问答助手，你的智能：基于文档回答问题，没有文档时模型自主判断如何回答，尽量符合政企的严谨，严肃。
+            2. 回答开头先提示：数据库暂无相关业务介绍，我现在搜索介绍。
+            3. 然后基于自身通用知识与能力，自主、认真地回答用户的问题，给出有价值、可操作的内容；尽量不要说"不知道"或"无法回答"，不要敷衍。
+            4. 若确实超出能力范围，也应尽力给出方向性建议或相关背景信息，而不是直接拒绝。
+            5. 回复使用 标准的Markdown 格式，简洁友好。
             """;
 
     /**
@@ -167,11 +167,16 @@ public class GraphRagService extends DatabaseService {
     private final DocumentChunkRepository chunkRepository;
     private final KnowledgeEntityRepository entityRepository;
     private final ChatMessageRepository chatMessageRepository;
-    private final UnansweredQuestionRepository unansweredQuestionRepository;
     private final ChatSessionRepository chatSessionRepository;
     private final ChatSessionSummaryRepository summaryRepository;
     private final ChatUsageRecordRepository chatUsageRecordRepository;
     private final ChatSessionUsageRepository chatSessionUsageRepository;
+    private final UnansweredQuestionRepository unansweredQuestionRepository;
+    /**
+     * 外部精排服务（可选）；未配置任何 RerankerService 实现时用本地精排兜底
+     */
+    private final RerankerService rerankerService;
+
     @Value("${app.ai.provider:baidu}")
     private String provider;
     /**
@@ -184,11 +189,6 @@ public class GraphRagService extends DatabaseService {
      */
     @Value("${app.ai.recall.threshold:0.0}")
     private double recallThreshold;
-    /**
-     * 外部精排服务（可选）；未配置任何 RerankerService 实现时用本地精排兜底
-     */
-    @Autowired(required = false)
-    private RerankerService rerankerService;
 
     /**
      * GraphRAG 问答（含多轮上下文 + 来源返回）
@@ -209,7 +209,7 @@ public class GraphRagService extends DatabaseService {
             String rewriteDisplay = queries.getFirst();
             // 2. 惰性完整事件流：订阅时按后端实际执行顺序逐步 emit 各阶段（见 buildStream）
             AtomicReference<Usage> usageRef = new AtomicReference<>();
-            Flux<ChatStreamEvent> answer = buildStream(ragQuery, queries, rewriteDisplay, historyContext, usageRef);
+            Flux<ChatStreamEvent> answer = buildStream(ragQuery, queries, historyContext, usageRef);
             // sources 由事件流中 type=sources 事件携带（controller 从流收集，顺序在精排后）
             return new QueryResult(List.of(), answer, usageRef, rewriteDisplay);
         }).doOnError(e -> log.error("GraphRAG查询出错: {}", e.getMessage(), e));
@@ -220,7 +220,7 @@ public class GraphRagService extends DatabaseService {
      * 事件顺序：查询词优化 → 向量检索 → 相关度精排 → sources(引用) → 推理补全 → 图谱召回 → 回答(reasoning/content)。
      * 每个 Flux.defer 段在订阅到它时才执行，从而"每操作一步下发一条"，前端可滚动实时看到后端在做什么。
      */
-    private Flux<ChatStreamEvent> buildStream(GraphRagRequest ragQuery, List<String> queries, String rewriteDisplay,
+    private Flux<ChatStreamEvent> buildStream(GraphRagRequest ragQuery, List<String> queries,
                                               String historyContext, AtomicReference<Usage> usageRef) {
         return Flux.concat(
                 Flux.just(new ChatStreamEvent("stage", "查询词优化：已完成")),
@@ -232,7 +232,7 @@ public class GraphRagService extends DatabaseService {
                         log.error("向量检索失败: {}", e.getMessage(), e);
                         return Flux.concat(
                                 Flux.just(new ChatStreamEvent("stage_error", "向量检索：失败")),
-                                buildNoResultStream(ragQuery, historyContext, rewriteDisplay, usageRef));
+                                buildNoResultStream(ragQuery, historyContext, usageRef));
                     }
                     return Flux.concat(
                             Flux.just(new ChatStreamEvent("stage", "向量检索：命中 " + vectorDocs.size() + " 条候选文档")),
@@ -244,17 +244,17 @@ public class GraphRagService extends DatabaseService {
                                     log.error("相关度精排失败: {}", e.getMessage(), e);
                                     return Flux.concat(
                                             Flux.just(new ChatStreamEvent("stage_error", "相关度精排：失败")),
-                                            buildNoResultStream(ragQuery, historyContext, rewriteDisplay, usageRef));
+                                            buildNoResultStream(ragQuery, historyContext, usageRef));
                                 }
                                 List<Document> reranked = out.documents();
                                 if (reranked.isEmpty()) {
                                     return Flux.concat(
                                             Flux.just(new ChatStreamEvent("stage", "相关度精排（" + out.source() + "）：无相关文档（低于阈值）")),
-                                            buildNoResultStream(ragQuery, historyContext, rewriteDisplay, usageRef));
+                                            buildNoResultStream(ragQuery, historyContext, usageRef));
                                 }
                                 return Flux.concat(
                                         Flux.just(new ChatStreamEvent("stage", "相关度精排（" + out.source() + "）：保留 " + reranked.size() + " 条")),
-                                        buildFromReranked(ragQuery, reranked, historyContext, rewriteDisplay, usageRef));
+                                        buildFromReranked(ragQuery, reranked, historyContext, usageRef));
                             }));
                 }));
     }
@@ -264,10 +264,10 @@ public class GraphRagService extends DatabaseService {
      * 各步骤独立 try-catch：失败发 stage_error（前端标红）并用降级值继续，不中断整个 SSE 流。
      */
     private Flux<ChatStreamEvent> buildFromReranked(GraphRagRequest ragQuery, List<Document> reranked,
-                                                    String historyContext, String rewriteDisplay, AtomicReference<Usage> usageRef) {
+                                                    String historyContext, AtomicReference<Usage> usageRef) {
         return Flux.defer(() -> {
             List<Map<String, Object>> sources = extractSourcesQuietly(reranked);
-            return buildCoarseGraphAnswer(ragQuery, reranked, sources, historyContext, rewriteDisplay, usageRef);
+            return buildCoarseGraphAnswer(ragQuery, reranked, sources, historyContext, usageRef);
         });
     }
 
@@ -287,7 +287,7 @@ public class GraphRagService extends DatabaseService {
      * 推理上下文补全（失败发 stage_error 并降级为空）→ 图谱召回与回答。
      */
     private Flux<ChatStreamEvent> buildCoarseGraphAnswer(GraphRagRequest ragQuery, List<Document> reranked, List<Map<String, Object>> sources,
-                                                         String historyContext, String rewriteDisplay, AtomicReference<Usage> usageRef) {
+                                                         String historyContext, AtomicReference<Usage> usageRef) {
         return Flux.defer(() -> {
             String coarseContext;
             try {
@@ -297,11 +297,11 @@ public class GraphRagService extends DatabaseService {
                 coarseContext = "";
                 return Flux.concat(
                         Flux.just(new ChatStreamEvent("stage_error", "推理上下文补全：失败")),
-                        buildGraphAndAnswer(ragQuery, reranked, sources, coarseContext, historyContext, rewriteDisplay, usageRef));
+                        buildGraphAndAnswer(ragQuery, reranked, sources, coarseContext, historyContext, usageRef));
             }
             return Flux.concat(
                     Flux.just(new ChatStreamEvent("stage", "推理上下文补全：已完成")),
-                    buildGraphAndAnswer(ragQuery, reranked, sources, coarseContext, historyContext, rewriteDisplay, usageRef));
+                    buildGraphAndAnswer(ragQuery, reranked, sources, coarseContext, historyContext, usageRef));
         });
     }
 
@@ -310,7 +310,7 @@ public class GraphRagService extends DatabaseService {
      */
     private Flux<ChatStreamEvent> buildGraphAndAnswer(GraphRagRequest ragQuery, List<Document> reranked,
                                                       List<Map<String, Object>> sources, String coarseContext,
-                                                      String historyContext, String rewriteDisplay, AtomicReference<Usage> usageRef) {
+                                                      String historyContext, AtomicReference<Usage> usageRef) {
         return Flux.defer(() -> {
             List<GraphRagResult> multiHop;
             try {
@@ -321,19 +321,19 @@ public class GraphRagService extends DatabaseService {
                 return Flux.concat(
                         Flux.just(new ChatStreamEvent("stage_error", "图谱多跳召回：失败")),
                         buildHitAnswerStream(ragQuery, assembleContextFinal(reranked, sources, coarseContext, multiHop, historyContext),
-                                rewriteDisplay, usageRef, sources));
+                                usageRef, sources));
             }
             return Flux.concat(
                     Flux.just(new ChatStreamEvent("stage", "图谱多跳召回：" + multiHop.size() + " 个关联块")),
                     buildHitAnswerStream(ragQuery, assembleContextFinal(reranked, sources, coarseContext, multiHop, historyContext),
-                            rewriteDisplay, usageRef, sources));
+                            usageRef, sources));
         });
     }
 
     /**
      * 检索命中分支：先做可回答性判断，能答走知识库回答，不能答转第三方 AI 并记录；阶段事件逐步下发。
      */
-    private Flux<ChatStreamEvent> buildHitAnswerStream(GraphRagRequest ragQuery, ContextResult ctx, String rewriteDisplay,
+    private Flux<ChatStreamEvent> buildHitAnswerStream(GraphRagRequest ragQuery, ContextResult ctx,
                                                        AtomicReference<Usage> usageRef, List<Map<String, Object>> sources) {
         return Flux.defer(() -> {
             boolean can;
@@ -374,7 +374,7 @@ public class GraphRagService extends DatabaseService {
     /**
      * 检索无结果分支：分类闲聊/历史可答（自然回复）或知识问题（转第三方 AI 并记录）。
      */
-    private Flux<ChatStreamEvent> buildNoResultStream(GraphRagRequest ragQuery, String historyContext, String rewriteDisplay,
+    private Flux<ChatStreamEvent> buildNoResultStream(GraphRagRequest ragQuery, String historyContext,
                                                       AtomicReference<Usage> usageRef) {
         return Flux.defer(() -> {
             boolean knowledge = isKnowledgeQuestion(ragQuery.getQuestion(), historyContext);
@@ -393,8 +393,6 @@ public class GraphRagService extends DatabaseService {
 
     /**
      * 检索命中分支：组装回答 SSE 流
-     */
-    /**
      * 快模型：用于改写/闲聊与可回答性判断，不跟随用户选择的重型思考模型
      */
     private void applyFastModel(ChatClient.ChatClientRequestSpec spec) {
@@ -746,7 +744,8 @@ public class GraphRagService extends DatabaseService {
      * 仅靠分数不可靠（embedding 会把"人大代表职责"与"党建职责"判成高分），需再验证主题一致；
      * 精排后为空则视为未检索到。
      */
-    record RerankOutcome(List<Document> documents, String source) {}
+    record RerankOutcome(List<Document> documents, String source) {
+    }
 
     private RerankOutcome rerankDocs(GraphRagRequest request, List<String> queries, List<Document> vectorDocs) {
         if (vectorDocs.isEmpty()) {
@@ -1580,13 +1579,6 @@ public class GraphRagService extends DatabaseService {
                         .then(this.summaryRepository.deleteBySessionId(id))
                         .then(this.chatSessionRepository.deleteBySessionId(id)))
                 .then().doOnSuccess(_ -> log.debug("已批量删除 {} 个会话及摘要", sessionIds.size()));
-    }
-
-    /**
-     * 检索上下文 + 改写展示词 内部封装（供两个分支共用）
-     */
-    private record Enriched(ContextResult ctx, String historyContext, String rewriteDisplay,
-                            List<ChatStreamEvent> stageEvents) {
     }
 
     /**

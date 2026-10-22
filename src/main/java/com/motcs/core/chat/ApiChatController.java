@@ -126,8 +126,7 @@ public class ApiChatController {
                     return Utils.jsonEvent(ev.type(), Map.of("text", ev.text() == null ? "" : ev.text()));
                 });
                 return Flux.concat(sessionMono, rewriteMono, answerMono)
-                        .publishOn(Schedulers.boundedElastic())
-                        .doFinally(signal -> {
+                        .publishOn(Schedulers.boundedElastic()).doFinally(signal -> {
                             if (signal == SignalType.CANCEL) return;
                             if (StringUtils.hasLength(request.getQuestion())) {
                                 request.setAnswer(answerBuilder.toString());
@@ -139,19 +138,15 @@ public class ApiChatController {
                                 this.graphRagService.recordUnansweredIfApplicable(request).subscribe();
                                 // 记录 token 用量（用量监控）
                                 Usage usage = usageRef.get();
-                                if (usage != null) {
+                                if (!ObjectUtils.isEmpty(usage)) {
                                     this.apiKeyUsageService.record(apiKey.getId(), request.getUserId(), sessionId,
-                                            request.getModel(), usage.getPromptTokens(), usage.getCompletionTokens(),
-                                            usage.getTotalTokens(),
+                                            request.getModel(), usage.getPromptTokens(), usage.getCompletionTokens(), usage.getTotalTokens(),
                                             usage.getCacheReadInputTokens() == null ? 0 : usage.getCacheReadInputTokens().intValue()).subscribe();
                                     ModelPricing.Price price = ModelPricing.of(request.getModel());
-                                    int prompt = usage.getPromptTokens();
-                                    int completion = usage.getCompletionTokens();
                                     int cache = usage.getCacheReadInputTokens() == null ? 0 : usage.getCacheReadInputTokens().intValue();
-                                    int uncached = Math.max(prompt - cache, 0);
-                                    double cost = uncached / 1000.0 * price.inPerK()
-                                            + cache / 1000.0 * price.cachePerK()
-                                            + completion / 1000.0 * price.outPerK();
+                                    int uncached = Math.max(usage.getPromptTokens() - cache, 0);
+                                    double cost = uncached / 1000.0 * price.inPerK() + cache / 1000.0 * price.cachePerK()
+                                            + usage.getCompletionTokens() / 1000.0 * price.outPerK();
                                     this.apiKeyService.consumeQuota(apiKey.getId(), cost).subscribe();
                                 }
                             }
