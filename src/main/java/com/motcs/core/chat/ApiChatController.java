@@ -150,7 +150,8 @@ public class ApiChatController {
                                     this.apiKeyService.consumeQuota(apiKey.getId(), cost).subscribe();
                                 }
                             }
-                        });
+                        })
+                        .doOnError(e -> log.error("API Key 问答SSE流出错: {}", e.getMessage(), e));
             });
         }).switchIfEmpty(Flux.just(Utils.jsonEvent("error", Map.of("message", "无效的 API Key"))));
     }
