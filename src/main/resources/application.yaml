@@ -40,7 +40,10 @@ spring:
     password: ${app.r2dbc.password}
     pool:
       max-size: 20
-      initial-size: 5
+      max-idle-time: 60s
+      max-life-time: 90s
+      validation-query: SELECT 1
+      max-acquire-time: 3s
 
   ai:
     openai:
