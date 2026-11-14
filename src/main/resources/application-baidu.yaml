@@ -22,8 +22,9 @@
 #      Neo4j 的 knowledge_vector_index 是按 2048 维创建的，需先删除旧索引
 #      （启动时 initialize-schema=true 会自动按 1024 重建），
 #      且存量文档需重新上传/重新向量化，否则检索失效。
-#   2. 千帆 embedding 接口单次提交文本条数有限制（bge-large-zh 官方约 16 条/次），
-#      若大文档整体批量向量化报错，需在 DocumentService 中分批提交。
+#   2. 千帆 embedding 接口单次提交文本条数有限制（bge-large-zh 官方 16 条/次），
+#      超限会报 400: embeddings max input length is 16。
+#      DocumentService 已按 app.ai.embedding.batch-size（默认 16）分批提交，无需手工处理。
 # ============================================================
 
 
@@ -40,9 +41,12 @@ app:
     # 千帆控制台 → 应用接入 → API Key（bce-v3/...）
     api-key: ${AI_API_KEY:default}
     embedding:
-      # 中文向量模型 bge-large-zh：1024 维，单次最多约 16 条文本，每条约 512 token
+      # 中文向量模型 bge-large-zh：1024 维，单次最多 16 条文本（每条约 512 token）
       model: ${AI_EMBEDDING_MODEL:bge-large-zh}
       dimension: ${AI_EMBEDDING_DIMENSION:1024}
+      # 向量入库单批条数：千帆 embeddings 接口上限 16 条/次，超出报
+      # 400: embeddings max input length is 16，DocumentService 按此分批提交
+      batch-size: ${AI_EMBEDDING_BATCH_SIZE:16}
     provider: ${AI_PROVIDER:baidu}
     provider-name: ${AI_PROVIDER_NAME:百度千帆}
     chat-models: ${AI_CHAT_MODELS:deepseek-v4.1-flash,deepseek-v4-flash-0731,ernie-4.5-turbo-20260402,ernie-4.5-turbo-128k}

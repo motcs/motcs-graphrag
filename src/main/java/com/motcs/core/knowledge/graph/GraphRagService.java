@@ -177,8 +177,6 @@ public class GraphRagService extends DatabaseService {
      */
     private final RerankerService rerankerService;
 
-    @Value("${app.ai.provider:baidu}")
-    private String provider;
     /**
      * 初始召回候选数（Top-N 召回，默认 20，精排后再取最终 topK）
      */
@@ -392,20 +390,6 @@ public class GraphRagService extends DatabaseService {
     }
 
     /**
-     * 检索命中分支：组装回答 SSE 流
-     * 快模型：用于改写/闲聊与可回答性判断，不跟随用户选择的重型思考模型
-     */
-    private void applyFastModel(ChatClient.ChatClientRequestSpec spec) {
-        if (Objects.equals(provider, "baidu")) {
-            spec.options(OpenAiChatOptions.builder().model("ernie-4.5-turbo-20260402"));
-        } else if (Objects.equals(provider, "zhipu")) {
-            spec.options(OpenAiChatOptions.builder().model("glm-4-flash"));
-        } else {
-            spec.options(OpenAiChatOptions.builder().model("deepseek-v3.2"));
-        }
-    }
-
-    /**
      * 判断本地检索无命中时，用户问题是闲聊/历史可答，还是需要知识回答的知识问题。
      * 返回 true = 知识问题（本地无法回复，需转第三方 AI 并记录）。
      * 判断失败时保守按知识问题处理。
@@ -422,7 +406,6 @@ public class GraphRagService extends DatabaseService {
                     .system(judgePrompt)
                     .user("【历史对话】\n" + (StringUtils.hasLength(historyContext) ? historyContext : "无")
                             + "\n\n【当前问题】" + question);
-            applyFastModel(spec);
             String text = spec.call().content();
             return text != null && text.contains("知识问题");
         } catch (Exception e) {
@@ -447,7 +430,6 @@ public class GraphRagService extends DatabaseService {
                     只输出四个字：能回答 或 不能回答，不要解释。""";
             ChatClient.ChatClientRequestSpec spec = chatClient.prompt().system(judgePrompt)
                     .user("【知识库上下文】\n%s\n\n【用户问题】%s".formatted(context, question));
-            applyFastModel(spec);
             String text = spec.call().content();
             return text != null && text.contains("能回答");
         } catch (Exception e) {
@@ -730,6 +712,7 @@ public class GraphRagService extends DatabaseService {
                     .filterExpression(filterExpr).build();
             List<Document> docs = this.vectorStore.similaritySearch(searchRequest);
             for (Document doc : docs) {
+                log.info("doc精排信息：{}", doc);
                 String key = doc.getMetadata().getOrDefault("docCode", "")
                         + "|" + doc.getMetadata().getOrDefault("chunkIndex", "");
                 if (!seen.add(key)) continue;

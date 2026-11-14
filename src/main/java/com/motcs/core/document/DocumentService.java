@@ -63,6 +63,14 @@ public class DocumentService extends DatabaseService {
     private long maxFileSize;
 
     /**
+     * 向量入库单批条数：千帆 bge-large-zh 的 embeddings 接口单次最多 16 条 input，
+     * 超出会直接返回 400: embeddings max input length is 16。文档分片必须分批提交。
+     * 换成其它 embedding 服务（限制更宽）时可通过 app.ai.embedding.batch-size 调大。
+     */
+    @Value("${app.ai.embedding.batch-size:16}")
+    private int embeddingBatchSize;
+
+    /**
      * Serialize new-upload docCode generation so concurrent threads cannot get the same code.
      */
     private final Object docCodeLock = new Object();
@@ -282,10 +290,17 @@ public class DocumentService extends DatabaseService {
                     documents.add(new Document(c.getContent(), metadata));
                 }
 
-                // 4. 向量入库（仅细粒度）
-                this.vectorStore.add(documents);
+                // 4. 向量入库（仅细粒度）：分批提交，规避 embeddings 单次条数上限
+                //    先登记所有分片 ID，任一批失败时 failUpload 可按 ID 清理已入库的批次
                 context.setChunkIds(documents.stream().map(Document::getId).toList());
-                log.debug("文档已成功添加到向量库，共 {} 个细粒度片段", documents.size());
+                int batchSize = embeddingBatchSize > 0 ? embeddingBatchSize : 16;
+                int totalBatches = (documents.size() + batchSize - 1) / batchSize;
+                for (int from = 0; from < documents.size(); from += batchSize) {
+                    int to = Math.min(from + batchSize, documents.size());
+                    this.vectorStore.add(documents.subList(from, to));
+                    log.debug("向量入库进度: {}/{} 批（本批 {} 条）", (from / batchSize) + 1, totalBatches, to - from);
+                }
+                log.debug("文档已成功添加到向量库，共 {} 个细粒度片段（分 {} 批提交）", documents.size(), totalBatches);
 
                 // 5. 删除占位分片
                 if (context.getPlaceholderId() != null) {
@@ -323,8 +338,14 @@ public class DocumentService extends DatabaseService {
     public void failUpload(UploadContext context, String errorMessage) {
         try {
             if (context.getChunkIds() != null && !context.getChunkIds().isEmpty()) {
-                vectorStore.delete(context.getChunkIds());
-                log.debug("已清理失败文档的 {} 条向量", context.getChunkIds().size());
+                // 分批入库时部分批次可能尚未写入，delete 对不存在的节点是空操作；
+                // 单独兜住异常，避免清理失败阻断下面的 FAILED 状态回写
+                try {
+                    vectorStore.delete(context.getChunkIds());
+                    log.debug("已清理失败文档的 {} 条向量", context.getChunkIds().size());
+                } catch (Exception ex) {
+                    log.warn("清理失败文档向量异常（不影响状态回写）: {}", ex.getMessage());
+                }
             }
             if (context.getDocumentId() != null) {
                 chunkRepository.updateStatusByDocumentId(context.getDocumentId(), "FAILED", errorMessage);
